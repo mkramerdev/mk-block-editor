@@ -16,9 +16,9 @@ This Turborepo includes the following packages/apps:
 
 ### Apps and Packages
 
-- `docs`: a [Next.js](https://nextjs.org/) app
-- `web`: another [Next.js](https://nextjs.org/) app
-- `@repo/ui`: a stub React component library shared by both `web` and `docs` applications
+- `playground`: a [Next.js](https://nextjs.org/) app
+- `playground-react`: a [Vite](https://vite.dev/) and [React](https://react.dev/) app
+- `@repo/ui`: a stub React component library shared by both playground applications
 - `@repo/eslint-config`: `eslint` configurations (includes `eslint-config-next` and `eslint-config-prettier`)
 - `@repo/typescript-config`: `tsconfig.json`s used throughout the monorepo
 
@@ -57,15 +57,15 @@ You can build a specific package by using a [filter](https://turborepo.dev/docs/
 With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
 
 ```sh
-turbo build --filter=docs
+turbo build --filter=playground
 ```
 
 Without global `turbo`:
 
 ```sh
-npx turbo build --filter=docs
-pnpm exec turbo build --filter=docs
-pnpm exec turbo build --filter=docs
+npx turbo build --filter=playground
+pnpm exec turbo build --filter=playground
+pnpm exec turbo build --filter=playground
 ```
 
 ### Develop
@@ -93,15 +93,15 @@ You can develop a specific package by using a [filter](https://turborepo.dev/doc
 With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
 
 ```sh
-turbo dev --filter=web
+turbo dev --filter=playground-react
 ```
 
 Without global `turbo`:
 
 ```sh
-npx turbo dev --filter=web
-pnpm exec turbo dev --filter=web
-pnpm exec turbo dev --filter=web
+npx turbo dev --filter=playground-react
+pnpm exec turbo dev --filter=playground-react
+pnpm exec turbo dev --filter=playground-react
 ```
 
 ### Remote Caching

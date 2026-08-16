@@ -1,0 +1,15 @@
+{
+  "extends": "@repo/typescript-config/base.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "declaration": false,
+    "declarationMap": false,
+    "jsx": "react-jsx",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "types": ["vite/client"]
+  },
+  "include": ["src", "vite.config.ts"],
+  "exclude": ["node_modules"]
+}
