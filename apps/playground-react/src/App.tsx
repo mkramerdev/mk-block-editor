@@ -1,6 +1,8 @@
 import { Button } from "@repo/ui/button";
+import { Route, Routes } from "react-router";
+import FullEditor from "./routes/full-editor";
 
-export default function App() {
+function Home() {
   return (
     <main>
       <p className="eyebrow">Vite + React</p>
@@ -12,5 +14,14 @@ export default function App() {
         Open alert
       </Button>
     </main>
+  );
+}
+
+export default function App() {
+  return (
+    <Routes>
+      <Route path="/" element={<Home />} />
+      <Route path="/full-editor" element={<FullEditor />} />
+    </Routes>
   );
 }

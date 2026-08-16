@@ -1,0 +1,22 @@
+services:
+  editor-db:
+    image: postgres:18
+    container_name: editor-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: editor
+      POSTGRES_USER: editor
+      POSTGRES_PASSWORD: editor
+    ports:
+      - "5432:5432"
+    volumes:
+      - editor-db-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U editor -d editor"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  editor-db-data:
