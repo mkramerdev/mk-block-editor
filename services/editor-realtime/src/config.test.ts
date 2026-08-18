@@ -4,7 +4,7 @@ import { loadEditorRealtimeConfig } from "./config.ts";
 describe("editor realtime configuration", () => {
   it("uses the local editor PostgreSQL database in development", () => {
     expect(loadEditorRealtimeConfig({ NODE_ENV: "development" }).postgresUrl).toBe(
-      "postgres://postgres:postgres@127.0.0.1:5435/editor_document",
+      "postgres://editor:editor@127.0.0.1:5435/editor_document",
     );
   });
 

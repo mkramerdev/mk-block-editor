@@ -6,7 +6,7 @@ import {
 } from "@repo/editor-core/editing";
 import type { BlockId, JsonObject } from "@repo/editor-core/kernel";
 import type { BlockDefinition } from "@repo/editor-core/definitions";
-import { contentSelection, wholeSelection } from "@repo/editor-core/selection";
+import { contentSelection } from "@repo/editor-core/selection";
 import type { BlockType } from "@repo/editor-core/document";
 import type {
   EditorContentRuntimeDefinition,
@@ -102,20 +102,11 @@ const headingDefinition = {
   renderer: HeadingRenderer,
 } satisfies WebBlockDefinition<EditableEditor>;
 
-const wholeListItemSelection = wholeSelection();
-
 function listItemDefinition(
   type: "bulletListItem" | "orderedListItem" | "checklistItem",
 ) {
   return {
     ...firstDraftBlockModelDefinitions[type],
-    selection: {
-      ...wholeListItemSelection,
-      projection: {
-        ...wholeListItemSelection.projection,
-        canStartSelection: true,
-      },
-    },
     renderer:
       type === "checklistItem" ? ChecklistItemRenderer : ListItemRenderer,
     shellElement: "li",

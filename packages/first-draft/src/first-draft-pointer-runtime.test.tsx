@@ -40,6 +40,13 @@ vi.mock("@repo/editor-yjs", async (importOriginal) => {
 
 const blockA = "fd-paragraph-intro" as BlockId;
 const blockB = "fd-paragraph-byline" as BlockId;
+const beforeList = "fd-paragraph-before-goals" as BlockId;
+const bulletList = "fd-bullet-list" as BlockId;
+const bulletItemA = "fd-bullet-1" as BlockId;
+const bulletTextA = "fd-bullet-1-text" as BlockId;
+const bulletItemB = "fd-bullet-2" as BlockId;
+const bulletTextB = "fd-bullet-2-text" as BlockId;
+const afterList = "fd-paragraph-after-goals" as BlockId;
 
 describe("First Draft real pointer activation allocation contract", () => {
   afterEach(() => {
@@ -225,6 +232,161 @@ describe("First Draft real pointer activation allocation contract", () => {
     rendered.unmount();
     expect(runtime!.getLiveBlockContentCount()).toBe(0);
     editor.dispose();
+  });
+
+  it("drags continuously through list wrappers without whole-block paint or extra input owners", () => {
+    const snapshot = createListPointerSnapshot();
+    const bootstrap = createFirstDraftBootstrapFromSnapshot({
+      documentId: "list-pointer-runtime-document",
+      revision: 0,
+      snapshot,
+    });
+    const viewState = createFirstDraftViewStateStore();
+    const editor = initializeEditableEditor({
+      compiledDefinition: compileCanonicalEditorDefinition(
+        createFirstDraftEditorDefinition(viewState),
+      ),
+      snapshot: bootstrap.snapshot,
+      validatedSnapshot: bootstrap,
+      onChange: vi.fn(),
+      onChangeError: (error) => {
+        throw error;
+      },
+      createTransactionId: () => crypto.randomUUID(),
+    });
+    const rendered = render(
+      <FirstDraftViewStateProvider store={viewState}>
+        <div data-editor-interaction-scope="true">
+          <FirstDraftBlockHoverProvider enabled>
+            <EditorDocument editor={editor} />
+          </FirstDraftBlockHoverProvider>
+        </div>
+      </FirstDraftViewStateProvider>,
+    );
+    const list = rendered.container.querySelector<HTMLElement>(
+      '[data-editor-block-list-root="true"]',
+    );
+    if (!list) throw new Error("Missing editor block list");
+    Object.defineProperties(list, {
+      setPointerCapture: { configurable: true, value: vi.fn() },
+      hasPointerCapture: { configurable: true, value: vi.fn(() => true) },
+      releasePointerCapture: { configurable: true, value: vi.fn() },
+    });
+    installListSelectionGeometry(rendered.container);
+    const originalClientRects = Object.getOwnPropertyDescriptor(
+      Range.prototype,
+      "getClientRects",
+    );
+    Object.defineProperty(Range.prototype, "getClientRects", {
+      configurable: true,
+      value: vi.fn(() => [selectionRectangle(40, 0, 120, 18)]),
+    });
+
+    try {
+      const pointerId = 21;
+      dispatchPointerDown(rendered.container, beforeList, pointerId, true);
+      expectUniqueInputOwner(rendered.container, 0);
+
+      dispatchPointerMoveTo(rendered.container, bulletItemA, pointerId, 10, 48);
+      expect(list.dataset.editorTextSelectionDragActive).toBe("true");
+      expectNoListItemSurfacePaint(rendered.container);
+      expectUniqueInputOwner(rendered.container, 0);
+
+      dispatchPointerMoveTo(rendered.container, bulletTextA, pointerId, 50, 55);
+      dispatchPointerMoveToElement(
+        blockElement(rendered.container, bulletList),
+        pointerId,
+        10,
+        82,
+      );
+      dispatchPointerMoveTo(
+        rendered.container,
+        bulletItemB,
+        pointerId,
+        10,
+        100,
+      );
+      dispatchPointerMoveTo(
+        rendered.container,
+        bulletTextB,
+        pointerId,
+        50,
+        108,
+      );
+
+      expect(list.dataset.editorTextSelectionDragActive).toBe("true");
+      expectNoListItemSurfacePaint(rendered.container);
+      expectUniqueInputOwner(rendered.container, 0);
+
+      dispatchPointerUpAt(rendered.container, afterList, pointerId, 50, 155);
+
+      const committed = editor.selectionController.getCommittedSnapshot();
+      expect(committed?.kind).toBe("document");
+      expect(committed?.endpoints.anchor?.blockId).toBe(beforeList);
+      expect(committed?.endpoints.head?.blockId).toBe(afterList);
+      expect(
+        [bulletList, bulletItemA, bulletItemB].includes(
+          committed!.endpoints.anchor!.blockId,
+        ),
+      ).toBe(false);
+      expect(
+        [bulletList, bulletItemA, bulletItemB].includes(
+          committed!.endpoints.head!.blockId,
+        ),
+      ).toBe(false);
+
+      for (const wrapperId of [bulletList, bulletItemA, bulletItemB]) {
+        expect(editor.readBlockSelectionModel(wrapperId)).toMatchObject({
+          id: "wrapper",
+          coverage: { selected: "none" },
+          projection: { canStartSelection: false, selectable: false },
+        });
+        expect(
+          committed?.blocks.find(({ blockId }) => blockId === wrapperId),
+        ).toMatchObject({
+          category: "wrapper",
+          selectable: false,
+          coverageResult: { modelId: "wrapper" },
+        });
+      }
+      expect(
+        committed?.blocks
+          .filter(
+            ({ coverageResult }) => coverageResult.paint?.kind === "content",
+          )
+          .map(({ blockId }) => blockId),
+      ).toEqual([beforeList, bulletTextA, bulletTextB, afterList]);
+      expectNoListItemSurfacePaint(rendered.container);
+      expect(
+        rendered.container.querySelector(
+          `[data-editor-selection-paint="text-fragment"][data-editor-selection-paint-block-id="${bulletTextA}"]`,
+        ),
+      ).not.toBeNull();
+      expect(
+        rendered.container.querySelector(
+          `[data-editor-selection-paint="text-fragment"][data-editor-selection-paint-block-id="${bulletTextB}"]`,
+        ),
+      ).not.toBeNull();
+      expectUniqueInputOwner(rendered.container, 1);
+      expect(
+        rendered.container
+          .querySelector<HTMLElement>('[data-editor-input-owner="true"]')
+          ?.closest("[data-editor-block-id]")
+          ?.getAttribute("data-editor-block-id"),
+      ).toBe(afterList);
+    } finally {
+      if (originalClientRects) {
+        Object.defineProperty(
+          Range.prototype,
+          "getClientRects",
+          originalClientRects,
+        );
+      } else {
+        Reflect.deleteProperty(Range.prototype, "getClientRects");
+      }
+      rendered.unmount();
+      editor.dispose();
+    }
   });
 
   it("reads current multi-block formatting from projections and hydrates only at captured-command execution", () => {
@@ -434,6 +596,41 @@ function createPointerSnapshot(): EditorInstanceSnapshot {
   };
 }
 
+function createListPointerSnapshot(): EditorInstanceSnapshot {
+  const source = createFirstDraftSnapshot();
+  const blocks = {
+    [beforeList]: source.blocks[beforeList]!,
+    [bulletList]: source.blocks[bulletList]!,
+    [bulletItemA]: source.blocks[bulletItemA]!,
+    [bulletTextA]: source.blocks[bulletTextA]!,
+    [bulletItemB]: source.blocks[bulletItemB]!,
+    [bulletTextB]: source.blocks[bulletTextB]!,
+    [afterList]: source.blocks[afterList]!,
+  };
+  return {
+    ...source,
+    blocks: Object.freeze(blocks),
+    rootBlockIds: Object.freeze([beforeList, bulletList, afterList]),
+    childIdsByParentId: Object.freeze({
+      [bulletList]: Object.freeze([bulletItemA, bulletItemB]),
+      [bulletItemA]: Object.freeze([bulletTextA]),
+      [bulletItemB]: Object.freeze([bulletTextB]),
+    }),
+    content: Object.freeze({
+      [beforeList]: source.content[beforeList]!,
+      [bulletTextA]: source.content[bulletTextA]!,
+      [bulletTextB]: source.content[bulletTextB]!,
+      [afterList]: source.content[afterList]!,
+    }),
+    opaqueContentCheckpoints: Object.freeze({
+      [beforeList]: source.opaqueContentCheckpoints[beforeList]!,
+      [bulletTextA]: source.opaqueContentCheckpoints[bulletTextA]!,
+      [bulletTextB]: source.opaqueContentCheckpoints[bulletTextB]!,
+      [afterList]: source.opaqueContentCheckpoints[afterList]!,
+    }),
+  };
+}
+
 function dispatchPointerClick(
   container: HTMLElement,
   blockId: BlockId,
@@ -480,20 +677,143 @@ function dispatchPointerUp(
   );
 }
 
+function dispatchPointerMoveTo(
+  container: HTMLElement,
+  blockId: BlockId,
+  pointerId: number,
+  clientX: number,
+  clientY: number,
+): void {
+  dispatchPointerMoveToElement(
+    blockElement(container, blockId),
+    pointerId,
+    clientX,
+    clientY,
+  );
+}
+
+function dispatchPointerMoveToElement(
+  target: HTMLElement,
+  pointerId: number,
+  clientX: number,
+  clientY: number,
+): void {
+  act(() =>
+    target.dispatchEvent(
+      pointerEvent("pointermove", pointerId, clientY, clientX),
+    ),
+  );
+}
+
+function dispatchPointerUpAt(
+  container: HTMLElement,
+  blockId: BlockId,
+  pointerId: number,
+  clientX: number,
+  clientY: number,
+): void {
+  const shell = blockElement(container, blockId);
+  const target =
+    shell.querySelector<HTMLElement>('[data-editor-text-root="true"]') ?? shell;
+  act(() =>
+    target.dispatchEvent(
+      pointerEvent("pointerup", pointerId, clientY, clientX),
+    ),
+  );
+}
+
+function blockElement(container: HTMLElement, blockId: BlockId): HTMLElement {
+  const shell = container.querySelector<HTMLElement>(
+    `[data-editor-block-shell="true"][data-editor-block-id="${blockId}"]`,
+  );
+  if (!shell) throw new Error(`Missing block shell ${blockId}`);
+  return shell;
+}
+
 function pointerEvent(
   type: string,
   pointerId: number,
   clientY: number,
+  clientX = 0,
 ): PointerEvent {
   const event = new MouseEvent(type, {
     bubbles: true,
     cancelable: true,
     button: 0,
-    clientX: 0,
+    clientX,
     clientY,
   });
   Object.defineProperty(event, "pointerId", { value: pointerId });
   return event as PointerEvent;
+}
+
+function installListSelectionGeometry(container: HTMLElement): void {
+  const geometry = new Map<BlockId, DOMRect>([
+    [beforeList, selectionRectangle(0, 0, 220, 20)],
+    [bulletList, selectionRectangle(0, 30, 220, 110)],
+    [bulletItemA, selectionRectangle(0, 35, 220, 40)],
+    [bulletTextA, selectionRectangle(30, 42, 180, 22)],
+    [bulletItemB, selectionRectangle(0, 90, 220, 40)],
+    [bulletTextB, selectionRectangle(30, 97, 180, 22)],
+    [afterList, selectionRectangle(0, 145, 220, 20)],
+  ]);
+  for (const [blockId, rect] of geometry) {
+    const shell = blockElement(container, blockId);
+    shell.getBoundingClientRect = () => rect;
+    const textRoot = shell.querySelector<HTMLElement>(
+      ':scope > [data-editor-text-root="true"], :scope > * [data-editor-text-root="true"]',
+    );
+    if (textRoot) textRoot.getBoundingClientRect = () => rect;
+  }
+  const list = container.querySelector<HTMLElement>(
+    '[data-editor-block-list-root="true"]',
+  );
+  if (list)
+    list.getBoundingClientRect = () => selectionRectangle(0, 0, 220, 170);
+}
+
+function selectionRectangle(
+  left: number,
+  top: number,
+  width: number,
+  height: number,
+): DOMRect {
+  return {
+    x: left,
+    y: top,
+    left,
+    top,
+    right: left + width,
+    bottom: top + height,
+    width,
+    height,
+    toJSON: () => ({}),
+  } as DOMRect;
+}
+
+function expectNoListItemSurfacePaint(container: HTMLElement): void {
+  for (const blockId of [bulletItemA, bulletItemB]) {
+    expect(
+      container.querySelector(
+        `[data-editor-selection-paint="atomic-surface"][data-editor-selection-paint-block-id="${blockId}"]`,
+      ),
+    ).toBeNull();
+  }
+}
+
+function expectUniqueInputOwner(
+  container: HTMLElement,
+  expectedCount: 0 | 1,
+): void {
+  expect(container.querySelectorAll(".ProseMirror")).toHaveLength(
+    expectedCount,
+  );
+  expect(container.querySelectorAll('[contenteditable="true"]')).toHaveLength(
+    expectedCount,
+  );
+  expect(
+    container.querySelectorAll('[data-editor-input-owner="true"]'),
+  ).toHaveLength(expectedCount);
 }
 
 function installTestRect(element: HTMLElement): void {

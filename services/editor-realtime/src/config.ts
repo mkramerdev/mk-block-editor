@@ -13,7 +13,7 @@ export interface EditorRealtimeConfig {
 }
 
 const DEVELOPMENT_POSTGRES_URL =
-  "postgres://postgres:postgres@127.0.0.1:5435/editor_document";
+  "postgres://editor:editor@127.0.0.1:5435/editor_document";
 
 export function loadEditorRealtimeConfig(
   env: Record<string, string | undefined> = process.env,

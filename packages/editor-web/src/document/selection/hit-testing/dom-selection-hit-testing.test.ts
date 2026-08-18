@@ -350,7 +350,127 @@ describe("editor selection pointer hit testing", () => {
       Reflect.deleteProperty(document, "elementFromPoint");
     }
   });
+
+  it("stably resolves nested wrapper padding and sibling gaps to selectable descendants", () => {
+    const containerId = "bullet-list" as BlockId;
+    const itemAId = "item-a" as BlockId;
+    const textAId = "item-a-text" as BlockId;
+    const itemBId = "item-b" as BlockId;
+    const textBId = "item-b-text" as BlockId;
+    const list = document.createElement("div");
+    const container = blockShell(containerId);
+    const itemA = blockShell(itemAId);
+    const textA = blockShell(textAId);
+    const textRootA = document.createElement("div");
+    const itemB = blockShell(itemBId);
+    const textB = blockShell(textBId);
+    const textRootB = document.createElement("div");
+    list.dataset.editorBlockListRoot = "true";
+    textRootA.dataset.editorTextRoot = "true";
+    textRootA.textContent = "first item";
+    textRootB.dataset.editorTextRoot = "true";
+    textRootB.textContent = "second item";
+    textA.append(textRootA);
+    textB.append(textRootB);
+    itemA.append(textA);
+    itemB.append(textB);
+    container.append(itemA, itemB);
+    list.append(container);
+    document.body.append(list);
+    list.getBoundingClientRect = () => rectangle(0, 0, 240, 160);
+    container.getBoundingClientRect = () => rectangle(0, 20, 240, 120);
+    itemA.getBoundingClientRect = () => rectangle(0, 20, 240, 50);
+    textA.getBoundingClientRect = () => rectangle(30, 30, 190, 25);
+    textRootA.getBoundingClientRect = () => rectangle(30, 30, 190, 25);
+    itemB.getBoundingClientRect = () => rectangle(0, 90, 240, 50);
+    textB.getBoundingClientRect = () => rectangle(30, 100, 190, 25);
+    textRootB.getBoundingClientRect = () => rectangle(30, 100, 190, 25);
+
+    const blocks = new Map<
+      BlockId,
+      ReturnType<EditorSelectionGraphReader["getBlock"]>
+    >([
+      [containerId, versionedBlock(containerId, "bulletList", null, false)],
+      [itemAId, versionedBlock(itemAId, "bulletListItem", containerId, false)],
+      [textAId, versionedBlock(textAId, "paragraph", itemAId, true)],
+      [itemBId, versionedBlock(itemBId, "bulletListItem", containerId, false)],
+      [textBId, versionedBlock(textBId, "paragraph", itemBId, true)],
+    ]);
+    const graph: EditorSelectionGraphReader = {
+      getBlock: (id) => blocks.get(id) ?? null,
+      getParentId: (id) => blocks.get(id)?.parentId ?? null,
+      getRootBlockIds: () => [containerId],
+      getChildBlockIds: (id) =>
+        id === containerId
+          ? [itemAId, itemBId]
+          : id === itemAId
+            ? [textAId]
+            : id === itemBId
+              ? [textBId]
+              : [],
+      readBlockSelectionModel: (id) =>
+        id === textAId || id === textBId
+          ? contentSelection()
+          : wrapperSelection(),
+    };
+    const resolve = (
+      target: EventTarget,
+      clientY: number,
+      preferredBlockId: BlockId | null = null,
+    ) =>
+      resolveEditorSelectionPointerHit({
+        list,
+        target,
+        clientX: 10,
+        clientY,
+        graph,
+        preferredBlockId,
+      });
+
+    expect(resolve(itemA, 40)?.target.block.id).toBe(textAId);
+    expect(resolve(container, 80)?.target.block.id).toBe(textAId);
+    expect(resolve(itemB, 95)?.target.block.id).toBe(textBId);
+    expect(resolve(textRootB, 110)?.target.block.id).toBe(textBId);
+    expect(resolve(container, 80, textBId)?.target.block.id).toBe(textBId);
+    expect(
+      resolve(itemA, 40, null)?.target.selection.projection.selectable,
+    ).toBe(true);
+    expect(
+      resolveEditorSelectionPointerHit({
+        list,
+        target: itemA,
+        clientX: 10,
+        clientY: 40,
+        graph,
+        requireStartEligible: true,
+      }),
+    ).toBeNull();
+  });
 });
+
+function blockShell(blockId: BlockId): HTMLElement {
+  const shell = document.createElement("div");
+  Object.assign(shell.dataset, {
+    editorBlockShell: "true",
+    editorBlockId: blockId,
+  });
+  return shell;
+}
+
+function versionedBlock(
+  id: BlockId,
+  type: string,
+  parentId: BlockId | null,
+  hasContent: boolean,
+) {
+  return {
+    id,
+    type,
+    parentId,
+    metadataVersion: "1",
+    contentVersion: hasContent ? "1" : null,
+  };
+}
 
 function rectangle(
   left: number,
