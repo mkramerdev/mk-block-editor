@@ -47,6 +47,7 @@ import {
   getEditorSelectionCommandEligibility,
   type EditorSelectionCommandIneligibleReason,
 } from "./command-eligibility.ts";
+import { createEditorSelectionContentCompletenessChecker } from "../completeness/effective-content-completeness.ts";
 
 export interface MaterializeEditorSelectionFragmentOptions {
   readonly snapshot: EditorSelectionSnapshot;
@@ -299,12 +300,28 @@ interface SelectionFragmentBuilderOptions {
 
 class SelectionFragmentBuilder {
   private readonly rangeById: ReadonlyMap<BlockId, EditorSelectionRangeBlock>;
+  private readonly hasCompleteContent: (blockId: BlockId) => boolean;
   private syntheticKey = 0;
 
   constructor(private readonly options: SelectionFragmentBuilderOptions) {
     this.rangeById = new Map(
       options.snapshot.rangeBlocks.map((block) => [block.blockId, block]),
     );
+    this.hasCompleteContent = createEditorSelectionContentCompletenessChecker({
+      graph: options.graph,
+      rangeById: this.rangeById,
+      blockDefinitions: options.blockDefinitions,
+      readTextContentSize: (blockId, blockType) => {
+        const target = readEditorBlockSelectionTarget(options.graph, blockId);
+        return target?.block.type === blockType
+          ? this.readTextContentSize(target)
+          : null;
+      },
+      getChildBlockIds: (blockId) => {
+        const target = readEditorBlockSelectionTarget(options.graph, blockId);
+        return target ? this.selectionChildIds(target) : [];
+      },
+    });
   }
 
   build(): CanonicalBlockFragment {
@@ -532,29 +549,6 @@ class SelectionFragmentBuilder {
     if (range && range.coverage !== "none") return true;
     return this.selectionChildIds(target).some((childId) =>
       this.hasSelectedContent(childId),
-    );
-  }
-
-  private hasCompleteContent(blockId: BlockId): boolean {
-    const target = readEditorBlockSelectionTarget(this.options.graph, blockId);
-    if (!target) return false;
-    const range = this.rangeById.get(blockId);
-    if (range?.coverage === "complete-block") return true;
-    const definition = this.options.blockDefinitions[target.block.type];
-    if (!definition) throw new Error(`unknown block type ${target.block.type}`);
-    if (definition.kind === "text") {
-      if (!range || range.coverage === "none") return false;
-      if (range.coverage === "complete-content") return true;
-      const length = this.readTextContentSize(target);
-      const from = normalizeTextBoundary(range.startOffset, 0, length);
-      const to = normalizeTextBoundary(range.endOffset, length, length);
-      return Math.min(from, to) === 0 && Math.max(from, to) === length;
-    }
-    if (definition.kind === "atomic") return false;
-    const children = this.selectionChildIds(target);
-    return (
-      children.length > 0 &&
-      children.every((childId) => this.hasCompleteContent(childId))
     );
   }
 

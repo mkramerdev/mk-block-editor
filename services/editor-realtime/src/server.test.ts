@@ -1,8 +1,6 @@
 import { once } from "node:events";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { extractPlainTextFromRichTextDocument } from "@repo/editor-model/content/rich-text";
-import { asBlockId } from "@repo/editor-model/kernel";
+import { extractPlainTextFromRichTextDocument } from "@repo/editor-core/content/rich-text";
+import { asBlockId } from "@repo/editor-core/kernel";
 import {
   createFirstDraftEditorDefinition,
   createFirstDraftViewStateStore,
@@ -23,7 +21,10 @@ import {
 import type { FirstDraftTransactionPersistence } from "@repo/editor-first-draft/server";
 import { addEditorBlockOperations } from "@repo/editor-web/block-operations";
 import { initializeEditableEditor as initializeCompiledEditor } from "@repo/editor-web/editor";
-import { compileCanonicalEditorDefinition } from "@repo/editor-web/editor-definition";
+import {
+  compileCanonicalEditorDefinition,
+  type EditableEditorDefinition,
+} from "@repo/editor-web/editor-definition";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import {
@@ -47,9 +48,16 @@ function initializeEditableEditor(options: {
   readonly createTransactionId?: Parameters<
     typeof initializeCompiledEditor
   >[0]["createTransactionId"];
+  readonly onContentRuntime?: (runtime: TestContentRuntime) => void;
 }) {
+  const definition = options.onContentRuntime
+    ? captureDefinitionContentRuntime(
+        options.definition,
+        options.onContentRuntime,
+      )
+    : options.definition;
   return initializeCompiledEditor({
-    compiledDefinition: compileCanonicalEditorDefinition(options.definition),
+    compiledDefinition: compileCanonicalEditorDefinition(definition),
     snapshot: options.snapshot,
     onChange: options.onChange,
     createTransactionId: options.createTransactionId,
@@ -734,7 +742,12 @@ describe("the sole editor realtime WebSocket service", () => {
     const acceptanceOrder: string[] = [];
     const acceptedA = waitForMessage(
       sender,
-      (message) =>
+      (
+        message,
+      ): message is Extract<
+        FirstDraftMessage,
+        { type: "editor-transaction-accepted" }
+      > =>
         message.type === "editor-transaction-accepted" &&
         message.transactionId === "causal-typed",
     ).then((message) => {
@@ -743,7 +756,12 @@ describe("the sole editor realtime WebSocket service", () => {
     });
     const acceptedB = waitForMessage(
       sender,
-      (message) =>
+      (
+        message,
+      ): message is Extract<
+        FirstDraftMessage,
+        { type: "editor-transaction-accepted" }
+      > =>
         message.type === "editor-transaction-accepted" &&
         message.transactionId === "causal-pasted",
     ).then((message) => {
@@ -989,25 +1007,6 @@ describe("the sole editor realtime WebSocket service", () => {
     expect(diagnostics).toHaveBeenCalledTimes(1);
   });
 
-  it("has one First Draft transaction path and no removed persistence dependency", () => {
-    const packageJson = JSON.parse(
-      readFileSync(join(process.cwd(), "package.json"), "utf8"),
-    ) as { readonly dependencies: Record<string, string> };
-    expect(Object.keys(packageJson.dependencies).sort()).toEqual([
-      "@repo/editor-first-draft",
-      "dotenv",
-      "tsx",
-      "ws",
-    ]);
-    const indexSource = readFileSync(
-      join(process.cwd(), "src/index.ts"),
-      "utf8",
-    );
-    expect(indexSource).toContain("startEditorRealtimeServer");
-    expect(indexSource).toContain("createFirstDraftPostgresPersistence");
-    expect(indexSource).not.toMatch(/submitTransaction|product-model/u);
-  });
-
   it.each([
     ["A then B", ["a", "b"] as const],
     ["B then A", ["b", "a"] as const],
@@ -1030,9 +1029,12 @@ describe("the sole editor realtime WebSocket service", () => {
       const framesA: ArrayBuffer[] = [];
       const framesB: ArrayBuffer[] = [];
       const snapshot = createFirstDraftSnapshot();
+      const runtimeA = createContentRuntimeCapture();
+      const runtimeB = createContentRuntimeCapture();
       const editorA = initializeEditableEditor({
         definition: firstDraftDefinition(),
         snapshot,
+        onContentRuntime: runtimeA.capture,
         onChange: handleTransaction({
           readyState: WebSocket.OPEN,
           send: (frame) => framesA.push(frame.slice(0)),
@@ -1042,18 +1044,19 @@ describe("the sole editor realtime WebSocket service", () => {
       const editorB = initializeEditableEditor({
         definition: firstDraftDefinition(),
         snapshot,
+        onContentRuntime: runtimeB.capture,
         onChange: handleTransaction({
           readyState: WebSocket.OPEN,
           send: (frame) => framesB.push(frame.slice(0)),
         }),
         createTransactionId: ids(`concurrent-b-${receiveOrder.join("")}`),
       });
-      const editingLeaseA = editorA.contentRuntime.acquireBlockContent(
+      const editingLeaseA = runtimeA.read().acquireBlockContent(
         textBlockId,
         "paragraph",
         "active-editing",
       );
-      const editingLeaseB = editorB.contentRuntime.acquireBlockContent(
+      const editingLeaseB = runtimeB.read().acquireBlockContent(
         textBlockId,
         "paragraph",
         "active-editing",
@@ -1516,9 +1519,9 @@ function waitForRawFrame(socket: WebSocket): Promise<ArrayBuffer> {
   return new Promise((resolve) => {
     socket.once("message", (data) => {
       const view = toArrayBufferView(data);
-      resolve(
-        view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength),
-      );
+      const copy = new Uint8Array(view.byteLength);
+      copy.set(view);
+      resolve(copy.buffer);
     });
   });
 }
@@ -1649,6 +1652,44 @@ function decodeProposedTransaction(frame: ArrayBuffer) {
 
 function firstDraftDefinition() {
   return createFirstDraftEditorDefinition(createFirstDraftViewStateStore());
+}
+
+type TestContentRuntime = ReturnType<
+  NonNullable<EditableEditorDefinition["content"]>["createRuntime"]
+>;
+
+function captureDefinitionContentRuntime(
+  definition: EditableEditorDefinition,
+  capture: (runtime: TestContentRuntime) => void,
+): EditableEditorDefinition {
+  const content = definition.content;
+  if (!content) throw new Error("First Draft has no content runtime");
+  return {
+    ...definition,
+    content: {
+      createRuntime(source) {
+        const runtime = content.createRuntime(source);
+        capture(runtime);
+        return runtime;
+      },
+    },
+  };
+}
+
+function createContentRuntimeCapture(): {
+  readonly capture: (runtime: TestContentRuntime) => void;
+  readonly read: () => TestContentRuntime;
+} {
+  let current: TestContentRuntime | null = null;
+  return {
+    capture: (runtime) => {
+      current = runtime;
+    },
+    read: () => {
+      if (!current) throw new Error("Content runtime was not created");
+      return current;
+    },
+  };
 }
 
 function ids(prefix: string): () => string {

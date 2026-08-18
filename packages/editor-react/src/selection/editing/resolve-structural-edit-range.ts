@@ -11,6 +11,7 @@ import type {
 import type { BlockId } from "@repo/editor-core/kernel";
 import type { EditorSelectionGraphReader } from "../graph/reader.ts";
 import type { EditorSelectionSnapshot } from "../model/types.ts";
+import { createEditorSelectionContentCompletenessChecker } from "../completeness/effective-content-completeness.ts";
 
 export interface ResolveStructuralEditRangeOptions {
   readonly snapshot: EditorSelectionSnapshot;
@@ -38,9 +39,27 @@ export function resolveStructuralEditRange(
 
   const blocks: StructuralEditRangeBlock[] = [];
   const appended = new Set<BlockId>();
-  const completelySelectedBlockIds = new Set(
+  const rangeById = new Map(
+    options.snapshot.rangeBlocks.map((selected) => [
+      selected.blockId,
+      selected,
+    ]),
+  );
+  const hasCompleteContent = createEditorSelectionContentCompletenessChecker({
+    graph: options.graph,
+    rangeById,
+    blockDefinitions: options.blockDefinitions,
+    readTextContentSize: (blockId, blockType) => {
+      const content = options.readBlockContent(blockId, blockType);
+      return content ? richTextDocumentContentSize(content) : null;
+    },
+  });
+  const structuralRemovalRootIds = new Set(
     options.snapshot.rangeBlocks.flatMap((selected) =>
-      selectionRemovesCompleteBlock(selected) ? [selected.blockId] : [],
+      selectionRemovesCompleteBlock(selected) ||
+      selectionRemovesCompleteListItem(selected, options, hasCompleteContent)
+        ? [selected.blockId]
+        : [],
     ),
   );
   const actionableRangeBlockIds = options.snapshot.rangeBlocks.flatMap(
@@ -48,12 +67,17 @@ export function resolveStructuralEditRange(
       if (selected.coverage === "none") return [];
       const block = options.graph.getBlock(selected.blockId);
       if (!block || block.tombstone) return [];
+      if (
+        hasSelectedAncestor(
+          options.graph,
+          block.parentId,
+          structuralRemovalRootIds,
+        )
+      ) {
+        return [];
+      }
       const definition = options.blockDefinitions[block.type];
-      return selected.coverage === "complete-block" ||
-        (selected.coverageResult.delete &&
-          typeof selected.coverageResult.delete === "object" &&
-          "removeBlock" in selected.coverageResult.delete &&
-          selected.coverageResult.delete.removeBlock === true) ||
+      return structuralRemovalRootIds.has(selected.blockId) ||
         definition?.kind === "text"
         ? [selected.blockId]
         : [];
@@ -76,20 +100,14 @@ export function resolveStructuralEditRange(
       hasSelectedAncestor(
         options.graph,
         block.parentId,
-        completelySelectedBlockIds,
+        structuralRemovalRootIds,
       )
     )
       continue;
     const definition = options.blockDefinitions[block.type];
     if (!definition) return null;
 
-    if (
-      selected.coverage === "complete-block" ||
-      (selected.coverageResult.delete &&
-        typeof selected.coverageResult.delete === "object" &&
-        "removeBlock" in selected.coverageResult.delete &&
-        selected.coverageResult.delete.removeBlock === true)
-    ) {
+    if (structuralRemovalRootIds.has(selected.blockId)) {
       append({
         kind: "block",
         blockId: block.id,
@@ -161,6 +179,20 @@ export function resolveStructuralEditRange(
     start: boundaryFor(first, "start", options),
     end: boundaryFor(last, "end", options),
   });
+}
+
+function selectionRemovesCompleteListItem(
+  selected: EditorSelectionSnapshot["rangeBlocks"][number],
+  options: ResolveStructuralEditRangeOptions,
+  hasCompleteContent: (blockId: BlockId) => boolean,
+): boolean {
+  const block = options.graph.getBlock(selected.blockId);
+  if (!block || block.tombstone || block.type !== selected.blockType)
+    return false;
+  return (
+    options.blockDefinitions[block.type]?.list?.kind === "item" &&
+    hasCompleteContent(block.id)
+  );
 }
 
 function selectionRemovesCompleteBlock(
