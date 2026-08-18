@@ -53,6 +53,7 @@ export type {
   EditorContentImportDefinition,
   EditorContentRuntimeDefinition,
   EditorDefinition,
+  EditorSelectionFragmentDefinition,
   EditableEditorDefinition,
   ReadEditorDefinition,
   EditorBlockInternalSelectionSubsystemDefinition,

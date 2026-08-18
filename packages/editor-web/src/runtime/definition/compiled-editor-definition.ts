@@ -166,6 +166,7 @@ const allowedEditorDefinitionFields = new Set([
   "typingTriggers",
   "documentValidators",
   "blockInternalSelectionSubsystems",
+  "selectionFragment",
   "commands",
   "keybindings",
 ]);
@@ -217,6 +218,17 @@ function assertNoUnexpectedEditorDefinitionFields(
       ))
   ) {
     throw new Error("EditorDefinition documentValidators must be functions.");
+  }
+  if (
+    definition.selectionFragment !== undefined &&
+    (typeof definition.selectionFragment !== "object" ||
+      definition.selectionFragment === null ||
+      typeof definition.selectionFragment.resolveVisibleChildBlockIds !==
+        "function")
+  ) {
+    throw new Error(
+      "EditorDefinition selectionFragment must resolve visible child block ids.",
+    );
   }
 }
 

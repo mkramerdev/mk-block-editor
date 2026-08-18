@@ -60,6 +60,18 @@ export interface BlockSelectionContentFragmentDescriptor {
 
 export interface BlockSelectionWrapperFragmentDescriptor {
   readonly kind: "wrapper";
+  /**
+   * Controls when a wrapper survives document-selection fragment shaping.
+   * The default requires every in-scope child to be selected completely.
+   */
+  readonly inclusion?:
+    | "complete-content"
+    | "multiple-selected-children"
+    | "never";
+  /** Limit completeness checks to product-visible direct children. */
+  readonly contentScope?: "all" | "visible";
+  /** Copy every canonical child once the wrapper qualifies (for hidden content). */
+  readonly preservedChildren?: "selected" | "all";
 }
 
 export interface BlockSelectionBlockFragmentDescriptor {
@@ -198,6 +210,7 @@ export function contentSelection(): BlockSelectionModel {
 export function wrapperSelection(
   options: {
     readonly children?: BlockSelectionChildrenModel;
+    readonly fragment?: BlockSelectionWrapperFragmentDescriptor;
   } = {},
 ): BlockSelectionModel {
   return {
@@ -214,7 +227,7 @@ export function wrapperSelection(
     },
     children: options.children ?? { scope: { kind: "all" } },
     paint: { kind: "block-surface" },
-    fragment: { kind: "wrapper" },
+    fragment: options.fragment ?? { kind: "wrapper" },
     edit: { kind: "wrapper" },
     delete: { kind: "wrapper" },
     cut: { kind: "wrapper" },

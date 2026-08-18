@@ -6,7 +6,10 @@ import {
 } from "@repo/editor-core/editing";
 import type { BlockId, JsonObject } from "@repo/editor-core/kernel";
 import type { BlockDefinition } from "@repo/editor-core/definitions";
-import { contentSelection } from "@repo/editor-core/selection";
+import {
+  contentSelection,
+  wrapperSelection,
+} from "@repo/editor-core/selection";
 import type { BlockType } from "@repo/editor-core/document";
 import type {
   EditorContentRuntimeDefinition,
@@ -150,18 +153,38 @@ export const firstDraftBlockDefinitions: Readonly<
   },
   toggleHeading: {
     ...firstDraftBlockModelDefinitions.toggleHeading,
+    selection: wrapperSelection({
+      fragment: {
+        kind: "wrapper",
+        contentScope: "visible",
+        preservedChildren: "all",
+      },
+    }),
     renderer: ToggleHeadingRenderer,
   },
   toggleHeadingBody: {
     ...firstDraftBlockModelDefinitions.toggleHeadingBody,
+    selection: wrapperSelection({
+      fragment: { kind: "wrapper", inclusion: "never" },
+    }),
     renderer: TransparentWrapperRenderer,
   },
   toggleListItem: {
     ...firstDraftBlockModelDefinitions.toggleListItem,
+    selection: wrapperSelection({
+      fragment: {
+        kind: "wrapper",
+        contentScope: "visible",
+        preservedChildren: "all",
+      },
+    }),
     renderer: ToggleListItemRenderer,
   },
   toggleListItemBody: {
     ...firstDraftBlockModelDefinitions.toggleListItemBody,
+    selection: wrapperSelection({
+      fragment: { kind: "wrapper", inclusion: "never" },
+    }),
     renderer: TransparentWrapperRenderer,
   },
   divider: {
@@ -174,18 +197,34 @@ export const firstDraftBlockDefinitions: Readonly<
   },
   columns: {
     ...firstDraftBlockModelDefinitions.columns,
+    selection: wrapperSelection({
+      fragment: { kind: "wrapper", inclusion: "multiple-selected-children" },
+    }),
     renderer: ColumnsRenderer,
   },
   column: {
     ...firstDraftBlockModelDefinitions.column,
+    selection: wrapperSelection({
+      fragment: { kind: "wrapper", inclusion: "never" },
+    }),
     renderer: ColumnRenderer,
   },
   tabs: {
     ...firstDraftBlockModelDefinitions.tabs,
+    selection: wrapperSelection({
+      fragment: {
+        kind: "wrapper",
+        contentScope: "visible",
+        preservedChildren: "all",
+      },
+    }),
     renderer: TabsRenderer,
   },
   tabPane: {
     ...firstDraftBlockModelDefinitions.tabPane,
+    selection: wrapperSelection({
+      fragment: { kind: "wrapper", inclusion: "never" },
+    }),
     renderer: TabPaneRenderer,
   },
   placeholder: {
@@ -228,6 +267,25 @@ export function createFirstDraftEditorDefinition(
     defaultRoot: "paragraph",
     contentImport: { plainTextBlockType: "paragraph" },
     contentCodecs: createFirstDraftContentCodecs(),
+    selectionFragment: {
+      resolveVisibleChildBlockIds({ blockId, blockType, childBlockIds }) {
+        if (blockType === "tabs") {
+          const selected = viewState.getSnapshot().selectedTabs[blockId];
+          const active =
+            selected && childBlockIds.includes(selected)
+              ? selected
+              : childBlockIds[0];
+          return active ? [active] : [];
+        }
+        if (
+          (blockType === "toggleHeading" || blockType === "toggleListItem") &&
+          viewState.isBlockCollapsed(blockId)
+        ) {
+          return childBlockIds.slice(0, 1);
+        }
+        return childBlockIds;
+      },
+    },
     documentValidators: [validateFirstDraftTableStructure],
     commands: [
       createCollapsedToggleEnterCommand(viewState),

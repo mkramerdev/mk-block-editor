@@ -69,6 +69,9 @@ export function useCanonicalCopyEvents(options: {
               options.contentRuntime.readBlockPlainText(blockId, blockType),
             textAnchorResolver: options.textAnchorResolver,
             blockDefinitions: options.definition.blocks,
+            resolveVisibleChildBlockIds:
+              options.definition.selectionFragment
+                ?.resolveVisibleChildBlockIds,
           });
         },
       })

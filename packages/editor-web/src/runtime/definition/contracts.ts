@@ -57,6 +57,8 @@ interface EditorDefinitionBase<TEditor extends EditorReadRuntime> {
   readonly content?: EditorContentRuntimeDefinition;
   readonly documentValidators?: readonly StructuralDocumentValidator[];
   readonly blockInternalSelectionSubsystems?: readonly EditorBlockInternalSelectionSubsystemDefinition[];
+  /** Product view-state projection used only while shaping document clipboard fragments. */
+  readonly selectionFragment?: EditorSelectionFragmentDefinition;
 }
 
 export type ReadEditorDefinition = EditorDefinitionBase<ReadEditor>;
@@ -68,6 +70,14 @@ export interface EditableEditorDefinition
 }
 
 export type EditorDefinition = ReadEditorDefinition | EditableEditorDefinition;
+
+export interface EditorSelectionFragmentDefinition {
+  readonly resolveVisibleChildBlockIds: (input: {
+    readonly blockId: BlockId;
+    readonly blockType: BlockType;
+    readonly childBlockIds: readonly BlockId[];
+  }) => readonly BlockId[];
+}
 
 export interface EditorBlockInternalSelectionGraph {
   getBlock(blockId: BlockId): VersionedBlock | null;

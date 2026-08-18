@@ -83,6 +83,8 @@ export function useEditableClipboardEvents({
               contentRuntime.readBlockPlainText(blockId, blockType),
             textAnchorResolver,
             blockDefinitions: definition.blocks,
+            resolveVisibleChildBlockIds:
+              definition.selectionFragment?.resolveVisibleChildBlockIds,
           });
         },
       }),

@@ -23,6 +23,7 @@ import { type BlockId, type JsonObject } from "@repo/editor-core/kernel";
 import type {
   BlockSelectionCustomFragmentNode,
   BlockSelectionFragmentDescriptor,
+  BlockSelectionWrapperFragmentDescriptor,
 } from "@repo/editor-core/selection";
 import {
   isEditorSelectionTextAnchor,
@@ -61,6 +62,11 @@ export interface MaterializeEditorSelectionFragmentOptions {
   ) => RichTextDocumentNodeJson | null;
   readonly textAnchorResolver?: EditorSelectionTextAnchorResolver;
   readonly blockDefinitions: Readonly<Record<BlockType, BlockDefinition>>;
+  readonly resolveVisibleChildBlockIds?: (input: {
+    readonly blockId: BlockId;
+    readonly blockType: BlockType;
+    readonly childBlockIds: readonly BlockId[];
+  }) => readonly BlockId[];
 }
 
 export type MaterializeEditorSelectionFragmentResult =
@@ -201,6 +207,7 @@ export function materializeEditorSelectionFragment({
   readBlockContent,
   textAnchorResolver,
   blockDefinitions,
+  resolveVisibleChildBlockIds,
 }: MaterializeEditorSelectionFragmentOptions): MaterializeEditorSelectionFragmentResult {
   const resolved = resolveEditorSelectionSnapshotTextAnchors({
     snapshot,
@@ -224,6 +231,7 @@ export function materializeEditorSelectionFragment({
       readBlockPlainText,
       readBlockContent,
       blockDefinitions,
+      resolveVisibleChildBlockIds,
     });
     return { ok: true, fragment: builder.build() };
   } catch (error) {
@@ -282,6 +290,11 @@ interface SelectionFragmentBuilderOptions {
     blockType: BlockType,
   ) => RichTextDocumentNodeJson | null;
   readonly blockDefinitions: Readonly<Record<BlockType, BlockDefinition>>;
+  readonly resolveVisibleChildBlockIds?: (input: {
+    readonly blockId: BlockId;
+    readonly blockType: BlockType;
+    readonly childBlockIds: readonly BlockId[];
+  }) => readonly BlockId[];
 }
 
 class SelectionFragmentBuilder {
@@ -402,16 +415,19 @@ class SelectionFragmentBuilder {
   }
 
   private collectSelected(blockId: BlockId): readonly PendingFragmentNode[] {
-    const own = this.buildSelectedNode(blockId, false);
+    const own = this.buildSelectedNode(blockId, false, false);
     if (own) return [own];
-    return this.options.graph
-      .getChildBlockIds(blockId)
-      .flatMap((childId) => this.collectSelected(childId));
+    const target = readEditorBlockSelectionTarget(this.options.graph, blockId);
+    if (!target) return [];
+    return this.selectionChildIds(target).flatMap((childId) =>
+      this.collectSelected(childId),
+    );
   }
 
   private buildSelectedNode(
     blockId: BlockId,
     forceComplete: boolean,
+    forceStructure: boolean,
   ): PendingFragmentNode | null {
     const target = readEditorBlockSelectionTarget(this.options.graph, blockId);
     if (!target) return null;
@@ -440,33 +456,37 @@ class SelectionFragmentBuilder {
         : null;
     }
 
+    const wrapperDescriptor =
+      descriptor?.kind === "wrapper" ? descriptor : undefined;
+    const selectionChildIds = this.selectionChildIds(target, wrapperDescriptor);
+    const selectedChildIds = selectionChildIds.filter((childId) =>
+      this.hasSelectedContent(childId),
+    );
+    const completeContent =
+      selectionChildIds.length > 0 &&
+      selectionChildIds.every((childId) => this.hasCompleteContent(childId));
+    const inclusion = wrapperDescriptor?.inclusion ?? "complete-content";
     const structurallySelected =
       forceComplete ||
-      (selected &&
-        (descriptor?.kind === "wrapper" || descriptor?.kind === "block"));
-    const forceChildren =
+      forceStructure ||
+      range?.coverage === "complete-block" ||
+      (selected && descriptor?.kind === "block") ||
+      (inclusion === "complete-content" && completeContent) ||
+      (inclusion === "multiple-selected-children" &&
+        selectedChildIds.length > 1);
+    if (!structurallySelected) return null;
+
+    const forceAllChildren =
       forceComplete ||
       range?.coverage === "complete-block" ||
-      (range?.coverage === "complete-content" &&
-        !range.coverageResult.childCoverages?.length);
-    const scopedChildren = new Set(
-      range?.coverageResult.childCoverages
-        ?.filter((child) => child.coverage !== "none")
-        .map((child) => child.blockId) ?? [],
-    );
-    const children = this.options.graph
-      .getChildBlockIds(blockId)
-      .filter(
-        (childId) =>
-          forceChildren ||
-          scopedChildren.size === 0 ||
-          scopedChildren.has(childId),
-      )
-      .flatMap((childId) => {
-        const child = this.buildSelectedNode(childId, forceChildren);
-        return child ? [child] : this.collectSelected(childId);
-      });
-    if (!structurallySelected) return null;
+      wrapperDescriptor?.preservedChildren === "all";
+    const childIds = forceAllChildren
+      ? this.options.graph.getChildBlockIds(blockId)
+      : selectedChildIds;
+    const children = childIds.flatMap((childId) => {
+      const child = this.buildSelectedNode(childId, forceAllChildren, true);
+      return child ? [child] : this.collectSelected(childId);
+    });
     if (children.length === 0) {
       throw new Error(
         `selected wrapper ${blockId} contains no selected children`,
@@ -477,6 +497,79 @@ class SelectionFragmentBuilder {
       children,
       range?.coverage === "complete-block" ? "block" : "children",
     );
+  }
+
+  private selectionChildIds(
+    target: EditorBlockSelectionTarget,
+    descriptor?: BlockSelectionWrapperFragmentDescriptor,
+  ): readonly BlockId[] {
+    const candidate =
+      descriptor ??
+      fragmentDescriptorForRangeBlock(this.rangeById.get(target.block.id));
+    const resolvedDescriptor =
+      candidate?.kind === "wrapper" ? candidate : undefined;
+    const childIds = this.options.graph.getChildBlockIds(target.block.id);
+    if (
+      resolvedDescriptor?.contentScope !== "visible" ||
+      !this.options.resolveVisibleChildBlockIds
+    ) {
+      return childIds;
+    }
+    const visible = new Set(
+      this.options.resolveVisibleChildBlockIds({
+        blockId: target.block.id,
+        blockType: target.block.type,
+        childBlockIds: childIds,
+      }),
+    );
+    return childIds.filter((childId) => visible.has(childId));
+  }
+
+  private hasSelectedContent(blockId: BlockId): boolean {
+    const target = readEditorBlockSelectionTarget(this.options.graph, blockId);
+    if (!target) return false;
+    const range = this.rangeById.get(blockId);
+    if (range && range.coverage !== "none") return true;
+    return this.selectionChildIds(target).some((childId) =>
+      this.hasSelectedContent(childId),
+    );
+  }
+
+  private hasCompleteContent(blockId: BlockId): boolean {
+    const target = readEditorBlockSelectionTarget(this.options.graph, blockId);
+    if (!target) return false;
+    const range = this.rangeById.get(blockId);
+    if (range?.coverage === "complete-block") return true;
+    const definition = this.options.blockDefinitions[target.block.type];
+    if (!definition) throw new Error(`unknown block type ${target.block.type}`);
+    if (definition.kind === "text") {
+      if (!range || range.coverage === "none") return false;
+      if (range.coverage === "complete-content") return true;
+      const length = this.readTextContentSize(target);
+      const from = normalizeTextBoundary(range.startOffset, 0, length);
+      const to = normalizeTextBoundary(range.endOffset, length, length);
+      return Math.min(from, to) === 0 && Math.max(from, to) === length;
+    }
+    if (definition.kind === "atomic") return false;
+    const children = this.selectionChildIds(target);
+    return (
+      children.length > 0 &&
+      children.every((childId) => this.hasCompleteContent(childId))
+    );
+  }
+
+  private readTextContentSize(target: EditorBlockSelectionTarget): number {
+    const readContent = this.options.readBlockContent?.(
+      target.block.id,
+      target.block.type,
+    );
+    const content = isRichTextDocument(readContent)
+      ? normalizeRichTextDocument(target.block.type, readContent)
+      : createBlockRichTextContentFromPlainText(
+          target.block.type,
+          this.options.readBlockPlainText(target.block.id, target.block.type),
+        );
+    return richTextDocumentContentSize(content);
   }
 
   private buildTextNode(

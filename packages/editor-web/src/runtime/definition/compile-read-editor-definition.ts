@@ -22,6 +22,7 @@ const allowedReadDefinitionFields = new Set([
   "contentCodecs",
   "documentValidators",
   "blockInternalSelectionSubsystems",
+  "selectionFragment",
 ]);
 
 /** PM-free compilation used exclusively by the static read entrypoint. */
@@ -107,6 +108,17 @@ function assertValidReadDefinition(definition: ReadEditorDefinition): void {
       ))
   ) {
     throw new Error("EditorDefinition documentValidators must be functions.");
+  }
+  if (
+    definition.selectionFragment !== undefined &&
+    (typeof definition.selectionFragment !== "object" ||
+      definition.selectionFragment === null ||
+      typeof definition.selectionFragment.resolveVisibleChildBlockIds !==
+        "function")
+  ) {
+    throw new Error(
+      "EditorDefinition selectionFragment must resolve visible child block ids.",
+    );
   }
 }
 

@@ -13,7 +13,11 @@ import {
   type EditorSelectionGraphReader,
 } from "@repo/editor-react/selection";
 import { describe, expect, it } from "vitest";
-import { firstDraftBlockDefinitions } from "./first-draft-definition.tsx";
+import {
+  createFirstDraftEditorDefinition,
+  firstDraftBlockDefinitions,
+} from "./first-draft-definition.tsx";
+import { createFirstDraftViewStateStore } from "./blocks/view-state.tsx";
 import { firstDraftBlockModelDefinitions } from "./server/block-definitions.ts";
 
 const listItemTypes = [
@@ -110,6 +114,86 @@ describe("First Draft definition ownership", () => {
             coverage === "complete-block"),
       ),
     ).toBe(false);
+  });
+
+  it("declares wrapper fragment exceptions without making wrappers selection endpoints", () => {
+    expect(firstDraftBlockDefinitions.columns.selection?.fragment).toEqual({
+      kind: "wrapper",
+      inclusion: "multiple-selected-children",
+    });
+    expect(firstDraftBlockDefinitions.column.selection?.fragment).toEqual({
+      kind: "wrapper",
+      inclusion: "never",
+    });
+    expect(firstDraftBlockDefinitions.tabs.selection?.fragment).toEqual({
+      kind: "wrapper",
+      contentScope: "visible",
+      preservedChildren: "all",
+    });
+    expect(
+      firstDraftBlockDefinitions.toggleHeadingBody.selection?.fragment,
+    ).toEqual({
+      kind: "wrapper",
+      inclusion: "never",
+    });
+    for (const type of [
+      "columns",
+      "column",
+      "tabs",
+      "tabPane",
+      "toggleHeading",
+      "toggleHeadingBody",
+      "toggleListItem",
+      "toggleListItemBody",
+    ] as const) {
+      expect(
+        firstDraftBlockDefinitions[type].selection?.projection,
+      ).toMatchObject({
+        category: "wrapper",
+        endpoint: { kind: "block" },
+        canStartSelection: false,
+        selectable: false,
+      });
+    }
+  });
+
+  it("scopes fragment completeness to the active tab and collapsed toggle summary", () => {
+    const tabs = "tabs" as BlockId;
+    const firstPane = "first-pane" as BlockId;
+    const secondPane = "second-pane" as BlockId;
+    const toggle = "toggle" as BlockId;
+    const summary = "summary" as BlockId;
+    const body = "body" as BlockId;
+    const viewState = createFirstDraftViewStateStore({
+      selectedTabs: { [tabs]: secondPane },
+      collapsedBlockIds: [toggle],
+    });
+    const policy =
+      createFirstDraftEditorDefinition(viewState).selectionFragment!;
+
+    expect(
+      policy.resolveVisibleChildBlockIds({
+        blockId: tabs,
+        blockType: "tabs",
+        childBlockIds: [firstPane, secondPane],
+      }),
+    ).toEqual([secondPane]);
+    expect(
+      policy.resolveVisibleChildBlockIds({
+        blockId: toggle,
+        blockType: "toggleHeading",
+        childBlockIds: [summary, body],
+      }),
+    ).toEqual([summary]);
+
+    viewState.setBlockCollapsed(toggle, false);
+    expect(
+      policy.resolveVisibleChildBlockIds({
+        blockId: toggle,
+        blockType: "toggleHeading",
+        childBlockIds: [summary, body],
+      }),
+    ).toEqual([summary, body]);
   });
 });
 
