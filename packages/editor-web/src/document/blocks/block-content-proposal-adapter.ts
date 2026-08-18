@@ -9,6 +9,7 @@ import {
   applyFinalizedContentOperations,
   createBlockLocalProseMirrorState,
   deriveProseMirrorOperations,
+  isEditorOwnedDeletionTransaction,
   materializeCanonicalBlockLocalProseMirrorDocument,
   proposalChangesDocument,
   type ProseMirrorProposalAdapter,
@@ -199,10 +200,13 @@ export class ActiveProseMirrorProposalAdapter
     if (!derived.ok || !selectionAfter) {
       return { kind: "rejected", state: this.projectCommittedState(view) };
     }
-    const selectionPresentation =
-      !view.isDestroyed && view.dom.isConnected && view.hasFocus()
-        ? "native-already-established"
-        : "restore-native";
+    const focused =
+      !view.isDestroyed && view.dom.isConnected && view.hasFocus();
+    const selectionPresentation = focused
+      ? proposal.transactions.some(isEditorOwnedDeletionTransaction)
+        ? "installed-by-proposed-state"
+        : "native-already-established"
+      : "restore-native";
     const accepted = editor.acceptContentOperationProposal(
       {
         base: proposal.base,
@@ -288,21 +292,29 @@ export class ActiveProseMirrorProposalAdapter
         state.selection.anchor,
         state,
       );
+    const { blockId, blockType } = this.options;
+    const anchor = {
+      blockId,
+      blockType,
+      textOffset: anchorOffset,
+      affinity: null,
+    } as const;
+    if (state.selection.empty) {
+      return {
+        direction: "forward",
+        anchor,
+        focus: anchor,
+      };
+    }
     const focusOffset =
       blockTextCoordinateCodec.proseMirrorPositionToCanonicalOffset(
         state.selection.head,
         state,
       );
-    const { blockId, blockType } = this.options;
     return {
       direction:
         state.selection.anchor <= state.selection.head ? "forward" : "backward",
-      anchor: {
-        blockId,
-        blockType,
-        textOffset: anchorOffset,
-        affinity: null,
-      },
+      anchor,
       focus: {
         blockId,
         blockType,

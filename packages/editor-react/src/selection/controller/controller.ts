@@ -1097,24 +1097,6 @@ class SelectionControllerImplementation implements SelectionController {
     }
   }
 
-  private restoreCanonicalProjection(): void {
-    const canonical = this.canonicalSnapshot;
-    const currentGraphRevision = this.endpointSnapshot.graphRevision;
-    const endpoint =
-      canonical.kind === "none" ||
-      (canonical.kind === "document" &&
-        isCollapsedTextSelection(canonical.snapshot))
-        ? createIdleSelectionSnapshot(
-            this.endpointSnapshot.selectionRevision + 1,
-            {
-              graphRevision: currentGraphRevision,
-            },
-          )
-        : canonical.snapshot.documentSelection;
-    this.projectEndpointSnapshot(endpoint);
-    this.publishLocalPaintModel();
-  }
-
   private createSettlementMarker(
     kind: SelectionSettlementKind,
     context: SelectionSettlementContext,

@@ -37,9 +37,6 @@ import type {
 } from "../operations/content-commit.ts";
 import type { EditorLocalMutationProvenance } from "../operations/local-mutation-provenance.ts";
 
-export type EditorImplementation =
-  import("../controller/editor-implementation.ts").EditorImplementation;
-
 export interface EditorStructuralTransactionOptions {
   readonly origin?: "local-command" | "undo" | "redo";
   readonly editorSuggestion?: EditorOperationSuggestion | null;

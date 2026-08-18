@@ -178,6 +178,52 @@ describe("ActiveProseMirrorProposalAdapter", () => {
     expectCollapsedCanonicalOffset(editor, 3);
   });
 
+  it("installs an editor-owned beforeinput selection from the accepted proposed state", () => {
+    const { editor, view } = createMountedEditor("abc");
+    const acceptProposal = vi.spyOn(editor, "acceptContentOperationProposal");
+    view.focus();
+    view.dispatch(
+      view.state.tr.setSelection(TextSelection.atEnd(view.state.doc)),
+    );
+    acceptProposal.mockClear();
+    const text = view.dom.querySelector("[data-block-node]")?.firstChild;
+    if (!text) throw new Error("Expected mounted block-local text");
+    const event = new InputEvent("beforeinput", {
+      bubbles: true,
+      cancelable: true,
+      inputType: "deleteContentBackward",
+    });
+    Object.defineProperty(event, "getTargetRanges", {
+      value: () => [
+        {
+          startContainer: text,
+          startOffset: 2,
+          endContainer: text,
+          endOffset: 3,
+        } as StaticRange,
+      ],
+    });
+
+    view.dom.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(editor.readBlockPlainText(blockId, "paragraph")).toBe("ab");
+    expect(acceptProposal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        selectionAfter: expect.objectContaining({
+          anchor: expect.any(Object),
+          focus: expect.any(Object),
+        }),
+      }),
+      expect.objectContaining({
+        selectionPresentation: "installed-by-proposed-state",
+        releaseAfterProposedStateInstalled: true,
+      }),
+    );
+    const selectionAfter = acceptProposal.mock.calls[0]?.[0].selectionAfter;
+    expect(selectionAfter?.anchor).toBe(selectionAfter?.focus);
+  });
+
   it("restores canonical selection without invoking the public focus action", () => {
     const { editor, view } = createMountedEditor("abc");
     const acceptProposal = vi.spyOn(editor, "acceptContentOperationProposal");

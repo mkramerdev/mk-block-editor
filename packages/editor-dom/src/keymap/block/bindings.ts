@@ -47,15 +47,11 @@ export function createBlockKeyBindings(
         return true;
       }
 
-      // Let the browser perform ordinary text/range deletion. ProseMirror's
-      // DOM observer publishes the resulting block-local transaction, while
-      // the native editing implementation preserves grapheme and IME rules.
+      // Ordinary text/range deletion is claimed from beforeinput using the
+      // browser-provided target range. Unsupported browsers retain native DOM
+      // editing and ProseMirror's compatibility recovery path.
       if (!state.selection.empty) return false;
-      const cursorOffset = proseMirrorPositionToCanonicalOffset(
-        state.selection.head,
-        state,
-      );
-      if (cursorOffset > 0) return false;
+      if (state.selection.$from.parentOffset > 0) return false;
       return emitKeyBehavior(options, state, "backspace", 0);
     },
     Delete(state, dispatch) {
@@ -71,11 +67,12 @@ export function createBlockKeyBindings(
         return true;
       }
       if (!state.selection.empty) return false;
-      const cursorOffset = proseMirrorPositionToCanonicalOffset(
-        state.selection.head,
-        state,
-      );
-      if (cursorOffset !== readBlockTextContentSize(state)) return false;
+      if (
+        state.selection.$from.parentOffset !==
+        state.selection.$from.parent.content.size
+      )
+        return false;
+      const cursorOffset = readBlockTextContentSize(state);
       return emitKeyBehavior(options, state, "delete", cursorOffset);
     },
     Tab(state) {

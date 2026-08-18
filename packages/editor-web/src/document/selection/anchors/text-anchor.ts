@@ -91,38 +91,6 @@ export function createWebSelectionTextAnchorAtOffset({
   };
 }
 
-export function createWebSelectionTextAnchorInLiveContext({
-  contentRuntime,
-  blockId,
-  blockType,
-  textOffset,
-  affinity = null,
-}: Omit<CreateWebSelectionTextAnchorOptions, "contentLease">): CreateWebSelectionTextAnchorResult {
-  const created = contentRuntime.tryCreateTextAnchorInLiveContext({
-    blockId,
-    blockType,
-    textOffset: normalizeTextOffset(textOffset),
-    affinity,
-  });
-  if (!created.ok) {
-    return created.reason === "not-live"
-      ? {
-          ok: false,
-          reason: "missing-text",
-          blockId,
-          message: "Block content is not live",
-        }
-      : { ...created, blockId };
-  }
-  const anchor = createEditorSelectionTextAnchor({
-    codec: created.codec,
-    payload: created.payload,
-  });
-  return anchor.ok
-    ? { ok: true, textAnchor: anchor.textAnchor, textOffset: created.textOffset }
-    : { ...anchor, blockId };
-}
-
 export function resolveWebSelectionTextAnchorPoint(
   point: EditorLogicalSelectionPoint,
   graph: EditorSelectionGraphReader,

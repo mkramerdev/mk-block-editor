@@ -10,9 +10,9 @@ import type {
 } from "./rich-inline-types.ts";
 import { applyInlineMarkUpdateToRichTextDocument } from "../marks/rich-text-mark-command.ts";
 import {
+  partitionRichInlineNodeUnits,
   richInlineContentSize,
   richInlineNodeSize,
-  sliceRichInlineContentUnits,
 } from "./rich-inline-units.ts";
 import type { BlockDefinition } from "../../definitions/block-definition.ts";
 import type { EditorModelOperationValidationResult } from "../../operations/transactions/validation-result.ts";
@@ -33,6 +33,14 @@ export interface ApplyLogicalContentOperationOptions {
   readonly inlineMarks: readonly InlineMarkDefinition[];
   /** The authoritative runtime has already validated and canonicalized this base. */
   readonly validatedCanonicalBase?: boolean;
+}
+
+export interface PreparedRichTextContentOperation {
+  readonly before: RichTextDocumentNodeJson;
+  readonly after: RichTextDocumentNodeJson;
+  readonly operation: EditorLogicalContentOperation;
+  readonly inverseOperation: EditorLogicalContentOperation | null;
+  readonly removedContent: readonly RichTextInlineNodeJson[];
 }
 
 export function createInverseLogicalContentOperation(
@@ -130,69 +138,78 @@ export function applyLogicalContentOperationToRichTextDocument(
   operation: EditorLogicalContentOperation,
   options: ApplyLogicalContentOperationOptions,
 ): RichTextDocumentNodeJson | null {
+  return (
+    prepareLogicalContentOperationToRichTextDocument(
+      blockType,
+      content,
+      operation,
+      options,
+    )?.after ?? null
+  );
+}
+
+export function prepareLogicalContentOperationToRichTextDocument(
+  blockType: BlockType,
+  content: unknown,
+  operation: EditorLogicalContentOperation,
+  options: ApplyLogicalContentOperationOptions,
+): PreparedRichTextContentOperation | null {
   const base = normalizeRichTextApplyInput(
     blockType,
     content,
     options.validatedCanonicalBase,
   );
   if (!base) return null;
+  let after: RichTextDocumentNodeJson | null = null;
+  let removedContent: readonly RichTextInlineNodeJson[] = [];
   switch (operation.kind) {
-    case "insertInlineContent":
-      return replaceInlineRangeExact(
+    case "insertInlineContent": {
+      const edit = prepareInlineRangeEdit(
         base,
-        blockType,
         operation.position.offset,
         operation.position.offset,
+        undefined,
         operation.content,
       );
-    case "deleteInlineRange":
-      return expectedContentMatchesExactRange(
+      after = edit?.after ?? null;
+      break;
+    }
+    case "deleteInlineRange": {
+      const edit = prepareInlineRangeEdit(
         base,
-        blockType,
         operation.range.from.offset,
         operation.range.to.offset,
         operation.deletedContent,
-      )
-        ? replaceInlineRangeExact(
-            base,
-            blockType,
-            operation.range.from.offset,
-            operation.range.to.offset,
-            [],
-          )
-        : null;
-    case "replaceInlineRange":
-      return expectedContentMatchesExactRange(
+        [],
+      );
+      removedContent = edit?.removed ?? [];
+      after = edit?.after ?? null;
+      break;
+    }
+    case "replaceInlineRange": {
+      const edit = prepareInlineRangeEdit(
         base,
-        blockType,
         operation.range.from.offset,
         operation.range.to.offset,
         operation.deletedContent,
-      )
-        ? replaceInlineRangeExact(
-            base,
-            blockType,
-            operation.range.from.offset,
-            operation.range.to.offset,
-            operation.content,
-          )
-        : null;
-    case "setInlineEntity":
-      return expectedContentMatchesExactRange(
+        operation.content,
+      );
+      removedContent = edit?.removed ?? [];
+      after = edit?.after ?? null;
+      break;
+    }
+    case "setInlineEntity": {
+      const edit = prepareInlineRangeEdit(
         base,
-        blockType,
         operation.range.from.offset,
         operation.range.to.offset,
         operation.deletedContent,
-      )
-        ? replaceInlineRangeExact(
-            base,
-            blockType,
-            operation.range.from.offset,
-            operation.range.to.offset,
-            [operation.entity],
-          )
-        : null;
+        [operation.entity],
+      );
+      removedContent = edit?.removed ?? [];
+      after = edit?.after ?? null;
+      break;
+    }
     case "addInlineMark":
     case "removeInlineMark": {
       if (
@@ -218,9 +235,18 @@ export function applyLogicalContentOperationToRichTextDocument(
           attrs: operation.attrs,
         },
       );
-      return result.changed ? result.content : base;
+      after = result.changed ? result.content : base;
+      break;
     }
   }
+  if (!after) return null;
+  return {
+    before: base,
+    after,
+    operation,
+    inverseOperation: createInverseLogicalContentOperation(operation),
+    removedContent,
+  };
 }
 
 export function validateLogicalContentOperation(
@@ -348,79 +374,61 @@ export function isLogicalContentOperationKind(
   );
 }
 
-function replaceInlineRangeExact(
+function prepareInlineRangeEdit(
   base: RichTextDocumentNodeJson,
-  blockType: BlockType,
   from: number,
   to: number,
-  replacement: readonly RichTextInlineNodeJson[],
-): RichTextDocumentNodeJson | null {
-  if (!rangeWithinDocument(base, from, to)) return null;
+  expectedContent: readonly RichTextInlineNodeJson[] | undefined,
+  replacement: readonly RichTextInlineNodeJson[] = expectedContent ?? [],
+): {
+  readonly after: RichTextDocumentNodeJson;
+  readonly removed: readonly RichTextInlineNodeJson[];
+} | null {
+  if (
+    !Number.isInteger(from) ||
+    !Number.isInteger(to) ||
+    from < 0 ||
+    to < from
+  )
+    return null;
   const block = base.content[0] ?? { type: "paragraph" as const };
   const inline = block.content ?? [];
-  const contentSize = richInlineContentSize(inline);
-  if (from === contentSize && to === contentSize) {
-    if (replacement.length === 0) return base;
-    const next = [...inline];
-    for (const replacementNode of replacement) {
-      appendCanonicalInlineNode(next, cloneInlineNode(replacementNode));
-    }
-    return {
-      type: "doc",
-      content: [
-        {
-          ...block,
-          type: "paragraph" as const,
-          content: next,
-        },
-      ],
-    };
-  }
-  const removed = sliceRichInlineContentUnits(inline, from, to);
-  if (inlineContentEqual(removed, replacement)) return base;
-
   const next: RichTextInlineNodeJson[] = [];
+  const removed: RichTextInlineNodeJson[] = [];
   let cursor = 0;
   let inserted = false;
   for (const node of inline) {
-    const size = richInlineNodeSize(node);
-    const nodeStart = cursor;
-    const nodeEnd = cursor + size;
-    cursor = nodeEnd;
-    if (nodeEnd <= from) {
-      appendCanonicalInlineNode(next, node);
-      continue;
-    }
-    if (!inserted) {
-      if (nodeStart < from) {
-        const prefix = sliceRichInlineContentUnits(
-          [node],
-          0,
-          from - nodeStart,
-        )[0];
-        if (prefix) appendCanonicalInlineNode(next, prefix);
-      }
+    const parts = partitionRichInlineNodeUnits(
+      node,
+      from - cursor,
+      to - cursor,
+    );
+    cursor += parts.size;
+    if (parts.before) appendCanonicalInlineNode(next, parts.before);
+    if (!inserted && from <= cursor) {
       for (const replacementNode of replacement) {
         appendCanonicalInlineNode(next, cloneInlineNode(replacementNode));
       }
       inserted = true;
     }
-    if (nodeEnd <= to) continue;
-    if (nodeStart < to) {
-      const suffix = sliceRichInlineContentUnits(
-        [node],
-        to - nodeStart,
-        size,
-      )[0];
-      if (suffix) appendCanonicalInlineNode(next, suffix);
-      continue;
-    }
-    appendCanonicalInlineNode(next, node);
+    if (parts.selected) appendCanonicalInlineNode(removed, parts.selected);
+    if (parts.after) appendCanonicalInlineNode(next, parts.after);
   }
+  if (to > cursor) return null;
   if (!inserted) {
     for (const replacementNode of replacement) {
       appendCanonicalInlineNode(next, cloneInlineNode(replacementNode));
     }
+  }
+  if (
+    expectedContent &&
+    expectedContent.length > 0 &&
+    !inlineContentEqual(removed, expectedContent)
+  ) {
+    return null;
+  }
+  if (inlineContentEqual(removed, replacement)) {
+    return { after: base, removed };
   }
   const nextBlock = {
     ...block,
@@ -428,19 +436,7 @@ function replaceInlineRangeExact(
     ...(next.length === 0 ? {} : { content: next }),
   };
   if (next.length === 0) delete nextBlock.content;
-  return { type: "doc", content: [nextBlock] };
-}
-
-function expectedContentMatchesExactRange(
-  base: RichTextDocumentNodeJson,
-  blockType: BlockType,
-  from: number,
-  to: number,
-  expectedContent: readonly RichTextInlineNodeJson[] | undefined,
-): boolean {
-  if (!rangeWithinDocument(base, from, to)) return false;
-  if (!expectedContent || expectedContent.length === 0) return true;
-  return inlineContentMatchesRange(base, blockType, from, to, expectedContent);
+  return { after: { type: "doc", content: [nextBlock] }, removed };
 }
 
 function rangeWithinDocument(
@@ -456,22 +452,6 @@ function rangeWithinDocument(
     to >= from &&
     to <= size
   );
-}
-
-function inlineContentMatchesRange(
-  base: RichTextDocumentNodeJson,
-  blockType: BlockType,
-  from: number,
-  to: number,
-  expectedContent: readonly RichTextInlineNodeJson[],
-): boolean {
-  void blockType;
-  const actual = sliceRichInlineContentUnits(
-    base.content[0]?.content ?? [],
-    from,
-    to,
-  );
-  return inlineContentEqual(actual, expectedContent);
 }
 
 function inlineContentEqual(

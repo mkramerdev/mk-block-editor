@@ -296,14 +296,6 @@ type PreparedContentEditorTransactionResult =
 
 class ActiveEditorMutationFailure extends Error {}
 
-type EditorCanonicalGraphMutationOrigin =
-  | "bootstrap"
-  | "local-command"
-  | "undo"
-  | "redo"
-  | "accepted-change"
-  | "recovery";
-
 type EditorStructuralPlanResult =
   | Extract<StructuralTransactionResult, { readonly ok: false }>
   | (Extract<StructuralTransactionResult, { readonly ok: true }> & {
@@ -1808,7 +1800,6 @@ export class EditorImplementation {
         updatedAt: Date.now(),
       },
       {},
-      "recovery",
     );
     return nextState;
   }
@@ -1850,7 +1841,6 @@ export class EditorImplementation {
       const notify = this.commitCanonicalGraphMutation(
         input.nextState,
         update,
-        "accepted-change",
         false,
         undefined,
         true,
@@ -1898,7 +1888,6 @@ export class EditorImplementation {
     const notify = this.commitCanonicalGraphMutation(
       input.nextState,
       update,
-      "recovery",
       false,
       undefined,
       true,
@@ -1967,7 +1956,6 @@ export class EditorImplementation {
             (batch) => batch.blockId,
           ),
         },
-        "accepted-change",
       );
       if (appliedContent) {
         this.options.contentCommit!.publishContentCommit(appliedContent);
@@ -2012,7 +2000,6 @@ export class EditorImplementation {
       {
         candidateBlockIds: blockGraphPatchCandidateIds(mutation.patch),
       },
-      "accepted-change",
     );
   }
 
@@ -2052,7 +2039,6 @@ export class EditorImplementation {
       const committed = this.commitInitialBootstrap(
         nextState,
         { candidateBlockIds: applied.affectedBlockIds },
-        "accepted-change",
       );
       if (appliedContent) {
         this.options.contentCommit!.publishContentCommit(appliedContent);
@@ -3504,60 +3490,6 @@ export class EditorImplementation {
     return { kind: "history-selection", selection };
   }
 
-  private validateContentProposalBase(base: EditorContentBaseToken): {
-    readonly reason:
-      | "stale-graph-revision"
-      | "missing-block"
-      | "block-type-mismatch"
-      | "stale-content-revision";
-    readonly message: string;
-  } | null {
-    if (this.disposed) {
-      return {
-        reason: "missing-block",
-        message: "Editor is disposed",
-      };
-    }
-    if (base.graphRevision !== this.getSelectionGraphRevision()) {
-      return {
-        reason: "stale-graph-revision",
-        message: `Content proposal graph revision ${base.graphRevision} is stale`,
-      };
-    }
-    const block = this.getBlock(base.blockId);
-    if (!block || block.tombstone) {
-      return {
-        reason: "missing-block",
-        message: `Content proposal block ${base.blockId} does not exist`,
-      };
-    }
-    if (block.type !== base.blockType) {
-      return {
-        reason: "block-type-mismatch",
-        message: `Content proposal block ${base.blockId} changed type`,
-      };
-    }
-    try {
-      const current = this.options.contentCommit?.readContentBaseToken(
-        base.blockId,
-        base.blockType,
-        base.graphRevision,
-      );
-      if (!current || current.contentRevision !== base.contentRevision) {
-        return {
-          reason: "stale-content-revision",
-          message: `Content proposal block ${base.blockId} has a stale projection revision`,
-        };
-      }
-    } catch (error) {
-      return {
-        reason: "stale-content-revision",
-        message: error instanceof Error ? error.message : String(error),
-      };
-    }
-    return null;
-  }
-
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
@@ -3587,7 +3519,6 @@ export class EditorImplementation {
       readonly candidateBlockIds?: readonly BlockId[];
       readonly contentChangedBlockIds?: readonly BlockId[];
     } = {},
-    origin: EditorCanonicalGraphMutationOrigin = "bootstrap",
   ): EditorCommandState {
     if (data.blockGraphVersion !== undefined) {
       assertValidBlockGraphVersion(data.blockGraphVersion);
@@ -3626,7 +3557,6 @@ export class EditorImplementation {
     this.commitCanonicalGraphMutation(
       next,
       this.classifyDocumentUpdate(current, next, classification),
-      origin,
     );
     return next;
   }
@@ -3857,7 +3787,6 @@ export class EditorImplementation {
       notifyDocumentSubscribers = this.commitCanonicalGraphMutation(
         request.nextState,
         update,
-        operationRequestMutationOrigin(request),
         true,
         canonicalSelectionEffect,
         appliedContent !== null,
@@ -3999,7 +3928,6 @@ export class EditorImplementation {
         this.commitCanonicalGraphMutation(
           request.nextState,
           update,
-          operationRequestMutationOrigin(request),
           options.structuralDraftAlreadyValidated,
           selectionEffect,
         );
@@ -4286,7 +4214,6 @@ export class EditorImplementation {
       notifyDocumentSubscribers = this.commitCanonicalGraphMutation(
         optimisticState,
         durableOperation.update,
-        operationRequestMutationOrigin(request),
         options.structuralDraftAlreadyValidated,
         canonicalSelectionEffect,
         appliedContent !== null,
@@ -4577,7 +4504,6 @@ export class EditorImplementation {
   private commitCanonicalGraphMutation(
     nextState: EditorCommandState,
     update: EditorDocumentUpdate,
-    origin: EditorCanonicalGraphMutationOrigin,
     structuralDraftAlreadyValidated = false,
     selectionEffect?: EditorCanonicalSelectionEffect,
     deferNotifications = false,
@@ -5209,7 +5135,8 @@ export class EditorImplementation {
     if (
       presentation === "canonical-only" ||
       presentation === "defer-native-until-content-release" ||
-      presentation === "native-already-established"
+      presentation === "native-already-established" ||
+      presentation === "installed-by-proposed-state"
     )
       return;
     if (settlement.kind !== "settled") return;
@@ -5753,12 +5680,6 @@ function blockGraphPatchCandidateIds(
     ...(patch.upsertedBlocks ?? []).map((block) => block.id),
     ...(patch.removedBlockIds ?? []),
   ]);
-}
-
-function operationRequestMutationOrigin(
-  request: Pick<EditorOperationRequest, "origin">,
-): EditorCanonicalGraphMutationOrigin {
-  return request.origin ?? "local-command";
 }
 
 function contentTransactionSelectionCause(

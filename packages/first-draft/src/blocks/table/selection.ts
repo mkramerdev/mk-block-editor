@@ -206,14 +206,6 @@ export function encodeTableRange(range: TableRange): TableRangeSelection {
   };
 }
 
-export function rangeIds(
-  graph: TableGraph,
-  tableId: BlockId,
-  range: TableRange | null,
-): ReadonlySet<BlockId> {
-  return new Set(rangeSelectionPaintSegments(graph, tableId, range).keys());
-}
-
 export function rangeSelectionPaintSegments(
   graph: TableGraph,
   tableId: BlockId,

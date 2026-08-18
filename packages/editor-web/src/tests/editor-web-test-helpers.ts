@@ -8,7 +8,6 @@ import { getCanonicalBlockOrder } from "@repo/editor-core/document";
 import type { ContentVersion } from "@repo/editor-core/kernel";
 import type { Block, BlockType } from "@repo/editor-core/document";
 import type { BlockId } from "@repo/editor-core/kernel";
-import type { EditorCommandState } from "@repo/editor-react/editor";
 import { encodeLocalContentCheckpoint } from "../content/local/runtime.ts";
 import {
   createBlockRichTextContentFromPlainText,
@@ -96,19 +95,6 @@ export function createBlockGraphFromTypes(
     blocks,
   };
   return blockGraph;
-}
-
-export function createDocumentFromTypes(
-  types: readonly BlockType[],
-): MaterializedEditorDocumentData {
-  const blockGraph = createBlockGraphFromTypes(types);
-  return materializeEditorDocumentData(
-    documentDataFromBlockGraph(blockGraph),
-    createEditorDocumentOrderData(blockGraph.rootBlockIds),
-    {
-      blocks: blockDataFromBlockGraph(blockGraph),
-    },
-  );
 }
 
 export function createEditorDocumentOrderData(
@@ -227,39 +213,6 @@ export function blockDataFromBlockGraph(
           : (content ?? null),
     };
   });
-}
-
-export function blockGraphFromState(
-  state: EditorCommandState,
-): EditorBlockGraphFixture {
-  return {
-    blockGraphVersion: state.blockGraphVersion,
-    rootBlockIds: [...state.rootBlockIds],
-    childIdsByParentId: Object.fromEntries(
-      Object.entries(state.childIdsByParentId).map(([parentId, childIds]) => [
-        parentId,
-        [...(childIds ?? [])],
-      ]),
-    ),
-    blocks: state.blocks,
-    createdAt: state.createdAt,
-    updatedAt: state.updatedAt,
-  };
-}
-
-export function applyBlockGraphToState(
-  state: EditorCommandState,
-  blockGraph: EditorBlockGraphFixture,
-): EditorCommandState {
-  return {
-    ...state,
-    blockGraphVersion: blockGraph.blockGraphVersion,
-    blocks: blockGraph.blocks,
-    rootBlockIds: blockGraph.rootBlockIds,
-    childIdsByParentId: blockGraph.childIdsByParentId,
-    createdAt: blockGraph.createdAt,
-    updatedAt: blockGraph.updatedAt,
-  };
 }
 
 function metadataForType(type: BlockType): JsonObject | undefined {

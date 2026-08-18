@@ -8,14 +8,11 @@ import type {
   EditorOperation,
 } from "../history.ts";
 import type { EditorCommandState } from "../state/command-state.ts";
-import type { AppliedStructuralTransaction } from "@repo/editor-core/editing";
 import type { EditorDocumentUpdate } from "./document-update.ts";
 import type { EditorBlockGraphOperation } from "./block-graph-operation.ts";
 import { createBlocksForDurableOperation } from "./operation-execution.ts";
 import { createEditorBlockGraphPatch } from "./manifest-diff.ts";
 import type { EditorOperationRequest } from "./mutation.ts";
-import { classifyEditorDocumentUpdate } from "./document-update.ts";
-import { blocksEquivalent } from "./manifest-query.ts";
 
 export interface CreateBlockGraphOperationPairInput {
   readonly previousState: EditorCommandState;
@@ -78,104 +75,6 @@ export function createPreparedBlockGraphOperation(
       update: forwardPatch.update,
     },
   };
-}
-
-export function createPreparedStructuralGraphOperation(input: {
-  readonly previousState: EditorCommandState;
-  readonly requestedNextState: EditorCommandState;
-  readonly transaction: AppliedStructuralTransaction;
-  readonly targetId: string;
-}): PreparedEditorBlockGraphForwardOperation {
-  const affectedBlockIds = [...input.transaction.affectedBlockIds];
-  const removedBlockIds = affectedBlockIds.filter(
-    (blockId) =>
-      Boolean(input.previousState.blocks[blockId]) &&
-      !input.requestedNextState.blocks[blockId],
-  );
-  const upsertedBlocks = affectedBlockIds.flatMap((blockId) => {
-    const next = input.requestedNextState.blocks[blockId];
-    const previous = input.previousState.blocks[blockId];
-    return next &&
-      (!blocksEquivalent(previous, next) ||
-        structuralPlacementChanged(
-          input.previousState,
-          input.requestedNextState,
-          blockId,
-        ))
-      ? [next]
-      : [];
-  });
-  const resolvedPlacements = affectedBlockIds.flatMap((blockId) => {
-    const block = input.requestedNextState.blocks[blockId];
-    if (!block || block.tombstone) return [];
-    const siblings =
-      block.parentId === null
-        ? input.requestedNextState.rootBlockIds
-        : (input.requestedNextState.childIdsByParentId[block.parentId] ?? []);
-    const childIndex = siblings.indexOf(blockId);
-    return childIndex < 0
-      ? []
-      : [
-          {
-            blockId,
-            parentId: block.parentId,
-            childIndex,
-            previousSiblingId: siblings[childIndex - 1] ?? null,
-            nextSiblingId: siblings[childIndex + 1] ?? null,
-          },
-        ];
-  });
-  const forward = logicalBlockGraphOperation(
-    input.targetId,
-    {
-      affectedBlockIds,
-      upsertedBlocks,
-      removedBlockIds,
-      rootBlockIds: input.requestedNextState.rootBlockIds,
-      childIdsByParentId: input.requestedNextState.childIdsByParentId,
-      resolvedPlacements,
-    },
-    input.transaction.contentOperations,
-  );
-  return {
-    forward,
-    preparedOperation: {
-      operation: {
-        body: { kind: forward.graphKind, payload: forward.payload },
-        createdAt: Date.now(),
-      },
-      blocks: input.requestedNextState.blocks,
-      rootBlockIds: input.requestedNextState.rootBlockIds,
-      childIdsByParentId: input.requestedNextState.childIdsByParentId,
-      update: classifyEditorDocumentUpdate({
-        previousState: input.previousState,
-        nextState: input.requestedNextState,
-        candidateBlockIds: affectedBlockIds,
-        contentChangedBlockIds: input.transaction.contentOperations.map(
-          (batch) => batch.blockId,
-        ),
-      }),
-    },
-  };
-}
-
-function structuralPlacementChanged(
-  previousState: EditorCommandState,
-  nextState: EditorCommandState,
-  blockId: BlockId,
-): boolean {
-  const previous = previousState.blocks[blockId];
-  const next = nextState.blocks[blockId];
-  if (!previous || !next || previous.parentId !== next.parentId) return true;
-  const previousSiblings =
-    previous.parentId === null
-      ? previousState.rootBlockIds
-      : (previousState.childIdsByParentId[previous.parentId] ?? []);
-  const nextSiblings =
-    next.parentId === null
-      ? nextState.rootBlockIds
-      : (nextState.childIdsByParentId[next.parentId] ?? []);
-  return previousSiblings.indexOf(blockId) !== nextSiblings.indexOf(blockId);
 }
 
 export function createBlockGraphOperationPair(

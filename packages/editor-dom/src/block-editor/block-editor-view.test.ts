@@ -10,6 +10,7 @@ import { createBlockLocalProseMirrorState } from "./state/create-block-local-sta
 import { proseMirrorPositionToCanonicalOffset } from "../caret/coordinates/offset-codec.ts";
 import { createBlockLocalProseMirrorSchema } from "../schema/block-local/schema.ts";
 import { hardBreakNodeView } from "../nodeviews/hard-break-node-view.ts";
+import { isEditorOwnedDeletionTransaction } from "../plugins/input/deletion-beforeinput.ts";
 import { testBlockId, textEnd } from "../testing/block-editor-test-support.ts";
 
 describe("block editor view lifecycle", () => {
@@ -46,6 +47,69 @@ describe("block editor view lifecycle", () => {
     expect(proposals[0]?.transactions).toHaveLength(1);
     expect(proposals[0]?.transactions[0]?.docChanged).toBe(true);
     expect(view.state.doc.textContent).toBe("abc!");
+
+    view.destroy();
+    host.remove();
+  });
+
+  it("claims a browser-resolved backward deletion before native DOM mutation", () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const proposals: ProseMirrorStateProposal[] = [];
+    const emoji = "👨‍👩‍👧‍👦";
+    const view = createBlockLocalProseMirrorView({
+      mount: host,
+      blockId: testBlockId,
+      blockType: "paragraph",
+      doc: `A${emoji}B`,
+      proposalAdapter: acceptingAdapter((proposal) => proposals.push(proposal)),
+    });
+    view.focus();
+    const text = host.querySelector("[data-block-node]")?.firstChild;
+    expect(text).toBeInstanceOf(Text);
+    const event = deletionBeforeInput(
+      "deleteContentBackward",
+      text!,
+      1,
+      text!,
+      1 + emoji.length,
+    );
+
+    expect(host.dispatchEvent(event)).toBe(false);
+    expect(event.defaultPrevented).toBe(true);
+    expect(host.textContent).toBe("AB");
+    expect(view.state.doc.textContent).toBe("AB");
+    expect(proposals).toHaveLength(1);
+    expect(
+      proposals[0]?.transactions.some(isEditorOwnedDeletionTransaction),
+    ).toBe(true);
+
+    view.destroy();
+    host.remove();
+  });
+
+  it("retains native deletion fallback without one usable target range", () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const proposals: ProseMirrorStateProposal[] = [];
+    const view = createBlockLocalProseMirrorView({
+      mount: host,
+      blockId: testBlockId,
+      blockType: "paragraph",
+      doc: "abc",
+      proposalAdapter: acceptingAdapter((proposal) => proposals.push(proposal)),
+    });
+    view.focus();
+    const event = new InputEvent("beforeinput", {
+      bubbles: true,
+      cancelable: true,
+      inputType: "deleteContentBackward",
+    });
+
+    expect(host.dispatchEvent(event)).toBe(true);
+    expect(event.defaultPrevented).toBe(false);
+    expect(view.state.doc.textContent).toBe("abc");
+    expect(proposals).toHaveLength(0);
 
     view.destroy();
     host.remove();
@@ -329,4 +393,24 @@ function acceptingAdapter(
       return { kind: "accepted", state: proposal.proposedState };
     },
   };
+}
+
+function deletionBeforeInput(
+  inputType: "deleteContentBackward" | "deleteContentForward",
+  startContainer: Node,
+  startOffset: number,
+  endContainer: Node,
+  endOffset: number,
+): InputEvent {
+  const event = new InputEvent("beforeinput", {
+    bubbles: true,
+    cancelable: true,
+    inputType,
+  });
+  Object.defineProperty(event, "getTargetRanges", {
+    value: () => [
+      { startContainer, startOffset, endContainer, endOffset } as StaticRange,
+    ],
+  });
+  return event;
 }

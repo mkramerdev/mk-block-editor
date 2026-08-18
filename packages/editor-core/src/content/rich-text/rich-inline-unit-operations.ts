@@ -97,6 +97,60 @@ export function richInlineNodesToUnits(nodes: readonly RichTextInlineNodeJson[])
   return units;
 }
 
+export interface RichInlineNodeUnitPartition {
+  readonly size: number;
+  readonly before: RichTextInlineNodeJson | null;
+  readonly selected: RichTextInlineNodeJson | null;
+  readonly after: RichTextInlineNodeJson | null;
+}
+
+/** Splits one inline node at code-point offsets while scanning its text once. */
+export function partitionRichInlineNodeUnits(
+  node: RichTextInlineNodeJson,
+  from: number,
+  to: number,
+): RichInlineNodeUnitPartition {
+  if (!isTextNode(node)) {
+    const selected = from < 1 && to > 0;
+    return {
+      size: 1,
+      before: from >= 1 ? node : null,
+      selected: selected ? node : null,
+      after: to <= 0 ? node : null,
+    };
+  }
+  const startUnit = Math.max(0, Math.trunc(from));
+  const endUnit = Math.max(startUnit, Math.trunc(to));
+  let size = 0;
+  let startIndex: number | null = startUnit === 0 ? 0 : null;
+  let endIndex: number | null = endUnit === 0 ? 0 : null;
+  for (let index = 0; index < node.text.length; ) {
+    const codePoint = node.text.codePointAt(index);
+    index += codePoint !== undefined && codePoint > 0xffff ? 2 : 1;
+    size += 1;
+    if (size === startUnit) startIndex = index;
+    if (size === endUnit) endIndex = index;
+  }
+  startIndex ??= node.text.length;
+  endIndex ??= node.text.length;
+  return {
+    size,
+    before: textNodeUnitSlice(node, 0, startIndex),
+    selected: textNodeUnitSlice(node, startIndex, endIndex),
+    after: textNodeUnitSlice(node, endIndex, node.text.length),
+  };
+}
+
+function textNodeUnitSlice(
+  node: Extract<RichTextInlineNodeJson, { text: string }>,
+  from: number,
+  to: number,
+): RichTextInlineNodeJson | null {
+  if (from === to) return null;
+  if (from === 0 && to === node.text.length) return node;
+  return { ...node, text: node.text.slice(from, to) };
+}
+
 function isTextNode(
   node: RichTextInlineNodeJson,
 ): node is Extract<RichTextInlineNodeJson, { text: string }> {

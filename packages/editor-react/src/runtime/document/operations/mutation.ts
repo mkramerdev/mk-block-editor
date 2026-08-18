@@ -158,8 +158,3 @@ export type EditorTransactionResult =
       readonly operationResult?: EditorOperationResult;
       readonly cause?: unknown;
     };
-
-export function incrementEditorVersion(value: string): string {
-  const version = Number(value);
-  return Number.isFinite(version) ? String(version + 1) : "2";
-}

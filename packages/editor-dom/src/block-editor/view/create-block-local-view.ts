@@ -78,10 +78,10 @@ export function createBlockLocalProseMirrorViewProps(
     ...editorProps,
     state,
     nodeViews,
-    // Browser input has already established the native selection in this
-    // block-local view. Scrolling it from updateState forces synchronous
-    // layout on every accepted character; explicit editor navigation owns
-    // scrolling at its presentation boundary instead.
+    // Native input or an accepted editor-owned beforeinput transaction
+    // establishes the selection in this block-local view. Scrolling it from
+    // updateState forces synchronous layout on every accepted character;
+    // explicit editor navigation owns scrolling at its presentation boundary.
     handleScrollToSelection: () => true,
     editable: () => pluginOptions.editable !== false,
     attributes: viewAttributes,

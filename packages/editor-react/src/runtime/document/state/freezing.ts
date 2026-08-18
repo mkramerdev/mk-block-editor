@@ -5,8 +5,7 @@ import type { BlockId } from "@repo/editor-core/kernel";
 import { jsonValuesEqual } from "@repo/editor-core/kernel";
 import { normalizeBlockMetadata } from "@repo/editor-core/metadata";
 import { createVersionedBlockRecordOverlay } from "@repo/editor-core/editing";
-import type { EditorCommandState, EditorManifestState } from "./command-state.ts";
-import { splitEditorCommandState } from "./command-state.ts";
+import type { EditorManifestState } from "./command-state.ts";
 import { assertValidEditorSnapshotReconciliation } from "../controller/snapshot-reconciliation.ts";
 
 export function freezeManifestState(
@@ -255,22 +254,6 @@ function recordReferencesEqual<T>(
   );
 }
 
-export function freezeCommandState(
-  state: EditorCommandState,
-): EditorCommandState {
-  const { session, manifest } = splitEditorCommandState(state);
-  return Object.freeze({
-    ...session,
-    blocks: manifest.blocks,
-    rootBlockIds: manifest.rootBlockIds,
-    childIdsByParentId: manifest.childIdsByParentId,
-  });
-}
-
 export function freezeReadonlyArray<T>(value: readonly T[]): readonly T[] {
   return Object.isFrozen(value) ? value : Object.freeze([...value]);
-}
-
-export function freezeRecord<T extends object>(value: T): T {
-  return Object.isFrozen(value) ? value : (Object.freeze(value) as T);
 }

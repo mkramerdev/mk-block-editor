@@ -816,7 +816,7 @@ function createLocalBlockContentStoreRuntime(
     },
     readBlockPlainText(blockId, blockType) {
       requireCurrentBlock(blockId, blockType);
-      return plainTextForContent(blockType, contentById.get(blockId)!);
+      return plainTextForContent(contentById.get(blockId)!);
     },
     createTextAnchorInContext(lease, input) {
       try {

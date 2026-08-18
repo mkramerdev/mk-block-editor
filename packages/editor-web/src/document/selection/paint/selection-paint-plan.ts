@@ -1,6 +1,5 @@
 import type { BlockId } from "@repo/editor-core/kernel";
 import {
-  blockInternalSelectionSubsystemId,
   validateCommittedSelectionOwnership,
   type BlockInternalSelectionSubsystem,
   type CommittedSelectionSnapshot,
@@ -220,13 +219,6 @@ export function resolveAtomicSurfacePaintBounds<T>(
     : { ok: true, target };
 }
 
-export function selectionPaintOwnerSubsystem(
-  plan: LocalSelectionPaintPlan | null,
-): string | null {
-  return plan?.kind === "block-internal"
-    ? blockInternalSelectionSubsystemId(plan.subsystem)
-    : null;
-}
 
 function isContentPaint(value: unknown): value is { readonly kind: "content" } {
   return isRecord(value) && value.kind === "content";

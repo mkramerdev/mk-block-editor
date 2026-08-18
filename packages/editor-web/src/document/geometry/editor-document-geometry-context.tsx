@@ -20,16 +20,6 @@ export function EditorDocumentGeometryRegistrationProvider({
   );
 }
 
-export function useEditorDocumentGeometryRegistration(): EditorDocumentGeometryRegistration {
-  const registration = useContext(EditorDocumentGeometryRegistrationContext);
-  if (!registration) {
-    throw new Error(
-      "Mounted text geometry requires an editor document geometry owner",
-    );
-  }
-  return registration;
-}
-
 export function useOptionalEditorDocumentGeometryRegistration(): EditorDocumentGeometryRegistration | null {
   return useContext(EditorDocumentGeometryRegistrationContext);
 }

@@ -64,6 +64,7 @@ export type ContentOperationProposalOrigin =
 export type ContentSelectionPresentation =
   | "canonical-only"
   | "native-already-established"
+  | "installed-by-proposed-state"
   | "restore-native";
 
 export interface ContentOperationProposalAcceptanceContext {

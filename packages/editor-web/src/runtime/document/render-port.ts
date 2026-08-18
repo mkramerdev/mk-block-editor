@@ -143,10 +143,6 @@ export type EditableEditorRuntimePort<
   EditableRendererInfrastructure &
   EditableEditorInfrastructure;
 
-export type AnyEditorRenderPort =
-  | EditorRenderPort<ReadEditor>
-  | EditorRenderPort<EditableEditor>;
-
 export type AnyEditorRuntimePort =
   | ReadEditorRuntimePort
   | EditableEditorRuntimePort;

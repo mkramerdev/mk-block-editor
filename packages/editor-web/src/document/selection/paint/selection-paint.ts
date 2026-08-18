@@ -1,10 +1,7 @@
 import type { BlockId } from "@repo/editor-core/kernel";
 import {
-  isEditorSelectionTextAnchor,
   normalizeSelectionOffset,
-  type EditorLogicalSelectionPoint,
   type EditorSelectionRangeBlock,
-  type EditorSelectionSnapshot,
   type BlockInternalSelectionSubsystem,
 } from "@repo/editor-react/selection";
 
@@ -37,28 +34,6 @@ export type EditorSelectionPaint =
       selection: unknown;
       coverageResult: EditorSelectionRangeBlock["coverageResult"];
     };
-
-export interface DeriveEditorBlockSelectionPaintOptions {
-  blockId: BlockId;
-  snapshot: EditorSelectionSnapshot;
-  textLength?: number;
-}
-
-export function deriveEditorBlockSelectionPaint({
-  blockId,
-  snapshot,
-  textLength = 0,
-}: DeriveEditorBlockSelectionPaintOptions): EditorSelectionPaint {
-  if (snapshot.phase !== "dragging" && snapshot.phase !== "committed")
-    return noSelectionPaint();
-  if (!snapshotHasValidTextBoundaryAnchors(snapshot)) return noSelectionPaint();
-  const rangeBlock = deriveEditorSelectionRangeBlockForBlock(blockId, snapshot);
-  if (!rangeBlock) return noSelectionPaint();
-  return deriveEditorSelectionRangeBlockPaint({
-    rangeBlock,
-    textLength,
-  });
-}
 
 export function deriveEditorSelectionRangeBlockPaint({
   rangeBlock,
@@ -110,12 +85,6 @@ export function deriveEditorSelectionRangeBlockPaint({
   return noSelectionPaint();
 }
 
-export function isSelectionCoverageContentPaint(
-  rangeBlock: EditorSelectionRangeBlock,
-): boolean {
-  return isContentSelectionPaintDescriptor(rangeBlock.coverageResult.paint);
-}
-
 function isContentSelectionPaintDescriptor(
   value: unknown,
 ): value is { readonly kind: "content" } {
@@ -142,19 +111,6 @@ function blockSurfacePaintCovers(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-export function deriveEditorSelectionRangeBlockForBlock(
-  blockId: BlockId,
-  snapshot: EditorSelectionSnapshot,
-): EditorSelectionRangeBlock | null {
-  if (snapshot.phase !== "dragging" && snapshot.phase !== "committed")
-    return null;
-  if (!snapshotHasValidTextBoundaryAnchors(snapshot)) return null;
-  for (const rangeBlock of snapshot.rangeBlocks) {
-    if (rangeBlock.blockId === blockId) return rangeBlock;
-  }
-  return null;
 }
 
 function deriveTextPaintRange(
@@ -192,22 +148,4 @@ function clampSelectionPaintOffset(offset: number, textLength: number): number {
 
 function noSelectionPaint(): EditorSelectionPaint {
   return { kind: "none" };
-}
-
-function snapshotHasValidTextBoundaryAnchors(
-  snapshot: EditorSelectionSnapshot,
-): boolean {
-  const points = [
-    snapshot.anchor,
-    snapshot.focus,
-    snapshot.normalizedStart,
-    snapshot.normalizedEnd,
-  ];
-  return points.every((point) => !point || pointHasValidAnchorShape(point));
-}
-
-function pointHasValidAnchorShape(point: EditorLogicalSelectionPoint): boolean {
-  return (
-    point.textAnchor === null || isEditorSelectionTextAnchor(point.textAnchor)
-  );
 }

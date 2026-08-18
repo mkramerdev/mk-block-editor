@@ -1,8 +1,7 @@
 import type { RichTextDocumentNodeJson } from "../../content/rich-text/rich-inline-types.ts";
 import type { RichInlineContentNormalizationOptions } from "../../content/rich-text/rich-inline-content.ts";
 import {
-  applyLogicalContentOperationToRichTextDocument,
-  createInverseLogicalContentOperation,
+  prepareLogicalContentOperationToRichTextDocument,
   validateLogicalContentOperation,
   isValidPlainTextOperation,
   type ApplyLogicalContentOperationOptions,
@@ -440,20 +439,19 @@ export function prepareLogicalContentOperations(input: {
     if (affectedContentFailure) {
       return { ok: false, message: affectedContentFailure };
     }
-    const next = applyLogicalContentOperationToRichTextDocument(
+    const transition = prepareLogicalContentOperationToRichTextDocument(
       input.blockType,
       content,
       effectiveOperation,
       { ...input.options, validatedCanonicalBase: true },
     );
-    if (!next) {
+    if (!transition) {
       return {
         ok: false,
         message: "Logical content operation is inapplicable",
       };
     }
-    const inverse = createInverseLogicalContentOperation(effectiveOperation);
-    if (!inverse) {
+    if (!transition.inverseOperation) {
       return {
         ok: false,
         message: "Logical content operation is not reversibly representable",
@@ -463,17 +461,17 @@ export function prepareLogicalContentOperations(input: {
     // exclusive control. History freezes them at its durable ownership
     // boundary; recursively walking them here only repeats that work for every
     // character.
-    const operation = effectiveOperation;
-    const inverseOperation = inverse;
+    const operation = transition.operation;
+    const inverseOperation = transition.inverseOperation;
     transitions.push(
       Object.freeze({
-        before: content,
-        after: next,
+        before: transition.before,
+        after: transition.after,
         operation,
         inverseOperation,
       }),
     );
-    content = next;
+    content = transition.after;
     operations.push(operation);
     inverseOperations.unshift(inverseOperation);
   }

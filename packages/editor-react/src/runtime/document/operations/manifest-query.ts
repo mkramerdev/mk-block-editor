@@ -40,15 +40,6 @@ export function blocksEquivalent(left: VersionedBlock | undefined, right: Versio
     JSON.stringify(left.metadata ?? null) === JSON.stringify(right.metadata ?? null);
 }
 
-export function isLiveBlockInRecord(
-  blocks: Readonly<Record<BlockId, VersionedBlock>>,
-  blockId: BlockId | null | undefined,
-): blockId is BlockId {
-  if (!blockId) return false;
-  const block = blocks[blockId];
-  return Boolean(block && !block.tombstone);
-}
-
 export function parentKey(parentId: BlockId | null): string {
   return parentId ?? "root";
 }
@@ -60,9 +51,4 @@ export function sameBlockIdList(left: readonly BlockId[], right: readonly BlockI
     if (left[index] !== right[index]) return false;
   }
   return true;
-}
-
-export function clampIndex(value: number | undefined, length: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.min(Math.max(0, Math.trunc(value ?? 0)), length);
 }

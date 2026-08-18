@@ -6,6 +6,7 @@ export {
 } from "../block-editor/view/create-block-local-view.ts";
 export type { CreateBlockLocalProseMirrorViewOptions } from "../block-editor/options/view-options.ts";
 export { isComposing as isBlockEditorComposing } from "../plugins/input/composition.ts";
+export { isEditorOwnedDeletionTransaction } from "../plugins/input/deletion-beforeinput.ts";
 export { createBlockLocalDomPlugins } from "../plugins/aggregate/create-block-local-dom-plugins.ts";
 export type {
   BlockDomKeyBehaviorEvent,

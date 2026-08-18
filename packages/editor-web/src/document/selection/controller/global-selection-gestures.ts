@@ -712,7 +712,6 @@ export function useGlobalSelectionGestures({
       const start = resolveKeyboardSelectionStart(
         list,
         editor,
-        contentRuntime,
         selectionController,
       );
       if (!start) return;
@@ -1008,7 +1007,6 @@ function committedSelectionIsNoncollapsed(
 function resolveKeyboardSelectionStart(
   list: HTMLElement,
   editor: AnyEditorRuntimePort,
-  contentRuntime: EditorWebContentRuntime,
   controller: SelectionController,
 ): {
   readonly anchor: EditorLogicalSelectionPoint;

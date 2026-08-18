@@ -1,8 +1,6 @@
 import type { DOMOutputSpec, NodeSpec } from "../../prosemirror/index.ts";
 import { normalizeHeadingLevel } from "@repo/editor-core/document";
 
-export type BlockTextNodeName = "paragraph" | "heading";
-
 export const defaultBlockLocalNodeSpecs: Record<string, NodeSpec> = {
   doc: { content: "block" },
   text: { group: "inline" },

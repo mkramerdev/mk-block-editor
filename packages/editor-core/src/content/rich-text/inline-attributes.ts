@@ -24,15 +24,6 @@ export interface InlineCommandMetadata {
 
 export const richTextContexts = ["text"] as const satisfies readonly InlineTextContext[];
 
-export function inlineAttribute(
-  defaultValue: InlineAttributeJson,
-  required = false,
-  sanitize: InlineAttributeContract["sanitize"] = "string",
-  trim = true,
-): InlineAttributeContract {
-  return required ? { default: defaultValue, required, sanitize, trim } : { default: defaultValue, sanitize, trim };
-}
-
 export function sanitizeInlineAttrValue(value: unknown, contract: InlineAttributeContract): InlineAttributeJson {
   if (contract.sanitize === "json") return sanitizeInlineJsonAttr(value, contract.default);
   if (contract.sanitize === "safe-url") return sanitizeInlineUrl(value);

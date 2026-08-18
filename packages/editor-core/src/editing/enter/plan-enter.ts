@@ -329,7 +329,6 @@ export function planGenericEnter(
       }),
     );
     return success(
-      input,
       operations,
       expectedBlocks,
       inserted.selectionBlockId,
@@ -475,7 +474,6 @@ function planCanonicalListEnter(input: {
     }),
   );
   return success(
-    input.input,
     input.operations,
     input.expectedBlocks,
     inserted.selectionBlockId,
@@ -572,7 +570,6 @@ function planEmptyCanonicalListExit(input: {
     }),
   );
   return success(
-    input.input,
     input.operations,
     input.expectedBlocks,
     input.focused.id,
@@ -681,7 +678,6 @@ function planEmptyEnter(input: {
         }),
       );
       return success(
-        input.input,
         input.operations,
         input.expectedBlocks,
         input.focused.id,
@@ -832,7 +828,6 @@ function finishEmptyInsertion(
     );
   }
   return success(
-    input.input,
     input.operations,
     input.expectedBlocks,
     inserted.selectionBlockId,
@@ -1074,7 +1069,6 @@ function blockExpectation(block: VersionedBlock) {
 }
 
 function success(
-  input: PlanGenericEnterInput,
   operations: readonly StructuralTransactionOperation[],
   expectedBlocks: readonly ReturnType<typeof blockExpectation>[],
   selectionBlockId: BlockId,

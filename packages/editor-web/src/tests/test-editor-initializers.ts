@@ -12,7 +12,6 @@ import type {
 import { compileCanonicalEditorDefinition } from "../runtime/definition/compiled-editor-definition.ts";
 import { compileReadEditorDefinition } from "../runtime/definition/compile-read-editor-definition.ts";
 import type { EditorChangeCallback } from "../runtime/document/contracts.ts";
-import { useState } from "react";
 import { useEditor } from "../runtime/document/use-editor.ts";
 
 interface TestEditableOptions {
@@ -46,12 +45,4 @@ export function initializeTestReadEditor(options: {
 /** Test harness for legacy behavioral suites; production has no render-owned hook. */
 export function useTestEditor(options: TestEditableOptions): EditableEditor {
   return useEditor(options);
-}
-
-export function useTestReadEditor(options: {
-  readonly definition: ReadEditorDefinition;
-  readonly snapshot: EditorInstanceSnapshot;
-}): ReadEditor {
-  const [editor] = useState(() => initializeTestReadEditor(options));
-  return editor;
 }

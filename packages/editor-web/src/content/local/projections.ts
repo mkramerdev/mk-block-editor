@@ -45,7 +45,6 @@ export function defaultContentForBlockType(
 }
 
 export function plainTextForContent(
-  blockType: BlockType,
   content: EditorRawBlockContent,
 ): string {
   return isRichTextDocument(content)

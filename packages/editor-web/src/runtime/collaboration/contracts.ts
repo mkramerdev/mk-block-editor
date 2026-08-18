@@ -1,6 +1,4 @@
-import type { BlockType } from "@repo/editor-core/document";
 import type { BlockId } from "@repo/editor-core/kernel";
-import type { EditorContentOperationUpdate } from "@repo/editor-core/content/rich-text";
 import type {
   EditorLogicalSelectionPoint,
   StableEditorSelection,
@@ -40,13 +38,6 @@ export interface UntrustedAcceptedEditorTransaction {
   readonly graph: unknown;
   readonly metadata: unknown;
   readonly content: unknown;
-}
-
-export interface AcceptedEditorContentUpdate {
-  readonly blockId: BlockId;
-  readonly blockType: BlockType;
-  readonly update: EditorContentOperationUpdate;
-  readonly readProjection: import("@repo/editor-core/content/rich-text").RichTextDocumentNodeJson;
 }
 
 export type RemoteEditorAuthorSelection =

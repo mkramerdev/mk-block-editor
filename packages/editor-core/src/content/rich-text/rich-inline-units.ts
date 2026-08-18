@@ -1,5 +1,6 @@
 export {
   clampRichInlineOffset,
+  partitionRichInlineNodeUnits,
   richInlineContentSize,
   richInlineNodeSize,
   richInlineNodesToUnits,
@@ -8,3 +9,4 @@ export {
   sliceRichInlineNodeUnits,
   sliceRichInlineTextUnits,
 } from "./rich-inline-unit-operations.ts";
+export type { RichInlineNodeUnitPartition } from "./rich-inline-unit-operations.ts";

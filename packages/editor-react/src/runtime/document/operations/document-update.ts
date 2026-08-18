@@ -217,15 +217,6 @@ export function classifyEditorDocumentUpdate({
   });
 }
 
-export function editorDocumentUpdateChangesSelection(
-  update: EditorDocumentUpdate,
-): boolean {
-  return (
-    update.containerSequences.changedParentIds.length > 0 ||
-    update.selection.kind === "refresh"
-  );
-}
-
 export function editorDocumentUpdateHasChanges(
   update: EditorDocumentUpdate,
 ): boolean {

@@ -19,8 +19,11 @@ export function createActiveLinePlugin(
     key: activeLinePluginKey,
     state: {
       init: (_config, state) => buildActiveLineDecorations(state, className),
-      apply: (_transaction, _previous, _oldState, state) =>
-        buildActiveLineDecorations(state, className),
+      apply(transaction, previous) {
+        return transaction.docChanged
+          ? previous.map(transaction.mapping, transaction.doc)
+          : previous;
+      },
     },
     props: {
       decorations(state) {

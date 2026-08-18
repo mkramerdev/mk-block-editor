@@ -173,10 +173,6 @@ export interface EditorBlockCommandExecutionContext<
   readonly request: EditorBlockCommandRequest;
 }
 
-export type EditorBlockCommandExecutor<
-  TEditor extends EditableEditor = EditableEditor,
-> = (context: EditorBlockCommandExecutionContext<TEditor>) => boolean;
-
 export type EditorCommandId = string;
 export type EditorCommandScope = "document" | "block";
 export type EditorKeyChord = string;

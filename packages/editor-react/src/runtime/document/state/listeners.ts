@@ -9,10 +9,6 @@ export function getOrCreateEditorListenerSet<Key>(
   return listeners;
 }
 
-export function notifyEditorListeners(listeners: ReadonlySet<() => void>): void {
-  for (const listener of [...listeners]) listener();
-}
-
 export function noop(): void {
   return undefined;
 }

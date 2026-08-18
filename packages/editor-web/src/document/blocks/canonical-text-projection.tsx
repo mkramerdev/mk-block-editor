@@ -34,7 +34,6 @@ export function useCanonicalTextProjection({
     () => contentRuntime.readBlockProjection(block.id, block.type),
   );
   const readText = readTextModelFromProjection(
-    block.type,
     readProjection,
     inlineAtoms,
     inlineMarks,
@@ -140,7 +139,6 @@ interface ReadInlineAtomLeaf extends ReadTextLeafBase {
 type ReadTextLeaf = ReadPlainTextLeaf | ReadHardBreakLeaf | ReadInlineAtomLeaf;
 
 function readTextModelFromProjection(
-  blockType: VersionedBlock["type"],
   content: ReturnType<EditorWebContentRuntime["readBlockProjection"]>,
   inlineAtoms: ReadonlyMap<string, InlineAtomDefinition>,
   inlineMarks: readonly InlineMarkDefinition[],

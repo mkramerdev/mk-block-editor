@@ -11,10 +11,7 @@ import {
 } from "@repo/editor-core/document";
 import { jsonValuesEqual, type BlockId } from "@repo/editor-core/kernel";
 import { validateStructuralDocument } from "@repo/editor-core/editing";
-import type { EditorImplementation } from "@repo/editor-react/editor";
 import type {
-  EditorContentDataReconciliation,
-  EditorContentRuntime,
   EditorContentRuntimeSource,
 } from "../content/content-runtime.ts";
 import { validateEditorInlineAtomOccurrence } from "../definition/inline-atoms.ts";
@@ -40,28 +37,6 @@ export function createEditorContentStartup(
       ? validatedSnapshot.canonicalContent
       : { ...snapshot.content },
   };
-}
-
-export function reconcileEditorSnapshot(
-  editor: Pick<EditorImplementation, "reconcileEditorSnapshotForRecovery">,
-  contentRuntime: EditorContentRuntime,
-  compiledDefinition: CompiledCanonicalEditorDefinition,
-  snapshot: EditorInstanceSnapshot,
-): void {
-  const definition = compiledDefinition.definition;
-  assertValidEditorSnapshotForStartupOrRecovery(snapshot, compiledDefinition);
-  contentRuntime.reconcileContentData(createSnapshotContent(snapshot));
-  editor.reconcileEditorSnapshotForRecovery({
-    origin: "external-snapshot",
-    blockGraphVersion: snapshot.blockGraphVersion,
-    blocks: materializeVersionedEditorBlocks(
-      snapshot.blocks,
-      snapshot.blockGraphVersion,
-      definition.blocks,
-    ),
-    rootBlockIds: snapshot.rootBlockIds,
-    childIdsByParentId: snapshot.childIdsByParentId,
-  });
 }
 
 export function materializeVersionedEditorBlocks(
@@ -145,19 +120,6 @@ function blocksMatchRecoveredVisibleState(
     jsonValuesEqual(previous.metadata ?? {}, next.metadata ?? {}) &&
     jsonValuesEqual(previous.tombstone, next.tombstone)
   );
-}
-
-function createSnapshotContent(
-  snapshot: EditorInstanceSnapshot,
-): EditorContentDataReconciliation {
-  return {
-    blockGraphVersion: snapshot.blockGraphVersion,
-    blockIds: getCanonicalBlockOrder(snapshot),
-    blockTypesById: blockTypesForSnapshot(snapshot),
-    opaqueContentCheckpoints: snapshot.opaqueContentCheckpoints,
-    contentById: { ...snapshot.content },
-    loadedAt: Date.now(),
-  };
 }
 
 function blockTypesForSnapshot(

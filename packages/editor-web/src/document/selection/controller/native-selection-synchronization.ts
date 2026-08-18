@@ -129,7 +129,6 @@ export function useNativeSelectionSynchronization({
       const anchor = logicalPointFromDomSelection(
         selection.anchorNode,
         selection.anchorOffset,
-        list,
         editor,
         contentRuntime,
         selectionController,
@@ -137,17 +136,18 @@ export function useNativeSelectionSynchronization({
         selection.isCollapsed,
         internalHostTextSelection,
       );
-      const focus = logicalPointFromDomSelection(
-        selection.focusNode,
-        selection.focusOffset,
-        list,
-        editor,
-        contentRuntime,
-        selectionController,
-        leases,
-        selection.isCollapsed,
-        internalHostTextSelection,
-      );
+      const focus = selection.isCollapsed
+        ? anchor
+        : logicalPointFromDomSelection(
+            selection.focusNode,
+            selection.focusOffset,
+            editor,
+            contentRuntime,
+            selectionController,
+            leases,
+            false,
+            internalHostTextSelection,
+          );
       if (!anchor || !focus) return;
       const graphRevision = editor.getSelectionGraphRevision();
       selectionController.commitCanonicalSelection(
@@ -291,11 +291,13 @@ function domSelectionMatchesCanonicalInputProjection(
     selection.anchorNode,
     selection.anchorOffset,
   );
-  const focusOffset = textOffsetFromDomPoint(
-    anchorRoot,
-    selection.focusNode,
-    selection.focusOffset,
-  );
+  const focusOffset = selection.isCollapsed
+    ? anchorOffset
+    : textOffsetFromDomPoint(
+        anchorRoot,
+        selection.focusNode,
+        selection.focusOffset,
+      );
   const canonical = controller.getCanonicalSnapshot();
   if (
     anchorOffset === null ||
@@ -384,7 +386,6 @@ function nativeInteractiveControlOwnsSelection(list: HTMLElement): boolean {
 function logicalPointFromDomSelection(
   node: Node,
   offset: number,
-  list: HTMLElement,
   editor: AnyEditorRuntimePort,
   contentRuntime: EditorWebContentRuntime,
   selectionController: SelectionController,
