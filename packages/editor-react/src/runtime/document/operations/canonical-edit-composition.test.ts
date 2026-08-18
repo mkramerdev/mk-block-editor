@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createBlockRichTextContentFromPlainText,
   extractPlainTextFromRichTextDocument,
+  type RichTextDocumentNodeJson,
 } from "@repo/editor-core/content/rich-text";
 import type { BlockDefinition } from "@repo/editor-core/definitions";
 import {
@@ -323,6 +324,155 @@ describe("canonical structural edit composition", () => {
     });
   });
 
+  it("settles a two-block paste before the original caret suffix", () => {
+    const graph = graphWithText("leftright");
+    const fragment = twoTextBlockFragment("one", "two");
+    const trailingId = fragment.end.blockId;
+    const result = resolveCanonicalEditComposition({
+      graph,
+      target: {
+        kind: "caret",
+        blockId: graph.block.id,
+        offset: 4,
+        graphRevision: 7,
+        expectedContentVersion: "1",
+      },
+      fragment,
+    });
+
+    expect(
+      result?.insertions?.[0]?.fragment.blocks.find(
+        (block) => block.id === trailingId,
+      )?.plainText,
+    ).toBe("tworight");
+    expect(result?.finalSelection).toEqual({
+      kind: "text",
+      blockId: trailingId,
+      offset: 3,
+    });
+  });
+
+  it("settles a multi-block replacement at the trailing inserted join survivor", () => {
+    const graph = graphWithTexts(["leftX", "Yright"]);
+    const [first, last] = graph.blocks;
+    if (!first || !last) throw new Error("Expected two graph blocks");
+    const fragment = twoTextBlockFragment("one", "two");
+    const trailingId = fragment.end.blockId;
+    const range: StructuralEditRange = {
+      graphRevision: 7,
+      selectionRevision: 3,
+      blocks: [
+        {
+          kind: "text",
+          blockId: first.id,
+          blockType: first.type,
+          parentId: null,
+          from: 4,
+          to: 5,
+          expectedContentVersion: "1",
+        },
+        {
+          kind: "text",
+          blockId: last.id,
+          blockType: last.type,
+          parentId: null,
+          from: 0,
+          to: 1,
+          expectedContentVersion: "1",
+        },
+      ],
+      start: { kind: "text", blockId: first.id, offset: 4 },
+      end: { kind: "text", blockId: last.id, offset: 1 },
+    };
+    const result = resolveCanonicalEditComposition({
+      graph,
+      target: { kind: "selection", range },
+      fragment,
+    });
+
+    expect(result?.deletion?.blocks).toMatchObject([
+      { blockId: first.id, from: 4, to: 5 },
+      { blockId: last.id, from: 0, to: 1 },
+    ]);
+    expect(result?.joins).toEqual([
+      { leftBlockId: first.id, rightBlockId: fragment.start.blockId },
+      { leftBlockId: trailingId, rightBlockId: last.id },
+    ]);
+    expect(result?.finalSelection).toEqual({
+      kind: "text",
+      blockId: trailingId,
+      offset: 3,
+    });
+  });
+
+  it("uses rich-text content size for a pasted endpoint containing an inline atom", () => {
+    const graph = graphWithText("LR");
+    const richContent = {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            { type: "text", text: "A" },
+            { type: "mention", metadata: { id: "u1" } },
+            { type: "text", text: "Z" },
+          ],
+        },
+      ],
+    } satisfies RichTextDocumentNodeJson;
+    const fragment = twoTextBlockFragment("one", richContent);
+    const trailingId = fragment.end.blockId;
+    const trailing = fragment.blocks.find((block) => block.id === trailingId);
+    expect(trailing?.plainText).toBe("AZ");
+    const result = resolveCanonicalEditComposition({
+      graph,
+      target: {
+        kind: "caret",
+        blockId: graph.block.id,
+        offset: 1,
+        graphRevision: 7,
+        expectedContentVersion: "1",
+      },
+      fragment,
+    });
+
+    expect(result?.finalSelection).toEqual({
+      kind: "text",
+      blockId: trailingId,
+      offset: 3,
+    });
+  });
+
+  it("keeps a wrapper-transparent endpoint on its nested text descendant", () => {
+    const graph = graphWithText("LR");
+    const fragment = wrappedTextFragment("inside");
+    const endpointId = fragment.end.blockId;
+    const wrapperId = fragment.rootBlockIds[0];
+    const result = resolveCanonicalEditComposition({
+      graph,
+      target: {
+        kind: "caret",
+        blockId: graph.block.id,
+        offset: 1,
+        graphRevision: 7,
+        expectedContentVersion: "1",
+      },
+      fragment,
+    });
+
+    expect(result?.finalSelection).toEqual({
+      kind: "text",
+      blockId: endpointId,
+      offset: 6,
+    });
+    expect(result?.finalSelection?.blockId).not.toBe(wrapperId);
+    expect(
+      result?.insertions?.[0]?.fragment.blocks.some(
+        (block) => block.id === endpointId && block.type === "collectionText",
+      ),
+    ).toBe(true);
+  });
+
   it("retargets open imported text to the caret text definition", () => {
     const graph = graphWithCollectionText("LR");
     const fragment = textFragment("I", "text");
@@ -367,7 +517,7 @@ describe("canonical structural edit composition", () => {
     });
   });
 
-  it("executes one transaction and only the three ordinary mutations", () => {
+  it("executes one transaction and settles selection after ordinary mutations", () => {
     const order: string[] = [];
     const editor = {
       transaction: vi.fn((callback: () => unknown) => {
@@ -378,6 +528,9 @@ describe("canonical structural edit composition", () => {
       deleteRange: vi.fn(() => order.push("deleteRange")),
       insertBlocks: vi.fn(() => order.push("insertBlocks")),
       joinTextBlocks: vi.fn(() => order.push("joinTextBlocks")),
+      setTransactionSelection: vi.fn(() =>
+        order.push("setTransactionSelection"),
+      ),
     };
     const graph = graphWithText("LR");
     const fragment = textFragment("I", "text");
@@ -401,12 +554,18 @@ describe("canonical structural edit composition", () => {
           rightBlockId: fragment.start.blockId,
         },
       ],
+      finalSelection: {
+        kind: "text",
+        blockId: graph.block.id,
+        offset: 1,
+      },
     }, { provenance: null });
     expect(order).toEqual([
       "transaction",
       "deleteRange",
       "insertBlocks",
       "joinTextBlocks",
+      "setTransactionSelection",
     ]);
     expect(editor.transaction).toHaveBeenCalledOnce();
   });
@@ -519,6 +678,35 @@ function graphWithCollectionText(text: string) {
   };
 }
 
+function graphWithTexts(texts: readonly string[]) {
+  const contents = texts.map((text) =>
+    createBlockRichTextContentFromPlainText("paragraph", text),
+  );
+  const blocks: VersionedBlock[] = texts.map((text, index) => ({
+    ...createCanonicalBlockRecord({
+      type: "paragraph",
+      parentId: null,
+      content: contents[index],
+      plainText: text,
+    }),
+    metadataVersion: "1",
+    contentVersion: "1",
+    tombstone: false,
+  }));
+  const blockById = new Map(blocks.map((block) => [block.id, block]));
+  const contentById = new Map(
+    blocks.map((block, index) => [block.id, contents[index]!]),
+  );
+  return {
+    blockDefinitions: definitions,
+    blocks,
+    getBlock: (blockId: BlockId) => blockById.get(blockId) ?? null,
+    getRootBlockIds: () => blocks.map((block) => block.id),
+    getChildBlockIds: () => [],
+    readBlockContent: (blockId: BlockId) => contentById.get(blockId) ?? null,
+  };
+}
+
 function textFragment(
   text: string,
   boundary: "text" | "block",
@@ -535,6 +723,39 @@ function textFragment(
     rootBlockIds: [record.id],
     start: { kind: boundary, blockId: record.id },
     end: { kind: boundary, blockId: record.id },
+    blockDefinitions: definitions,
+  });
+}
+
+function twoTextBlockFragment(
+  firstText: string,
+  secondValue: string | RichTextDocumentNodeJson,
+): CanonicalBlockFragment {
+  const firstContent = createBlockRichTextContentFromPlainText(
+    "paragraph",
+    firstText,
+  );
+  const secondContent =
+    typeof secondValue === "string"
+      ? createBlockRichTextContentFromPlainText("paragraph", secondValue)
+      : secondValue;
+  const first = createCanonicalBlockRecord({
+    type: "paragraph",
+    parentId: null,
+    content: firstContent,
+    plainText: extractPlainTextFromRichTextDocument(firstContent),
+  });
+  const second = createCanonicalBlockRecord({
+    type: "paragraph",
+    parentId: null,
+    content: secondContent,
+    plainText: extractPlainTextFromRichTextDocument(secondContent),
+  });
+  return createCanonicalBlockFragment({
+    blocks: [first, second],
+    rootBlockIds: [first.id, second.id],
+    start: { kind: "text", blockId: first.id },
+    end: { kind: "text", blockId: second.id },
     blockDefinitions: definitions,
   });
 }

@@ -53,6 +53,7 @@ export function resolveCanonicalEditComposition(input: {
 }): ResolvedStructuralEditComposition | null {
   const rootTypes = canonicalFragmentRootTypes(input.fragment);
   if (input.target.kind === "placement") {
+    const finalSelection = fragmentTextEndpoint(input.fragment);
     return {
       insertions: [
         {
@@ -60,6 +61,7 @@ export function resolveCanonicalEditComposition(input: {
           fragment: input.fragment,
         },
       ],
+      ...(finalSelection ? { finalSelection } : {}),
     };
   }
   if (input.target.kind === "caret") {
@@ -131,6 +133,7 @@ function resolveCaretComposition(
     target.offset > size
   )
     return null;
+  const pastedEndpoint = fragmentTextEndpoint(fragment);
   if (size === 0 && !boundaryTargetsRoot(fragment, fragment.start)) {
     const replacementPlacement = replacementPlacementForRootTypes(
       graph,
@@ -141,10 +144,10 @@ function resolveCaretComposition(
       return {
         deletion: blockRange(block, target.graphRevision),
         insertions: [{ placement: replacementPlacement, fragment }],
+        ...(pastedEndpoint ? { finalSelection: pastedEndpoint } : {}),
       };
     }
   }
-  const inlineInsertionLength = openTextFragmentLength(fragment);
   const suffix = sliceRichTextDocument(
     block.type,
     content,
@@ -170,6 +173,20 @@ function resolveCaretComposition(
     target.offset < size
       ? textTailRange(block, target.offset, size, target.graphRevision)
       : undefined;
+  const joins = boundaryTargetsRoot(fragment, fragment.start)
+    ? [
+        {
+          leftBlockId: block.id,
+          rightBlockId: fragment.start.blockId,
+        },
+      ]
+    : undefined;
+  const finalSelection = mapEndpointThroughStartJoin(
+    pastedEndpoint,
+    fragment,
+    block.id,
+    target.offset,
+  );
   return {
     ...(deletion ? { deletion } : {}),
     insertions: [
@@ -178,25 +195,8 @@ function resolveCaretComposition(
         fragment,
       },
     ],
-    ...(boundaryTargetsRoot(fragment, fragment.start)
-      ? {
-          joins: [
-            {
-              leftBlockId: block.id,
-              rightBlockId: fragment.start.blockId,
-            },
-          ],
-        }
-      : {}),
-    ...(inlineInsertionLength === null
-      ? {}
-      : {
-          finalSelection: {
-            kind: "text" as const,
-            blockId: block.id,
-            offset: target.offset + inlineInsertionLength,
-          },
-        }),
+    ...(joins ? { joins } : {}),
+    ...(finalSelection ? { finalSelection } : {}),
   };
 }
 
@@ -248,7 +248,6 @@ function resolveSelectionComposition(
 
   let range = inputRange;
   let fragment = inputFragment;
-  let finalSelection: ResolvedStructuralEditComposition["finalSelection"];
   if (
     graph.blockDefinitions[firstBlock.type]?.kind === "text" &&
     !directPlacementAccepts(
@@ -266,6 +265,7 @@ function resolveSelectionComposition(
     if (!retargeted) return null;
     fragment = retargeted;
   }
+  const pastedEndpoint = fragmentTextEndpoint(fragment);
   if (
     first.blockId === last.blockId &&
     first.kind === "text" &&
@@ -289,10 +289,10 @@ function resolveSelectionComposition(
         return {
           deletion: blockRange(firstBlock, inputRange.graphRevision),
           insertions: [{ placement: replacementPlacement, fragment }],
+          ...(pastedEndpoint ? { finalSelection: pastedEndpoint } : {}),
         };
       }
     }
-    const inlineInsertionLength = openTextFragmentLength(fragment);
     const suffix = sliceRichTextDocument(
       last.blockType,
       content,
@@ -312,13 +312,6 @@ function resolveSelectionComposition(
       blocks: Object.freeze([{ ...last, to: size }]),
       end: { kind: "text", blockId: last.blockId, offset: size },
     };
-    if (inlineInsertionLength !== null) {
-      finalSelection = {
-        kind: "text",
-        blockId: first.blockId,
-        offset: first.from + inlineInsertionLength,
-      };
-    }
   }
 
   const firstSurvives = first.kind !== "block";
@@ -350,6 +343,14 @@ function resolveSelectionComposition(
       rightBlockId: last.blockId,
     });
   }
+  const finalSelection = firstSurvives
+    ? mapEndpointThroughStartJoin(
+        pastedEndpoint,
+        fragment,
+        first.blockId,
+        first.kind === "text" ? first.from : 0,
+      )
+    : pastedEndpoint;
   return {
     deletion: range,
     insertions: [{ placement, fragment }],
@@ -358,20 +359,43 @@ function resolveSelectionComposition(
   };
 }
 
-function openTextFragmentLength(
+function fragmentTextEndpoint(
   fragment: CanonicalBlockFragment,
-): number | null {
-  if (
-    fragment.start.kind !== "text" ||
-    fragment.end.kind !== "text" ||
-    fragment.start.blockId !== fragment.end.blockId ||
-    !fragment.rootBlockIds.includes(fragment.start.blockId)
-  )
-    return null;
+): Extract<
+  NonNullable<ResolvedStructuralEditComposition["finalSelection"]>,
+  { readonly kind: "text" }
+> | null {
+  if (fragment.end.kind !== "text") return null;
   const record = fragment.blocks.find(
-    (candidate) => candidate.id === fragment.start.blockId,
+    (candidate) => candidate.id === fragment.end.blockId,
   );
-  return record?.content ? richTextDocumentContentSize(record.content) : null;
+  return record?.content
+    ? {
+        kind: "text",
+        blockId: record.id,
+        offset: richTextDocumentContentSize(record.content),
+      }
+    : null;
+}
+
+function mapEndpointThroughStartJoin(
+  endpoint: ReturnType<typeof fragmentTextEndpoint>,
+  fragment: CanonicalBlockFragment,
+  survivorBlockId: BlockId,
+  prefixLength: number,
+): ReturnType<typeof fragmentTextEndpoint> {
+  if (
+    !endpoint ||
+    !boundaryTargetsRoot(fragment, fragment.start) ||
+    endpoint.blockId !== fragment.start.blockId
+  ) {
+    return endpoint;
+  }
+  return {
+    kind: "text",
+    blockId: survivorBlockId,
+    offset: prefixLength + endpoint.offset,
+  };
 }
 
 function retargetOpenRootTextRecords(
