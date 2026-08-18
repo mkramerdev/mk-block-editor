@@ -300,19 +300,18 @@ export function createYjsBlockContentRuntime(
       graphRevision = input.blockGraphVersion;
       const before = state.projectionSnapshot;
       const context = state.peekContext();
+      const nextCheckpoint = mergeOpaqueBlockUpdate(
+        state.opaqueCheckpoint,
+        input.update,
+      );
       if (context) {
         const origin = typeof input.origin === "object" && input.origin
           ? input.origin
           : HYDRATION_ORIGIN;
         permittedInternalOrigins.add(origin);
         applyYjsBlockContentUpdate(context, input.update.payload.copy(), origin);
-        state.opaqueCheckpoint = opaqueCheckpointFromContext(context);
-      } else {
-        state.opaqueCheckpoint = mergeOpaqueBlockUpdate(
-          state.opaqueCheckpoint,
-          input.update,
-        );
       }
+      state.opaqueCheckpoint = nextCheckpoint;
       state.acceptedRevision = input.revision;
       state.contentRevision += 1;
       if (!contentEqual(before, next)) {
@@ -918,11 +917,6 @@ export function createYjsBlockContentRuntime(
                   block.remoteUpdate.payload.copy(),
                   origin,
                 );
-              } else {
-                live.opaqueCheckpoint = mergeOpaqueBlockUpdate(
-                  live.opaqueCheckpoint,
-                  block.remoteUpdate,
-                );
               }
             }
           } else if (block.introduced) {
@@ -951,14 +945,15 @@ export function createYjsBlockContentRuntime(
               `Yjs commit changed ${block.blockId} without an incremental update`,
             );
           }
+          const nextCheckpoint = mergeOpaqueBlockUpdate(
+            live.opaqueCheckpoint,
+            operationUpdate,
+          );
           live.contentRevision = block.baseToken.contentRevision + 1;
           live.mutationEpoch += 1;
           live.blockType = block.blockType;
-          const liveContext = live.peekContext();
-          if (liveContext) {
-            live.opaqueCheckpoint = opaqueCheckpointFromContext(liveContext);
-          }
-           live.projectionSnapshot = ownProjection(nextProjection);
+          live.opaqueCheckpoint = nextCheckpoint;
+          live.projectionSnapshot = ownProjection(nextProjection);
           appliedBlocks.push(
             ownAppliedBlock({
               blockId: block.blockId,

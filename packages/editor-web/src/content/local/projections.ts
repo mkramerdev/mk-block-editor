@@ -58,3 +58,23 @@ export function cloneContent<T extends EditorRawBlockContent | undefined>(
   if (content === undefined) return content;
   return cloneJsonValue(content) as T;
 }
+
+const ownedContentValues = new WeakSet<object>();
+
+/**
+ * Establishes the local runtime's immutable ownership of canonical content.
+ * Prepared edits structurally share already-owned subtrees, so the ownership
+ * walk only visits the newly created path on subsequent edits.
+ */
+export function ownContent<T extends EditorRawBlockContent>(content: T): T {
+  ownContentValue(content);
+  return content;
+}
+
+function ownContentValue(value: unknown): void {
+  if (value === null || typeof value !== "object") return;
+  if (ownedContentValues.has(value)) return;
+  for (const child of Object.values(value)) ownContentValue(child);
+  Object.freeze(value);
+  ownedContentValues.add(value);
+}

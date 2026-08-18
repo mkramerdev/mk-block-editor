@@ -28,6 +28,49 @@ const firstBlockId = asBlockId("01890f07-1c00-7000-8000-000000008001");
 const secondBlockId = asBlockId("01890f07-1c00-7000-8000-000000008002");
 
 describe("local content prepare/apply/release protocol", () => {
+  it("installs the exact deeply immutable prepared projection", () => {
+    const runtime = createRuntime({
+      [firstBlockId]: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              {
+                type: "text",
+                text: "fixed",
+                marks: [{ type: "strong" }],
+              },
+              { type: "text", text: "tail" },
+            ],
+          },
+        ],
+      },
+    });
+    const before = runtime.readBlockProjection(firstBlockId, "paragraph");
+    const prepared = requirePreparation(
+      prepareInsert(runtime, firstBlockId, 9, " after"),
+    );
+    const preparedProjection = runtime.readValidatedBlockContent(
+      prepared,
+      firstBlockId,
+      "paragraph",
+    );
+
+    expect(preparedProjection).not.toBe(before);
+    expectDeeplyFrozen(before);
+    expectDeeplyFrozen(preparedProjection);
+    expect(preparedProjection?.content[0]?.content?.[0]).toBe(
+      before.content[0]?.content?.[0],
+    );
+
+    const applied = runtime.commitContent(prepared);
+    expect(runtime.readBlockProjection(firstBlockId, "paragraph")).toBe(
+      preparedProjection,
+    );
+    runtime.publishContentCommit(applied);
+  });
+
   it("prepares without mutation or publication and applies silently", () => {
     const runtime = createRuntime({ [firstBlockId]: "before" });
     const blockListener = vi.fn();
@@ -668,19 +711,21 @@ describe("local content envelopes", () => {
   });
 });
 
-function createRuntime(textByBlockId: Record<BlockId, string>) {
+function createRuntime(
+  contentByBlockId: Record<BlockId, string | RichTextDocumentNodeJson>,
+) {
   const blockTypesById = {} as Record<BlockId, "paragraph">;
   const contentById = {} as Record<BlockId, RichTextDocumentNodeJson>;
   const opaqueContentCheckpoints = {} as Record<
     BlockId,
     EditorOpaqueContentCheckpoint
   >;
-  for (const [blockId, text] of Object.entries(textByBlockId) as [
+  for (const [blockId, value] of Object.entries(contentByBlockId) as [
     BlockId,
-    string,
+    string | RichTextDocumentNodeJson,
   ][]) {
     blockTypesById[blockId] = "paragraph";
-    contentById[blockId] = richText(text);
+    contentById[blockId] = typeof value === "string" ? richText(value) : value;
     const checkpoint = encodeLocalContentCheckpoint(contentById[blockId]);
     opaqueContentCheckpoints[blockId] = {
       kind: checkpoint.kind,
@@ -783,4 +828,10 @@ function resolveAnchor(
 
 function richText(text: string): RichTextDocumentNodeJson {
   return createBlockRichTextContentFromPlainText("paragraph", text);
+}
+
+function expectDeeplyFrozen(value: unknown): void {
+  if (value === null || typeof value !== "object") return;
+  expect(Object.isFrozen(value)).toBe(true);
+  for (const child of Object.values(value)) expectDeeplyFrozen(child);
 }

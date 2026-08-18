@@ -22,6 +22,12 @@ describe("ordinary content commit architecture", () => {
     expect(ordinaryCommit).not.toContain("new Doc");
     expect(ordinaryCommit).not.toContain("encodeCheckpoint");
     expect(ordinaryCommit).not.toContain("readContextProjection");
+    expect(ordinaryCommit).not.toContain(
+      "opaqueCheckpointFromContext(liveContext)",
+    );
+    expect(ordinaryCommit).toContain(
+      "mergeOpaqueBlockUpdate(\n            live.opaqueCheckpoint,\n            operationUpdate,\n          )",
+    );
     expect(ordinaryCommit.match(/writeExplicitProjection\(/gu)).toHaveLength(1);
     expect(ordinaryCommit).toContain("} else if (block.introduced) {");
     expect(ordinaryCommit).toContain(

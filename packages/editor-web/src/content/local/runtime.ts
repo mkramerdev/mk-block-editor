@@ -45,6 +45,7 @@ import {
 import {
   cloneContent,
   defaultContentForBlockType,
+  ownContent,
   plainTextForContent,
   readReconciliationProjection,
   readSourceBlockTypes,
@@ -197,7 +198,7 @@ function createLocalBlockContentStoreRuntime(
       inlineAtoms,
     );
     blockTypeById.set(blockId, blockType);
-    contentById.set(blockId, content);
+    contentById.set(blockId, ownContent(content));
     contentRevisionById.set(blockId, 0);
     anchorEpochById.set(blockId, nextAnchorEpoch++);
     anchorRevisionById.set(blockId, 0);
@@ -274,11 +275,8 @@ function createLocalBlockContentStoreRuntime(
         if (!checkpoint || projection === undefined) {
           throw new Error(`Text block ${blockId} requires projection and checkpoint`);
         }
-        const next = normalizeProjection(
-          blockType,
-          projection,
-          inlineMarks,
-          inlineAtoms,
+        const next = ownContent(
+          normalizeProjection(blockType, projection, inlineMarks, inlineAtoms),
         );
         const previous = contentById.get(blockId);
         const previousType = blockTypeById.get(blockId);
@@ -314,16 +312,18 @@ function createLocalBlockContentStoreRuntime(
       requireLiveRuntime();
       assertValidBlockGraphVersion(input.blockGraphVersion);
       requireCurrentBlock(input.blockId, input.blockType);
-      const next = normalizeProjection(
-        input.blockType,
-        input.readProjection,
-        inlineMarks,
-        inlineAtoms,
+      const next = ownContent(
+        normalizeProjection(
+          input.blockType,
+          input.readProjection,
+          inlineMarks,
+          inlineAtoms,
+        ),
       );
       graphRevision = input.blockGraphVersion;
       const previous = contentById.get(input.blockId)!;
       if (rawContentEqual(previous, next)) return;
-      contentById.set(input.blockId, cloneContent(next));
+      contentById.set(input.blockId, next);
       contentRevisionById.set(
         input.blockId,
         (contentRevisionById.get(input.blockId) ?? 0) + 1,
@@ -409,7 +409,7 @@ function createLocalBlockContentStoreRuntime(
         removedBlocks.push({
           blockId,
           blockType,
-          content: cloneContent(content),
+          content,
           contentRevision: contentRevisionById.get(blockId) ?? 0,
           inverseContentOperations: Object.freeze(inverse ? [inverse] : []),
         });
@@ -430,8 +430,10 @@ function createLocalBlockContentStoreRuntime(
           working.set(
             blockId,
             introduced
-              ? defaultContentForBlockType(change.baseToken.blockType)
-              : cloneContent(contentById.get(blockId)!),
+              ? ownContent(
+                  defaultContentForBlockType(change.baseToken.blockType),
+                )
+              : contentById.get(blockId)!,
           );
           bases.set(blockId, freezeBaseToken(change.baseToken));
         }
@@ -467,14 +469,14 @@ function createLocalBlockContentStoreRuntime(
             blockId,
           };
         }
-        working.set(blockId, result.content);
+        working.set(blockId, ownContent(result.content));
         preparedOperationsByBlock.set(blockId, result);
       }
       for (const [blockId, blockType] of Object.entries(
         input.introducedBlocks ?? {},
       ) as [BlockId, BlockType][]) {
         if (working.has(blockId)) continue;
-        working.set(blockId, defaultContentForBlockType(blockType));
+        working.set(blockId, ownContent(defaultContentForBlockType(blockType)));
         bases.set(
           blockId,
           freezeBaseToken({
@@ -489,14 +491,15 @@ function createLocalBlockContentStoreRuntime(
       for (const blockId of working.keys()) {
         const baseToken = bases.get(blockId)!;
         const introduced = !contentById.has(blockId);
+        const preparedOperations = preparedOperationsByBlock.get(blockId);
+        const after = working.get(blockId)!;
         const before =
           contentById.get(blockId) ??
-          defaultContentForBlockType(baseToken.blockType);
-        const after = working.get(blockId)!;
-        if (!introduced && rawContentEqual(before, after)) continue;
+          preparedOperations?.transitions[0]?.before ??
+          after;
+        if (!introduced && before === after) continue;
         const blockType = blockTypeById.get(blockId) ?? baseToken.blockType;
         const tombstone = anchorTombstoneById.get(blockId);
-        const preparedOperations = preparedOperationsByBlock.get(blockId);
         const contentOperations = preparedOperations?.operations ?? [];
         const inverseContentOperations =
           preparedOperations?.inverseOperations ?? [];
@@ -504,8 +507,8 @@ function createLocalBlockContentStoreRuntime(
           blockId,
           blockType,
           baseToken,
-          before: cloneContent(before),
-          after: cloneContent(after),
+          before,
+          after,
           contentOperations: Object.freeze(contentOperations),
           inverseContentOperations: Object.freeze(inverseContentOperations),
           operationUpdate: encodeLocalOperationUpdate(contentOperations),
@@ -652,9 +655,7 @@ function createLocalBlockContentStoreRuntime(
       }
       const changed = state.blocks.find((block) => block.blockId === blockId);
       if (changed) {
-        return changed.blockType === blockType
-          ? cloneContent(changed.after)
-          : null;
+        return changed.blockType === blockType ? changed.after : null;
       }
       return runtime.readBlockProjection(blockId, blockType);
     },
@@ -735,7 +736,7 @@ function createLocalBlockContentStoreRuntime(
           anchorRevisionById.set(block.blockId, 0);
         }
         blockTypeById.set(block.blockId, block.blockType);
-        contentById.set(block.blockId, cloneContent(block.after));
+        contentById.set(block.blockId, block.after);
         contentRevisionById.set(block.blockId, committedRevision);
         blocks.push(
           ownAppliedBlock({
@@ -791,7 +792,7 @@ function createLocalBlockContentStoreRuntime(
       for (const block of state.validated.removedBlocks) {
         anchorTombstoneById.set(block.blockId, {
           blockType: block.blockType,
-          content: cloneContent(block.content),
+          content: block.content,
         });
         blockTypeById.delete(block.blockId);
         contentById.delete(block.blockId);

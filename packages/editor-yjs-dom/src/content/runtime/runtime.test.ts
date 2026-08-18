@@ -127,6 +127,7 @@ describe("independent encoded Yjs block content", () => {
     expect(runtime.getLiveBlockContentCount()).toBe(0);
     expect(runtime.readBlockProjection(id(1), "paragraph")).toEqual(next);
     expect(runtime.readOpaqueBlockState(id(2))).toBe(untouched);
+    expectCheckpointMatchesLiveDocument(runtime, id(1));
     const lease = runtime.acquireBlockContent(
       id(1),
       "paragraph",
@@ -246,7 +247,91 @@ describe("independent encoded Yjs block content", () => {
     });
     expect(lease.context.doc).toBe(doc);
     expect(readYjsBlockContentPlainText(lease.context)).toBe("after");
+    expectCheckpointMatchesLiveDocument(runtime, id(1));
     lease.release();
+    runtime.destroy();
+  });
+
+  it("keeps the incremental checkpoint state-equivalent after a local commit", () => {
+    const source = sourceFor({ [id(1)]: "A" });
+    const runtime = createYjsBlockContentRuntime(source);
+    const baseToken = runtime.readContentBaseToken(id(1), "paragraph", 1);
+    const validated = requireValidated(
+      runtime.validateContentCommit({
+        graphRevision: 1,
+        changes: [
+          {
+            baseToken,
+            operations: [insertOperation(id(1), 1, "B")],
+          },
+        ],
+      }),
+    );
+    const applied = runtime.commitContent(validated);
+    runtime.publishContentCommit(applied);
+
+    const secondValidated = requireValidated(
+      runtime.validateContentCommit({
+        graphRevision: 1,
+        changes: [
+          {
+            baseToken: runtime.readContentBaseToken(id(1), "paragraph", 1),
+            operations: [insertOperation(id(1), 2, "C")],
+          },
+        ],
+      }),
+    );
+    runtime.publishContentCommit(runtime.commitContent(secondValidated));
+
+    expectCheckpointMatchesLiveDocument(runtime, id(1));
+    const checkpoint = runtime.readOpaqueBlockState(id(1));
+    if (!checkpoint) throw new Error("Expected maintained checkpoint");
+    const projection = runtime.readBlockProjection(id(1), "paragraph");
+    runtime.destroy();
+
+    const reopened = createYjsBlockContentRuntime({
+      ...source,
+      contentById: { [id(1)]: projection },
+      opaqueContentCheckpoints: { [id(1)]: checkpoint },
+    });
+    const lease = reopened.acquireBlockContent(
+      id(1),
+      "paragraph",
+      "active-editing",
+    );
+    expect(readYjsBlockContentPlainText(lease.context)).toBe("ABC");
+    lease.release();
+    reopened.destroy();
+  });
+
+  it("merges every captured update for an introduced block into its checkpoint", () => {
+    const source = sourceFor({ [id(1)]: "existing" });
+    const runtime = createYjsBlockContentRuntime(source);
+    const introducedId = id(2);
+    const validated = requireValidated(
+      runtime.validateContentCommit({
+        graphRevision: 1,
+        introducedBlocks: { [introducedId]: "paragraph" },
+        changes: [
+          {
+            baseToken: {
+              graphRevision: 1,
+              blockId: introducedId,
+              blockType: "paragraph",
+              contentRevision: 0,
+            },
+            operations: [insertOperation(introducedId, 0, "introduced")],
+          },
+        ],
+      }),
+    );
+    const applied = runtime.commitContent(validated);
+    runtime.publishContentCommit(applied);
+
+    expect(runtime.readBlockProjection(introducedId, "paragraph")).toEqual(
+      richText("introduced"),
+    );
+    expectCheckpointMatchesLiveDocument(runtime, introducedId);
     runtime.destroy();
   });
 });
@@ -319,4 +404,48 @@ function decodeBase64(value: string): Uint8Array {
 
 function richText(text: string): RichTextDocumentNodeJson {
   return createBlockRichTextContentFromPlainText("paragraph", text);
+}
+
+function insertOperation(blockId: BlockId, offset: number, text: string) {
+  return {
+    kind: "insertInlineContent" as const,
+    blockId,
+    blockType: "paragraph" as const,
+    target: { kind: "text" as const },
+    position: { blockId, offset },
+    content: [{ type: "text" as const, text }],
+  };
+}
+
+function requireValidated(
+  value: ReturnType<
+    ReturnType<typeof createYjsBlockContentRuntime>["validateContentCommit"]
+  >,
+) {
+  if (!("kind" in value)) throw new Error(value.message);
+  return value;
+}
+
+function expectCheckpointMatchesLiveDocument(
+  runtime: ReturnType<typeof createYjsBlockContentRuntime>,
+  blockId: BlockId,
+): void {
+  const checkpoint = runtime.readOpaqueBlockState(blockId);
+  if (!checkpoint) throw new Error("Expected maintained checkpoint");
+  const checkpointDoc = new Doc();
+  applyUpdate(
+    checkpointDoc,
+    decodeBase64(checkpoint.payloadBase64),
+    "test-checkpoint",
+  );
+  const lease = runtime.acquireBlockContent(
+    blockId,
+    "paragraph",
+    "active-editing",
+  );
+  expect(Array.from(encodeStateVector(checkpointDoc))).toEqual(
+    Array.from(encodeStateVector(lease.context.doc)),
+  );
+  lease.release();
+  checkpointDoc.destroy();
 }
