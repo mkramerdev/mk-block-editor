@@ -17,10 +17,7 @@ import {
   createTableRangeCoverage,
   tableInternalSelectionSubsystem,
 } from "./selection.ts";
-import {
-  FirstDraftBlockHoverProvider,
-  FirstDraftBlockHoverTracker,
-} from "../../block-controls/index.ts";
+import { FirstDraftBlockHoverProvider } from "../../block-controls/index.ts";
 
 const id = (value: string) => value as BlockId;
 const disposables: Array<{ dispose(): void }> = [];
@@ -58,9 +55,7 @@ describe("First Draft table-cell boundary commands", () => {
     const rendered = render(
       <FirstDraftViewStateProvider store={viewState}>
         <FirstDraftBlockHoverProvider enabled={editor.editable}>
-          <FirstDraftBlockHoverTracker>
-            <EditorDocument editor={editor} />
-          </FirstDraftBlockHoverTracker>
+          <EditorDocument editor={editor} />
         </FirstDraftBlockHoverProvider>
       </FirstDraftViewStateProvider>,
     );
@@ -69,7 +64,9 @@ describe("First Draft table-cell boundary commands", () => {
     const rowChildren = rowId ? [...editor.getChildBlockIds(rowId)] : [];
 
     act(() => {
-      expect(editor.focusText(cellId, { offset: 0, preventScroll: true })).toEqual({
+      expect(
+        editor.focusText(cellId, { offset: 0, preventScroll: true }),
+      ).toEqual({
         status: "focused",
       });
     });
@@ -239,9 +236,7 @@ describe("First Draft table-cell boundary commands", () => {
       expect(fireEvent.keyDown(grid, { key })).toBe(false);
       selectedCellIds.forEach((cellId, index) => {
         expect(fixture.editor.getBlock(cellId)).toBe(identities[index]);
-        expect(
-          fixture.editor.readBlockPlainText(cellId, "tableCell"),
-        ).toBe("");
+        expect(fixture.editor.readBlockPlainText(cellId, "tableCell")).toBe("");
       });
       expect(fixture.onChange).toHaveBeenCalledTimes(1);
       expect(fixture.structural).not.toHaveBeenCalled();
@@ -284,9 +279,7 @@ describe("First Draft table-cell boundary commands", () => {
     const rendered = render(
       <FirstDraftViewStateProvider store={viewState}>
         <FirstDraftBlockHoverProvider enabled={editor.editable}>
-          <FirstDraftBlockHoverTracker>
-            <EditorDocument editor={editor} />
-          </FirstDraftBlockHoverTracker>
+          <EditorDocument editor={editor} />
         </FirstDraftBlockHoverProvider>
       </FirstDraftViewStateProvider>,
     );
@@ -364,9 +357,7 @@ function renderFixture(snapshot = createFirstDraftSnapshot()) {
   const rendered = render(
     <FirstDraftViewStateProvider store={viewState}>
       <FirstDraftBlockHoverProvider enabled={editor.editable}>
-        <FirstDraftBlockHoverTracker>
-          <EditorDocument editor={editor} />
-        </FirstDraftBlockHoverTracker>
+        <EditorDocument editor={editor} />
       </FirstDraftBlockHoverProvider>
     </FirstDraftViewStateProvider>,
   );
@@ -387,7 +378,9 @@ function oneCellTableSnapshot(): EditorInstanceSnapshot {
     id("fd-table-cell-3-2"),
     id("fd-table-cell-3-3"),
   ]);
-  const keepEntries = <Value,>(record: Readonly<Partial<Record<BlockId, Value>>>) =>
+  const keepEntries = <Value,>(
+    record: Readonly<Partial<Record<BlockId, Value>>>,
+  ) =>
     Object.fromEntries(
       Object.entries(record).filter(([blockId]) => !removed.has(id(blockId))),
     ) as Partial<Record<BlockId, Value>>;

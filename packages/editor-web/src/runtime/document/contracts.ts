@@ -43,6 +43,7 @@ import type {
   StructuralEditRange,
 } from "@repo/editor-core/editing";
 import type {
+  EditorSelection,
   EditorLogicalSelectionPoint,
   EditorStableSelection,
   EditorTransactionSelection,
@@ -91,7 +92,24 @@ export interface EditorDocumentProps<TEditor extends Editor = Editor> {
   readonly editor: TEditor;
   readonly layout?: EditorLayoutConfig;
   readonly renderDocumentLayers?: EditorDocumentLayerRenderer<TEditor>;
+  readonly onSelectionDragStart?: EditorSelectionDragCallback;
+  readonly onSelectionDragUpdate?: EditorSelectionDragCallback;
+  readonly onSelectionDragEnd?: EditorSelectionDragCallback;
 }
+
+export interface EditorSelectionDragSnapshot {
+  readonly selection: EditorSelection;
+  readonly anchor: EditorLogicalSelectionPoint;
+  readonly focus: EditorLogicalSelectionPoint;
+  readonly pointer: {
+    readonly clientX: number;
+    readonly clientY: number;
+  };
+}
+
+export type EditorSelectionDragCallback = (
+  snapshot: EditorSelectionDragSnapshot,
+) => void;
 
 export type EditorDocumentLayerRenderer<TEditor extends Editor = Editor> = (
   context: EditorDocumentLayerRenderContext<TEditor>,
@@ -187,13 +205,11 @@ export interface EditorBlockContentSemanticChange extends EditorTransaction {
   readonly historyAction: "command" | "undo" | "redo";
 }
 
-export interface EditorBlockMetadataSemanticChange
-  extends EditorGraphSemanticChangeBase<EditorBlockMetadataChange> {
+export interface EditorBlockMetadataSemanticChange extends EditorGraphSemanticChangeBase<EditorBlockMetadataChange> {
   readonly canonicalOperation: EditorLogicalBlockMetadataOperation;
 }
 
-export interface EditorBlockGraphSemanticChange
-  extends EditorGraphSemanticChangeBase<EditorBlockGraphChange> {
+export interface EditorBlockGraphSemanticChange extends EditorGraphSemanticChangeBase<EditorBlockGraphChange> {
   readonly graphChanges: readonly CanonicalEditorBlockGraphChange[];
   readonly contentChanges: readonly EditorBlockContentChange<EditorContentOperationUpdate>[];
 }
@@ -239,13 +255,11 @@ export interface EditorTypingTriggerSession {
   };
 }
 
-export interface EditorTypingTriggerInlineReplacement
-  extends EditorTypingTriggerSessionReference {
+export interface EditorTypingTriggerInlineReplacement extends EditorTypingTriggerSessionReference {
   readonly content: readonly RichTextInlineNodeJson[];
 }
 
-export interface EditorTypingTriggerFragmentReplacement
-  extends EditorTypingTriggerSessionReference {
+export interface EditorTypingTriggerFragmentReplacement extends EditorTypingTriggerSessionReference {
   readonly fragment: CanonicalBlockFragment;
   readonly selectionBlockId: BlockId;
   readonly selectionOffset?: number;

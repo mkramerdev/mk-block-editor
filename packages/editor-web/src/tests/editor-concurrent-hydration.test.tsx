@@ -48,7 +48,7 @@ describe("concurrent editor hydration", () => {
       container.innerHTML = serverHtml;
       document.body.append(container);
       const serverDocumentRoot = container.querySelector(
-        "section.editor-web-document",
+        "div.editor-web-document",
       );
       expect(serverDocumentRoot).not.toBeNull();
       expect(serverDocumentRoot?.getAttribute("aria-label")).toBe(
@@ -113,7 +113,9 @@ describe("concurrent editor hydration", () => {
       );
       expect(activeRoot).not.toBeNull();
       expect(document.activeElement).toBe(activeRoot);
-      expect(committed.selectionController.canonical.getSnapshot()).toMatchObject({
+      expect(
+        committed.selectionController.canonical.getSnapshot(),
+      ).toMatchObject({
         kind: "document",
         snapshot: {
           endpoints: {

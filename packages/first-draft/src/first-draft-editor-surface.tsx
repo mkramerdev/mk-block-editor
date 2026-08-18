@@ -9,9 +9,11 @@ import {
   useState,
 } from "react";
 import type { BlockId } from "@repo/editor-core/kernel";
+import { createAutoScroll } from "mk-autoscroll";
 import {
   EditorDocument,
   toCollaborationSubjectKey,
+  type EditorSelectionDragSnapshot,
 } from "@repo/editor-web/document-runtime";
 import { compileCanonicalEditorDefinition } from "@repo/editor-web/editor-definition";
 import {
@@ -44,10 +46,7 @@ import { FirstDraftSelectionBadgeLayer } from "./first-draft-selection-badge-lay
 import { FirstDraftSelectionMenu } from "./selection-menu/index.ts";
 import { FirstDraftSlashMenu } from "./slash-menu/index.ts";
 import { FirstDraftMentionMenu } from "./mention-menu/index.ts";
-import {
-  FirstDraftBlockHoverProvider,
-  FirstDraftBlockHoverTracker,
-} from "./block-controls/index.ts";
+import { FirstDraftBlockHoverProvider } from "./block-controls/index.ts";
 
 export interface FirstDraftCollaborationOptions {
   readonly webSocketUrl: string;
@@ -150,9 +149,7 @@ export function FirstDraftEditorSurface({
             ...(requestedDisplayName === undefined
               ? {}
               : { displayName: requestedDisplayName }),
-            ...(requestedColor === undefined
-              ? {}
-              : { color: requestedColor }),
+            ...(requestedColor === undefined ? {} : { color: requestedColor }),
           })
         : null,
     [
@@ -168,9 +165,7 @@ export function FirstDraftEditorSurface({
   );
   const requestedGeneration = useMemo(
     () =>
-      connectionInputs
-        ? Symbol("first-draft-connection-generation")
-        : null,
+      connectionInputs ? Symbol("first-draft-connection-generation") : null,
     [connectionInputs],
   );
   const activeGeneration = useRef<ActiveFirstDraftConnectionGeneration | null>(
@@ -219,14 +214,10 @@ export function FirstDraftEditorSurface({
         current: FirstDraftConnectionUiState,
       ) => FirstDraftConnectionUiState,
     ) => {
-      if (
-        disposed ||
-        activeGeneration.current?.generation !== generation
-      )
+      if (disposed || activeGeneration.current?.generation !== generation)
         return;
       setOwnedUi((current) => {
-        if (activeGeneration.current?.generation !== generation)
-          return current;
+        if (activeGeneration.current?.generation !== generation) return current;
         const owned =
           current.generation === generation
             ? current
@@ -343,23 +334,27 @@ export function FirstDraftEditorSurface({
       });
       editor = createdEditor;
       addEditorBlockOperations(createdEditor);
-      detachRemote = attachFirstDraftRemoteTransactions(dispatcher, createdEditor, {
-        documentId,
-        initialRevision: message.revision,
-        onProtocolError: fail,
-        onAccepted: (accepted: EditorTransactionAcceptedMessage) =>
-          updateUi((current) => ({
-            ...current,
-            diagnostic: `${accepted.transactionId}: ${accepted.baseRevision} → ${accepted.revision}`,
-          })),
-        onPersistenceFailed: (
-          failed: EditorTransactionPersistenceFailedMessage,
-        ) =>
-          updateUi((current) => ({
-            ...current,
-            diagnostic: `Persistence ${failed.reason}: ${failed.message}`,
-          })),
-      });
+      detachRemote = attachFirstDraftRemoteTransactions(
+        dispatcher,
+        createdEditor,
+        {
+          documentId,
+          initialRevision: message.revision,
+          onProtocolError: fail,
+          onAccepted: (accepted: EditorTransactionAcceptedMessage) =>
+            updateUi((current) => ({
+              ...current,
+              diagnostic: `${accepted.transactionId}: ${accepted.baseRevision} → ${accepted.revision}`,
+            })),
+          onPersistenceFailed: (
+            failed: EditorTransactionPersistenceFailedMessage,
+          ) =>
+            updateUi((current) => ({
+              ...current,
+              diagnostic: `Persistence ${failed.reason}: ${failed.message}`,
+            })),
+        },
+      );
       presence = attachFirstDraftPresence(
         dispatcher,
         createdEditor,
@@ -423,7 +418,10 @@ export function FirstDraftEditorSurface({
 
   return (
     <>
-      <output data-first-draft-collaboration-status={ui.status} aria-live="polite">
+      <output
+        data-first-draft-collaboration-status={ui.status}
+        aria-live="polite"
+      >
         Collaboration: {ui.status}
         {ui.error ? ` — ${ui.error}` : ""}
       </output>
@@ -481,6 +479,58 @@ function FirstDraftEditorDocument({
   ) => void;
 }) {
   const { editor, viewState, identity, revision } = loaded;
+  const documentScrollRef = useRef<HTMLDivElement | null>(null);
+  const [autoScroll] = useState(() =>
+    createAutoScroll({
+      container: () => documentScrollRef.current,
+      axis: "y",
+      outsideBehavior: "continue",
+    }),
+  );
+  const autoScrollActiveRef = useRef(false);
+  const stopSelectionAutoScroll = useCallback(() => {
+    if (!autoScrollActiveRef.current) return;
+    autoScrollActiveRef.current = false;
+    autoScroll.stop();
+    autoScroll.updatePoint(null);
+  }, [autoScroll]);
+  const setDocumentScrollElement = useCallback(
+    (element: HTMLDivElement | null) => {
+      const previous = documentScrollRef.current;
+      if (previous && previous !== element) stopSelectionAutoScroll();
+      documentScrollRef.current = element;
+    },
+    [stopSelectionAutoScroll],
+  );
+  const handleSelectionDragStart = useCallback(
+    (drag: EditorSelectionDragSnapshot) => {
+      autoScroll.updatePoint({
+        x: drag.pointer.clientX,
+        y: drag.pointer.clientY,
+      });
+      autoScroll.start();
+      autoScrollActiveRef.current = true;
+    },
+    [autoScroll],
+  );
+  const handleSelectionDragUpdate = useCallback(
+    (drag: EditorSelectionDragSnapshot) => {
+      if (!autoScrollActiveRef.current) return;
+      autoScroll.updatePoint({
+        x: drag.pointer.clientX,
+        y: drag.pointer.clientY,
+      });
+    },
+    [autoScroll],
+  );
+  const handleSelectionDragEnd = useCallback(
+    () => stopSelectionAutoScroll(),
+    [stopSelectionAutoScroll],
+  );
+  useEffect(() => {
+    if (!editor.editable) stopSelectionAutoScroll();
+  }, [editor.editable, stopSelectionAutoScroll]);
+  useEffect(() => stopSelectionAutoScroll, [stopSelectionAutoScroll]);
   useLayoutEffect(() => {
     onLifecycleObservation({ kind: "editor-dom-mounted", revision });
   }, [editor, onLifecycleObservation, revision]);
@@ -494,7 +544,7 @@ function FirstDraftEditorDocument({
         <div
           className="first-draft-example__toolbar"
           role="toolbar"
-          aria-label="Editor history"
+          aria-label="Editor controls"
         >
           <button type="button" onClick={() => editor.undo()}>
             Undo
@@ -504,11 +554,17 @@ function FirstDraftEditorDocument({
           </button>
           <span>Use Tab / Shift+Tab to nest or reparent blocks.</span>
         </div>
-        <FirstDraftBlockHoverProvider enabled={editor.editable}>
-          <FirstDraftBlockHoverTracker className="first-draft-block-hover-tracker">
+        <div
+          ref={setDocumentScrollElement}
+          className="first-draft-example__document-scroll"
+        >
+          <FirstDraftBlockHoverProvider enabled={editor.editable}>
             <EditorDocument
               editor={editor}
               layout={layout}
+              onSelectionDragStart={handleSelectionDragStart}
+              onSelectionDragUpdate={handleSelectionDragUpdate}
+              onSelectionDragEnd={handleSelectionDragEnd}
               renderDocumentLayers={(context) => (
                 <>
                   <FirstDraftSelectionBadgeLayer
@@ -534,8 +590,8 @@ function FirstDraftEditorDocument({
                 </>
               )}
             />
-          </FirstDraftBlockHoverTracker>
-        </FirstDraftBlockHoverProvider>
+          </FirstDraftBlockHoverProvider>
+        </div>
       </section>
     </FirstDraftViewStateProvider>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import type { FocusEvent as ReactFocusEvent } from "react";
 import { useWebFocusAdapters } from "../../document/focus/use-web-focus-adapters.ts";
 import { useCommittedSelectionTextInput } from "../../document/selection/controller/committed-selection-text-input.ts";
@@ -21,7 +21,46 @@ export function createEditableDocumentRuntimeMount(
     composition,
     documentLayerKeyboard,
     onTransientPointerPaintChange,
+    onSelectionDragStart,
+    onSelectionDragUpdate,
+    onSelectionDragEnd,
   }: EditorDocumentRuntimeMountProps) {
+    const selectionDragCallbacksRef = useRef({
+      onSelectionDragStart,
+      onSelectionDragUpdate,
+      onSelectionDragEnd,
+    });
+    useLayoutEffect(() => {
+      selectionDragCallbacksRef.current = {
+        onSelectionDragStart,
+        onSelectionDragUpdate,
+        onSelectionDragEnd,
+      };
+    }, [onSelectionDragEnd, onSelectionDragStart, onSelectionDragUpdate]);
+    const handleSelectionDragStart = useCallback<
+      NonNullable<EditorDocumentRuntimeMountProps["onSelectionDragStart"]>
+    >((snapshot) => {
+      selectionDragCallbacksRef.current.onSelectionDragStart?.(snapshot);
+    }, []);
+    const handleSelectionDragUpdate = useCallback<
+      NonNullable<EditorDocumentRuntimeMountProps["onSelectionDragUpdate"]>
+    >((snapshot) => {
+      selectionDragCallbacksRef.current.onSelectionDragUpdate?.(snapshot);
+    }, []);
+    const handleSelectionDragEnd = useCallback<
+      NonNullable<EditorDocumentRuntimeMountProps["onSelectionDragEnd"]>
+    >((snapshot) => {
+      selectionDragCallbacksRef.current.onSelectionDragEnd?.(snapshot);
+    }, []);
+    const shouldPublishSelectionDrag = useCallback(
+      () =>
+        Boolean(
+          selectionDragCallbacksRef.current.onSelectionDragStart ||
+          selectionDragCallbacksRef.current.onSelectionDragUpdate ||
+          selectionDragCallbacksRef.current.onSelectionDragEnd,
+        ),
+      [],
+    );
     useLayoutEffect(
       () => editor.attachBlockShellRegistry(blockDom),
       [blockDom],
@@ -81,6 +120,10 @@ export function createEditableDocumentRuntimeMount(
       captureStructuralSelection,
       documentLayerKeyboard,
       onTransientPointerPaintChange,
+      onSelectionDragStart: handleSelectionDragStart,
+      onSelectionDragUpdate: handleSelectionDragUpdate,
+      onSelectionDragEnd: handleSelectionDragEnd,
+      shouldPublishSelectionDrag,
     });
     return (
       <InlineAtomPortalHost

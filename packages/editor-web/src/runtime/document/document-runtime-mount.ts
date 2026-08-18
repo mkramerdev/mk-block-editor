@@ -7,6 +7,7 @@ import type {
   SelectionCompositionSessionSnapshot,
 } from "@repo/editor-react/selection";
 import type { EditorDocumentLayerKeyboardDispatcher } from "./document-layer-interactions.ts";
+import type { EditorSelectionDragCallback } from "./contracts.ts";
 
 export interface EditorDocumentRuntimeMountProps {
   readonly listElement: HTMLDivElement | null;
@@ -18,8 +19,10 @@ export interface EditorDocumentRuntimeMountProps {
   readonly onTransientPointerPaintChange: (
     paint: TransientPointerSelectionPaint | null,
   ) => void;
+  readonly onSelectionDragStart?: EditorSelectionDragCallback;
+  readonly onSelectionDragUpdate?: EditorSelectionDragCallback;
+  readonly onSelectionDragEnd?: EditorSelectionDragCallback;
 }
 
-export type EditorDocumentRuntimeMount = ComponentType<
-  EditorDocumentRuntimeMountProps
->;
+export type EditorDocumentRuntimeMount =
+  ComponentType<EditorDocumentRuntimeMountProps>;

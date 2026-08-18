@@ -57,6 +57,9 @@ describe("EditorDocument layout contract", () => {
       readonly editor: Editor;
       readonly layout?: EditorLayoutConfig;
       readonly renderDocumentLayers?: EditorDocumentProps["renderDocumentLayers"];
+      readonly onSelectionDragStart?: EditorDocumentProps["onSelectionDragStart"];
+      readonly onSelectionDragUpdate?: EditorDocumentProps["onSelectionDragUpdate"];
+      readonly onSelectionDragEnd?: EditorDocumentProps["onSelectionDragEnd"];
     }>();
     expectTypeOf<{
       readonly sideLeftWidth: string;
@@ -82,7 +85,8 @@ describe("EditorDocument layout contract", () => {
       "3fr",
     );
     expect(shell.className).toBe("editor-web-document");
-    expect(shell.tagName).toBe("SECTION");
+    expect(shell.tagName).toBe("DIV");
+    expect(shell.getAttribute("role")).toBe("region");
     expect(shell.getAttribute("data-editor-web")).toBe("document");
     expect(
       screen.getAllByRole("region", { name: "Document editor" }),
@@ -251,6 +255,27 @@ describe("EditorDocument layout contract", () => {
     expect(lastController()).toBe(controller);
     expect(controller.canonical.getSnapshot()).toBe(canonical);
     expect(controller.endpoint.getSnapshot()).toBe(endpoint);
+  });
+
+  it("retains the document runtime subtree when drag callback identities change", () => {
+    const firstStart = vi.fn();
+    const view = render(
+      <EditorDocument editor={editor} onSelectionDragStart={firstStart} />,
+    );
+    const documentRoot = screen.getByTestId("editor-document");
+    const blockList = screen.getByTestId("block-list");
+
+    view.rerender(
+      <EditorDocument
+        editor={editor}
+        onSelectionDragStart={vi.fn()}
+        onSelectionDragUpdate={vi.fn()}
+        onSelectionDragEnd={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId("editor-document")).toBe(documentRoot);
+    expect(screen.getByTestId("block-list")).toBe(blockList);
   });
 
   it("keeps the committed controller usable through Strict Mode replay", () => {

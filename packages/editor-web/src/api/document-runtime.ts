@@ -20,6 +20,8 @@ export type {
   EditorCanonicalSelectionEffect,
   EditorBlockContentChange,
   EditorDocumentProps,
+  EditorSelectionDragSnapshot,
+  EditorSelectionDragCallback,
   EditorDocumentLayerRenderContext,
   EditorDocumentLayerRenderer,
   EditorDocumentLayerInteractionPort,

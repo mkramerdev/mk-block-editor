@@ -36,6 +36,9 @@ export interface BlockListProps<TEditor extends Editor = Editor> {
   contentRuntime: EditorWebContentRuntime;
   editor: EditorRuntimePort<TEditor>;
   renderDocumentLayers: EditorDocumentProps<TEditor>["renderDocumentLayers"];
+  onSelectionDragStart: EditorDocumentProps<TEditor>["onSelectionDragStart"];
+  onSelectionDragUpdate: EditorDocumentProps<TEditor>["onSelectionDragUpdate"];
+  onSelectionDragEnd: EditorDocumentProps<TEditor>["onSelectionDragEnd"];
   invalidateSelectionOnBlockShapeChange?: boolean;
 }
 
@@ -43,7 +46,15 @@ function BlockListRuntime<TEditor extends Editor>(
   props: BlockListProps<TEditor>,
 ) {
   const [listElement, setListElement] = useState<HTMLDivElement | null>(null);
-  const { definition, contentRuntime, editor, renderDocumentLayers } = props;
+  const {
+    definition,
+    contentRuntime,
+    editor,
+    renderDocumentLayers,
+    onSelectionDragStart,
+    onSelectionDragUpdate,
+    onSelectionDragEnd,
+  } = props;
   const runtimeEditor = editor as AnyEditorRuntimePort;
   const [documentLayerInteractions] = useState(
     createEditorDocumentLayerInteractionController,
@@ -127,6 +138,9 @@ function BlockListRuntime<TEditor extends Editor>(
               composition={globalSelection.composition}
               documentLayerKeyboard={documentLayerInteractions.keyboard}
               onTransientPointerPaintChange={setTransientPointerPaint}
+              onSelectionDragStart={onSelectionDragStart}
+              onSelectionDragUpdate={onSelectionDragUpdate}
+              onSelectionDragEnd={onSelectionDragEnd}
             />
           ) : null}
         </div>

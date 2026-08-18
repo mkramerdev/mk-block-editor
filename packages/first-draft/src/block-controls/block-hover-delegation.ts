@@ -1,6 +1,6 @@
 import type { PointerEvent } from "react";
 import type { BlockId } from "@repo/editor-core/kernel";
-import { FIRST_DRAFT_BLOCK_SHELL_SELECTOR } from "./block-hover-tracker.tsx";
+import { FIRST_DRAFT_BLOCK_SHELL_SELECTOR } from "./block-hover-provider.tsx";
 
 export function delegateFirstDraftBlockHover(
   event: PointerEvent<HTMLElement>,

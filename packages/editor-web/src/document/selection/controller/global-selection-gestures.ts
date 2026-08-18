@@ -23,6 +23,7 @@ import {
   type EditorBlockSelectionTarget,
   type EditorKeyboardSelectionKey,
   type EditorLogicalSelectionPoint,
+  type EditorSelection,
   type EditorSelectionRangeBlock,
   type SelectionController,
 } from "@repo/editor-react/selection";
@@ -34,10 +35,6 @@ import type { AnyEditorRuntimePort } from "../../../runtime/document/render-port
 import type { EditorDocumentLayerKeyboardDispatcher } from "../../../runtime/document/document-layer-interactions.ts";
 import { createEditorDocumentInputRouting } from "../../../runtime/keybindings/document-input-routing.ts";
 import type { EditorBlockDomRegistryReader } from "../../blocks/block-dom-registry.ts";
-import {
-  createEdgeScrollController,
-  type EdgeScrollController,
-} from "../../interaction/edge-scroll.ts";
 import { registerDocumentInteractionOwner } from "../../interaction/document-interaction-router.ts";
 import { routeEditorDocumentKeydown } from "../../interaction/document-layer-keydown-routing.ts";
 import {
@@ -52,10 +49,7 @@ import {
   isEditorBlockInternalSelectionExtendOutsideDetail,
 } from "./block-internal-transition-event.ts";
 import { hasEligibleFocusedTextCaret } from "./focus-insertion-target.ts";
-import {
-  resolveGlobalSelectionScrollRoot,
-  scrollKeyboardSelectionFocusIntoView,
-} from "./keyboard-scroll.ts";
+import { scrollKeyboardSelectionFocusIntoView } from "./keyboard-scroll.ts";
 import {
   blurFocusedEditorElement,
   capturePointer,
@@ -74,11 +68,13 @@ import {
   type DocumentSelectionPaintPrimitive,
 } from "../paint/selection-paint-plan.ts";
 import type { TransientPointerSelectionPaint } from "../paint/selection-paint-layer.tsx";
+import type {
+  EditorSelectionDragCallback,
+  EditorSelectionDragSnapshot,
+} from "../../../runtime/document/contracts.ts";
 
 const editorOwnerByBlockList = new WeakMap<HTMLElement, AnyEditorRuntimePort>();
 const DRAG_THRESHOLD_PX = 4;
-const EDGE_SCROLL_ZONE_PX = 64;
-const EDGE_SCROLL_MAX_SPEED = 900;
 
 interface BrowserPointerResource {
   readonly pointerId: number;
@@ -115,6 +111,10 @@ export interface UseGlobalSelectionGesturesOptions {
   readonly onTransientPointerPaintChange: (
     paint: TransientPointerSelectionPaint | null,
   ) => void;
+  readonly onSelectionDragStart?: EditorSelectionDragCallback;
+  readonly onSelectionDragUpdate?: EditorSelectionDragCallback;
+  readonly onSelectionDragEnd?: EditorSelectionDragCallback;
+  readonly shouldPublishSelectionDrag?: () => boolean;
 }
 
 /**
@@ -132,6 +132,10 @@ export function useGlobalSelectionGestures({
   captureStructuralSelection,
   documentLayerKeyboard,
   onTransientPointerPaintChange,
+  onSelectionDragStart,
+  onSelectionDragUpdate,
+  onSelectionDragEnd,
+  shouldPublishSelectionDrag,
 }: UseGlobalSelectionGesturesOptions): void {
   useLayoutEffect(() => {
     if (!listElement) return;
@@ -147,8 +151,8 @@ export function useGlobalSelectionGestures({
     editorOwnerByBlockList.set(list, editor);
     let pointer: BrowserPointerResource | null = null;
     let suppressCompletedDragClick = false;
-    let edgeScroll: EdgeScrollController | null = null;
     let transientPaintRevision = 0;
+    let lastSelectionDragSnapshot: EditorSelectionDragSnapshot | null = null;
 
     const resolveHit = (
       target: EventTarget | null,
@@ -189,6 +193,25 @@ export function useGlobalSelectionGestures({
             })
           : null,
       );
+      publishSelectionDrag(resource);
+    };
+    const selectionDragLifecycleIsObserved = () =>
+      shouldPublishSelectionDrag?.() ??
+      Boolean(
+        onSelectionDragStart || onSelectionDragUpdate || onSelectionDragEnd,
+      );
+    const publishSelectionDrag = (resource: BrowserPointerResource) => {
+      if (!selectionDragLifecycleIsObserved()) return;
+      const snapshot = materializeSelectionDragSnapshot(
+        resource,
+        editor,
+        contentRuntime,
+      );
+      if (!snapshot) return;
+      const started = lastSelectionDragSnapshot !== null;
+      lastSelectionDragSnapshot = snapshot;
+      if (started) onSelectionDragUpdate?.(snapshot);
+      else onSelectionDragStart?.(snapshot);
     };
     const requestSettledTextPresentation = (
       point: EditorLogicalSelectionPoint,
@@ -221,25 +244,27 @@ export function useGlobalSelectionGestures({
       );
       const hit = resolveHit(target, pointer.lastClientX, pointer.lastClientY);
       if (hit) updatePointer(pointer, hit);
+      else publishSelectionDrag(pointer);
     };
     const finishPointer = () => {
       if (!pointer) return;
       const current = pointer;
+      const endedSelectionDrag = lastSelectionDragSnapshot;
       pointer = null;
+      lastSelectionDragSnapshot = null;
       onTransientPointerPaintChange(null);
       releaseContentLeases(current.settlementLeases);
       delete list.dataset.editorNativeCaretPointerPending;
       current.restoreNativeSelection?.();
       if (current.phase === "dragging") releasePointer(list, current.pointerId);
       setTextSelectionDragActive(list, false);
-      edgeScroll?.stop();
+      if (endedSelectionDrag) onSelectionDragEnd?.(endedSelectionDrag);
     };
-    const beginActiveDrag = (
-      resource: BrowserPointerResource,
-      clientX: number,
-      clientY: number,
-    ): boolean => {
-      if (editor.getSelectionGraphRevision() !== resource.graphRevision) {
+    const beginActiveDrag = (resource: BrowserPointerResource): boolean => {
+      if (
+        !editor.editable ||
+        editor.getSelectionGraphRevision() !== resource.graphRevision
+      ) {
         finishPointer();
         return false;
       }
@@ -256,20 +281,13 @@ export function useGlobalSelectionGestures({
         resource.anchorCandidate,
         "dragging",
       );
-      edgeScroll ??= createEdgeScrollController({
-        scrollElement: resolveGlobalSelectionScrollRoot(list),
-        axes: { y: true },
-        edgeZonePx: EDGE_SCROLL_ZONE_PX,
-        maxSpeedPxPerSecond: EDGE_SCROLL_MAX_SPEED,
-        onTick: refreshPointer,
-      });
-      edgeScroll.start({ clientX, clientY });
       return true;
     };
     const pointerdown = (event: PointerEvent) => {
       suppressCompletedDragClick = false;
       if (pointer) finishPointer();
       if (
+        !editor.editable ||
         event.button !== 0 ||
         isPointerEventFromEditorInteractiveControl(event, list)
       )
@@ -310,10 +328,7 @@ export function useGlobalSelectionGestures({
       // hit testing carries soft-wrap affinity through settlement, and the
       // active input projection remains the collapsed canonical caret.
       event.preventDefault();
-      if (
-        editor.editable &&
-        blockUsesContentSelectionEndpoint(hit.target)
-      ) {
+      if (editor.editable && blockUsesContentSelectionEndpoint(hit.target)) {
         // ProseMirror's compatibility-mouse gesture must not independently
         // normalize the same DOM point to its default soft-wrap side.
         event.stopPropagation();
@@ -377,7 +392,7 @@ export function useGlobalSelectionGestures({
         restoreNativeSelection: suppressNativeSelection(list),
         settlementLeases: [],
       };
-      if (!beginActiveDrag(pointer, detail.clientX, detail.clientY)) return;
+      if (!beginActiveDrag(pointer)) return;
       blurFocusedEditorElement(list);
       updatePointer(pointer, focusHit);
     };
@@ -398,18 +413,15 @@ export function useGlobalSelectionGestures({
           event.preventDefault();
           return;
         }
-        if (!beginActiveDrag(pointer, event.clientX, event.clientY)) {
+        if (!beginActiveDrag(pointer)) {
           event.preventDefault();
           return;
         }
         updatePointer(pointer, hit);
       } else {
-        edgeScroll?.updatePointer({
-          clientX: event.clientX,
-          clientY: event.clientY,
-        });
         const hit = resolveHit(event.target, event.clientX, event.clientY);
         if (!hit) {
+          publishSelectionDrag(pointer);
           event.preventDefault();
           return;
         }
@@ -444,6 +456,8 @@ export function useGlobalSelectionGestures({
     const pointerup = (event: PointerEvent) => {
       if (!pointer || pointer.pointerId !== event.pointerId) return;
       const current = pointer;
+      current.lastClientX = event.clientX;
+      current.lastClientY = event.clientY;
       if (editor.getSelectionGraphRevision() !== current.graphRevision) {
         finishPointer();
         event.preventDefault();
@@ -467,7 +481,7 @@ export function useGlobalSelectionGestures({
             "candidate",
           );
         }
-      }
+      } else if (current.phase === "dragging") publishSelectionDrag(current);
       const points = materializePointerSettlement(
         current,
         editor,
@@ -942,7 +956,6 @@ export function useGlobalSelectionGestures({
     return () => {
       finishPointer();
       suppressCompletedDragClick = false;
-      edgeScroll?.dispose();
       selectionController.resetKeyboardNavigation();
       clearKeyboardSelectionActive(list);
       list.removeEventListener("pointerdown", pointerdown, true);
@@ -967,10 +980,38 @@ export function useGlobalSelectionGestures({
     contentRuntime,
     documentLayerKeyboard,
     editor,
+    editor.editable,
     listElement,
     onTransientPointerPaintChange,
+    onSelectionDragEnd,
+    onSelectionDragStart,
+    onSelectionDragUpdate,
     selectionController,
+    shouldPublishSelectionDrag,
   ]);
+}
+
+function materializeSelectionDragSnapshot(
+  resource: BrowserPointerResource,
+  editor: AnyEditorRuntimePort,
+  contentRuntime: EditorWebContentRuntime,
+): EditorSelectionDragSnapshot | null {
+  const points = materializePointerSettlement(resource, editor, contentRuntime);
+  if (!points) return null;
+  const selection: EditorSelection = Object.freeze({
+    direction: points.direction,
+    anchor: points.anchor,
+    focus: points.focus,
+  });
+  return Object.freeze({
+    selection,
+    anchor: points.anchor,
+    focus: points.focus,
+    pointer: Object.freeze({
+      clientX: resource.lastClientX,
+      clientY: resource.lastClientY,
+    }),
+  });
 }
 
 function readCanonicalKeyboardNavigationText(
@@ -996,11 +1037,11 @@ function committedSelectionIsNoncollapsed(
   const head = selection?.endpoints?.head;
   return Boolean(
     anchor &&
-      head &&
-      (anchor.blockId !== head.blockId ||
-        anchor.textOffset !== head.textOffset ||
-        !anchor.textAnchor ||
-        !head.textAnchor),
+    head &&
+    (anchor.blockId !== head.blockId ||
+      anchor.textOffset !== head.textOffset ||
+      !anchor.textAnchor ||
+      !head.textAnchor),
   );
 }
 
@@ -1218,8 +1259,7 @@ function deriveTransientPointerPaintPrimitives(
   if (
     anchor.graphRevision !== graphRevision ||
     focus.graphRevision !== graphRevision ||
-    (anchor.blockId === focus.blockId &&
-      anchor.textOffset === focus.textOffset)
+    (anchor.blockId === focus.blockId && anchor.textOffset === focus.textOffset)
   )
     return null;
   const anchorTarget = readEditorBlockSelectionTarget(editor, anchor.blockId);
@@ -1236,11 +1276,7 @@ function deriveTransientPointerPaintPrimitives(
   operationBlockIds.forEach((blockId, index) =>
     orderByBlockId.set(blockId, index),
   );
-  const comparison = comparePointerCandidates(
-    anchor,
-    focus,
-    orderByBlockId,
-  );
+  const comparison = comparePointerCandidates(anchor, focus, orderByBlockId);
   if (comparison === null) return null;
   const normalizedStart = comparison <= 0 ? anchor : focus;
   const normalizedEnd = comparison <= 0 ? focus : anchor;
@@ -1309,9 +1345,7 @@ function evaluateTransientPointerCoverage(
   if (model.children?.scope) {
     const children = context.editor
       .getChildBlockIds(target.block.id)
-      .map((blockId) =>
-        readEditorBlockSelectionTarget(context.editor, blockId),
-      )
+      .map((blockId) => readEditorBlockSelectionTarget(context.editor, blockId))
       .filter((child): child is EditorBlockSelectionTarget => child !== null)
       .map((child) => evaluateTransientPointerCoverage(child, context));
     childCoverages = Object.freeze(
@@ -1361,9 +1395,7 @@ function aggregateTransientPointerCoverage(
   if (directCoverage === "complete-block") return "complete-block";
   if (directCoverage === "partial") return "partial";
   if (childCoverages.length === 0) return directCoverage;
-  const selected = childCoverages.filter(
-    (child) => child.coverage !== "none",
-  );
+  const selected = childCoverages.filter((child) => child.coverage !== "none");
   if (selected.length === 0) return directCoverage;
   if (childCoverages.some((child) => child.coverage === "partial"))
     return "partial";
@@ -1402,8 +1434,7 @@ function comparePointerCandidates(
   right: PointerSelectionCandidate,
   orderByBlockId: ReadonlyMap<BlockId, number>,
 ): number | null {
-  if (left.blockId === right.blockId)
-    return left.textOffset - right.textOffset;
+  if (left.blockId === right.blockId) return left.textOffset - right.textOffset;
   const leftIndex = orderByBlockId.get(left.blockId);
   const rightIndex = orderByBlockId.get(right.blockId);
   return leftIndex === undefined || rightIndex === undefined
@@ -1437,11 +1468,13 @@ function materializePointerSettlement(
   readonly anchor: EditorLogicalSelectionPoint;
   readonly focus: EditorLogicalSelectionPoint;
 } | null {
-  if (editor.getSelectionGraphRevision() !== resource.graphRevision) return null;
+  if (editor.getSelectionGraphRevision() !== resource.graphRevision)
+    return null;
   const collapsed =
     resource.phase === "pending" ||
     (resource.anchorCandidate.blockId === resource.focusCandidate.blockId &&
-      resource.anchorCandidate.textOffset === resource.focusCandidate.textOffset);
+      resource.anchorCandidate.textOffset ===
+        resource.focusCandidate.textOffset);
   const anchorCandidate = collapsed
     ? resource.focusCandidate
     : resource.anchorCandidate;
@@ -1483,7 +1516,8 @@ function materializePointerCandidate(
   contentRuntime: EditorWebContentRuntime,
   leases: EditorBlockContentLease[],
 ): EditorLogicalSelectionPoint | null {
-  if (candidate.graphRevision !== editor.getSelectionGraphRevision()) return null;
+  if (candidate.graphRevision !== editor.getSelectionGraphRevision())
+    return null;
   const target = readEditorBlockSelectionTarget(editor, candidate.blockId);
   if (
     !target ||

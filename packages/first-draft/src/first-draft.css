@@ -37,13 +37,18 @@
   z-index: 30;
 }
 
-.first-draft-block-hover-tracker {
+.first-draft-example__document-scroll {
   min-inline-size: 0;
   min-block-size: 0;
   overflow-x: clip;
   overflow-y: auto;
   overscroll-behavior-y: contain;
   scrollbar-gutter: stable;
+}
+
+.first-draft-block-hover-boundary {
+  min-inline-size: 0;
+  min-block-size: 100%;
 }
 
 .first-draft-example .first-draft-block-controls {
@@ -510,12 +515,6 @@
   font-size: 1rem;
   line-height: 1.25;
   margin: 0.25rem 0;
-}
-
-.first-draft-example
-  :is(.paragraph-block__paragraph, .heading-block__heading):focus-within {
-  outline: 2px solid var(--fd-accent);
-  outline-offset: 2px;
 }
 
 .first-draft-example

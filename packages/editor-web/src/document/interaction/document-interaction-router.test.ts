@@ -156,6 +156,18 @@ describe("document interaction router", () => {
     unregisterSecond();
     unregisterFirst();
   });
+
+  it("routes captured scroll from an external ancestor to the active pointer owner", () => {
+    const editor = appendEditor("editor");
+    const editorOwner = owner(editor.list);
+    const unregister = registerDocumentInteractionOwner(document, editorOwner);
+
+    editor.editable.dispatchEvent(pointerEvent("pointerdown", 31));
+    editor.list.parentElement?.dispatchEvent(new Event("scroll"));
+
+    expect(editorOwner.scroll).toHaveBeenCalledOnce();
+    unregister();
+  });
 });
 
 function appendEditor(label: string): {

@@ -19,10 +19,7 @@ import {
 } from "../blocks/view-state.tsx";
 import { createFirstDraftEditorDefinition } from "../first-draft-definition.tsx";
 import { createFirstDraftSnapshot } from "../first-draft-fixture.ts";
-import {
-  FirstDraftBlockHoverProvider,
-  FirstDraftBlockHoverTracker,
-} from "./index.ts";
+import { FirstDraftBlockHoverProvider } from "./index.ts";
 
 const id = (value: string) => value as BlockId;
 const disposables: Array<{ dispose(): void }> = [];
@@ -603,9 +600,7 @@ function renderFirstDraft(
   const result = render(
     <FirstDraftViewStateProvider store={viewState}>
       <FirstDraftBlockHoverProvider enabled={editor.editable}>
-        <FirstDraftBlockHoverTracker>
-          <EditorDocument editor={editor} />
-        </FirstDraftBlockHoverTracker>
+        <EditorDocument editor={editor} />
       </FirstDraftBlockHoverProvider>
     </FirstDraftViewStateProvider>,
   );

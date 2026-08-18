@@ -1,4 +1,4 @@
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createFirstDraftSnapshot } from "./first-draft-fixture.ts";
@@ -24,6 +24,36 @@ const probes = vi.hoisted(() => ({
   presenceOptionsHistory: [] as Array<{
     onParticipants?: (participants: readonly Record<string, unknown>[]) => void;
   }>,
+  editorDocumentProps: null as Record<string, unknown> | null,
+  autoScrollInstances: [] as Array<{
+    readonly input: {
+      readonly container: () => HTMLDivElement | null;
+      readonly axis?: "x" | "y" | "both";
+      readonly outsideBehavior?: "stop" | "continue";
+    };
+    readonly start: ReturnType<typeof vi.fn>;
+    readonly stop: ReturnType<typeof vi.fn>;
+    readonly updatePoint: ReturnType<typeof vi.fn>;
+  }>,
+}));
+
+vi.mock("mk-autoscroll", () => ({
+  createAutoScroll: vi.fn(
+    (input: {
+      readonly container: () => HTMLDivElement | null;
+      readonly axis?: "x" | "y" | "both";
+      readonly outsideBehavior?: "stop" | "continue";
+    }) => {
+      const instance = {
+        input,
+        start: vi.fn(),
+        stop: vi.fn(),
+        updatePoint: vi.fn(),
+      };
+      probes.autoScrollInstances.push(instance);
+      return instance;
+    },
+  ),
 }));
 
 vi.mock("./transport/message-protocol.ts", async (importOriginal) => {
@@ -34,9 +64,20 @@ vi.mock("./transport/message-protocol.ts", async (importOriginal) => {
 });
 
 vi.mock("@repo/editor-web/document-runtime", () => ({
-  EditorDocument: ({ editor }: { editor: { testId: string } }) => (
-    <div data-testid="editor-document" data-editor-test-id={editor.testId} />
-  ),
+  EditorDocument: (
+    props: Record<string, unknown> & { editor: { testId: string } },
+  ) => {
+    probes.editorDocumentProps = props;
+    return (
+      <div
+        role="region"
+        aria-label="Document editor"
+        className="editor-web-document"
+        data-testid="editor-document"
+        data-editor-test-id={props.editor.testId}
+      />
+    );
+  },
   toCollaborationSubjectKey: () => null,
 }));
 vi.mock("@repo/editor-web/editor-definition", () => ({
@@ -95,10 +136,9 @@ vi.mock("./first-draft-selection-badge-layer.tsx", () => ({
   FirstDraftSelectionBadgeLayer: () => null,
 }));
 vi.mock("./block-controls/index.ts", () => ({
-  FirstDraftBlockHoverProvider: ({ children }: { children: ReactNode }) =>
-    children,
-  FirstDraftBlockHoverTracker: ({ children }: { children: ReactNode }) =>
-    children,
+  FirstDraftBlockHoverProvider: ({ children }: { children: ReactNode }) => (
+    <div className="first-draft-block-hover-boundary">{children}</div>
+  ),
 }));
 
 import {
@@ -200,6 +240,8 @@ describe("FirstDraftEditorSurface canonical lifecycle", () => {
     probes.remoteOptionsHistory.length = 0;
     probes.presenceOptions = null;
     probes.presenceOptionsHistory.length = 0;
+    probes.editorDocumentProps = null;
+    probes.autoScrollInstances.length = 0;
     TestWebSocket.instances = [];
     vi.stubGlobal("WebSocket", TestWebSocket);
     vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(
@@ -380,9 +422,7 @@ describe("FirstDraftEditorSurface canonical lifecycle", () => {
     expect(view.container.textContent).toContain("participant-document-first");
     expect(view.container.textContent).toContain("reported an error");
 
-    const lateMessageListeners = [
-      ...(socketA.listeners.get("message") ?? []),
-    ];
+    const lateMessageListeners = [...(socketA.listeners.get("message") ?? [])];
     view.rerender(<FirstDraftEditorSurface collaboration={second} />);
     expect(view.queryByTestId("editor-document")).toBeNull();
     expect(view.container.textContent).toContain("Collaboration: connecting");
@@ -486,6 +526,103 @@ describe("FirstDraftEditorSurface canonical lifecycle", () => {
     view.unmount();
   });
 
+  it("owns the document DOM hierarchy and one selection autoscroll controller", () => {
+    const view = render(<FirstDraftEditorSurface collaboration={first} />);
+    deliverDocument(TestWebSocket.instances[0]!, first);
+
+    const section = view.container.querySelector<HTMLElement>(
+      "section.first-draft-example",
+    )!;
+    const toolbar = section.querySelector<HTMLElement>(
+      ":scope > .first-draft-example__toolbar",
+    )!;
+    const scroll = section.querySelector<HTMLDivElement>(
+      ":scope > .first-draft-example__document-scroll",
+    )!;
+    const boundary = scroll.querySelector<HTMLElement>(
+      ":scope > .first-draft-block-hover-boundary",
+    )!;
+    const documentRoot = boundary.querySelector<HTMLElement>(
+      ":scope > .editor-web-document",
+    )!;
+
+    expect(section.children).toHaveLength(2);
+    expect(toolbar).not.toBeNull();
+    expect(scroll.contains(toolbar)).toBe(false);
+    expect(boundary).not.toBeNull();
+    expect(documentRoot.tagName).toBe("DIV");
+    expect(section.querySelector("section section")).toBeNull();
+    expect(
+      boundary.classList.contains("first-draft-example__document-scroll"),
+    ).toBe(false);
+    expect(probes.autoScrollInstances).toHaveLength(1);
+    expect(probes.autoScrollInstances[0]!.input.container()).toBe(scroll);
+    expect(probes.autoScrollInstances[0]!.input.axis).toBe("y");
+    expect(probes.autoScrollInstances[0]!.input.outsideBehavior).toBe(
+      "continue",
+    );
+    act(() => {
+      probes.presenceOptions?.onParticipants?.([
+        participantFor(first.documentId),
+      ]);
+    });
+    expect(probes.autoScrollInstances).toHaveLength(1);
+    expect(view.getByTestId("editor-document")).toBe(documentRoot);
+
+    const autoScroll = probes.autoScrollInstances[0]!;
+    const drag = {
+      pointer: { clientX: 41, clientY: 73 },
+      selection: {},
+      anchor: {},
+      focus: {},
+    };
+    act(() => {
+      (
+        probes.editorDocumentProps?.onSelectionDragStart as (
+          value: typeof drag,
+        ) => void
+      )(drag);
+    });
+    expect(autoScroll.updatePoint).toHaveBeenCalledWith({ x: 41, y: 73 });
+    expect(autoScroll.start).toHaveBeenCalledOnce();
+    expect(autoScroll.updatePoint.mock.invocationCallOrder[0]).toBeLessThan(
+      autoScroll.start.mock.invocationCallOrder[0]!,
+    );
+
+    act(() => {
+      (
+        probes.editorDocumentProps?.onSelectionDragUpdate as (
+          value: typeof drag,
+        ) => void
+      )({ ...drag, pointer: { clientX: 43, clientY: 79 } });
+    });
+    expect(autoScroll.updatePoint).toHaveBeenLastCalledWith({ x: 43, y: 79 });
+
+    fireEvent.pointerMove(boundary);
+    expect(autoScroll.start).toHaveBeenCalledOnce();
+
+    act(() => {
+      (
+        probes.editorDocumentProps?.onSelectionDragEnd as (
+          value: typeof drag,
+        ) => void
+      )(drag);
+    });
+    expect(autoScroll.stop).toHaveBeenCalledOnce();
+    expect(autoScroll.updatePoint).toHaveBeenLastCalledWith(null);
+
+    act(() => {
+      (
+        probes.editorDocumentProps?.onSelectionDragStart as (
+          value: typeof drag,
+        ) => void
+      )(drag);
+    });
+    view.unmount();
+    expect(autoScroll.stop).toHaveBeenCalledTimes(2);
+    expect(autoScroll.updatePoint).toHaveBeenLastCalledWith(null);
+  });
+
   it("rejects every late A1 source after A1 to B to equivalent A2", () => {
     const view = render(<FirstDraftEditorSurface collaboration={first} />);
     const socketA1 = TestWebSocket.instances[0]!;
@@ -496,9 +633,7 @@ describe("FirstDraftEditorSurface canonical lifecycle", () => {
 
     view.rerender(<FirstDraftEditorSurface collaboration={second} />);
     deliverDocument(TestWebSocket.instances[1]!, second);
-    view.rerender(
-      <FirstDraftEditorSurface collaboration={{ ...first }} />,
-    );
+    view.rerender(<FirstDraftEditorSurface collaboration={{ ...first }} />);
     const socketA2 = TestWebSocket.instances[2]!;
     expect(socketA2).not.toBe(socketA1);
     expect(view.queryByTestId("editor-document")).toBeNull();
@@ -534,7 +669,9 @@ describe("FirstDraftEditorSurface canonical lifecycle", () => {
     expect(view.container.textContent).toContain("Collaboration: connecting");
     expect(view.container.textContent).toContain("Remote peers: 0");
     expect(view.container.textContent).not.toContain("late-a1");
-    expect(view.container.textContent).not.toContain("participant-document-first");
+    expect(view.container.textContent).not.toContain(
+      "participant-document-first",
+    );
 
     deliverDocument(socketA2, first);
     expect(view.getByTestId("editor-document").dataset.editorTestId).toBe(

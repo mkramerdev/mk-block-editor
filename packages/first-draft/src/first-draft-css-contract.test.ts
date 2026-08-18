@@ -17,9 +17,9 @@ describe("First Draft text focus ownership", () => {
     expect(css).not.toMatch(/\.dark\s+\.first-draft-example/u);
   });
 
-  it("retains the intentional product focus ring on paragraph and heading wrappers", () => {
-    expect(css).toMatch(
-      /:is\(\.paragraph-block__paragraph,\s*\.heading-block__heading\):focus-within\s*\{\s*outline:\s*2px solid var\(--fd-accent\);/u,
+  it("does not draw a focus ring around active paragraph or heading wrappers", () => {
+    expect(css).not.toMatch(
+      /:is\(\.paragraph-block__paragraph,\s*\.heading-block__heading\):focus-within/u,
     );
   });
 
@@ -30,5 +30,24 @@ describe("First Draft text focus ownership", () => {
 
   it("does not restore a table-only text-root width patch", () => {
     expect(css).not.toMatch(/\.table-block__cell\s*>\s*\.editor-web-text/u);
+  });
+
+  it("assigns scrolling only to the First Draft document container", () => {
+    const documentScroll =
+      /^\.first-draft-example__document-scroll\s*\{([^}]*)\}/mu.exec(css)?.[1];
+    const hoverBoundary =
+      /^\.first-draft-block-hover-boundary\s*\{([^}]*)\}/mu.exec(css)?.[1];
+    const editorDocument =
+      /^\.first-draft-example \.editor-web-document\s*\{([^}]*)\}/mu.exec(
+        css,
+      )?.[1];
+
+    expect(documentScroll).toMatch(/overflow-y:\s*auto/u);
+    expect(documentScroll).toMatch(/overflow-x:\s*clip/u);
+    expect(documentScroll).toMatch(/overscroll-behavior-y:\s*contain/u);
+    expect(documentScroll).toMatch(/scrollbar-gutter:\s*stable/u);
+    expect(hoverBoundary).not.toMatch(/overflow(?:-y)?:\s*(?:auto|scroll)/u);
+    expect(editorDocument).not.toMatch(/overflow-y:\s*(?:auto|scroll)/u);
+    expect(css).not.toContain("first-draft-block-hover-tracker");
   });
 });

@@ -24,6 +24,9 @@ export function EditorDocument<TEditor extends Editor>({
   editor,
   layout,
   renderDocumentLayers,
+  onSelectionDragStart,
+  onSelectionDragUpdate,
+  onSelectionDragEnd,
 }: EditorDocumentProps<TEditor>) {
   const renderEditor = resolveEditorRuntimePort(editor);
   const effectiveLayout = layout ?? neutralEditorLayout;
@@ -32,7 +35,8 @@ export function EditorDocument<TEditor extends Editor>({
     "--editor-side-right-width": effectiveLayout.sideRightWidth,
   };
   return (
-    <section
+    <div
+      role="region"
       aria-label="Document editor"
       className="editor-web-document"
       data-editor-web="document"
@@ -44,7 +48,10 @@ export function EditorDocument<TEditor extends Editor>({
         contentRuntime={renderEditor.contentRuntime}
         editor={renderEditor as EditorRuntimePort<TEditor>}
         renderDocumentLayers={renderDocumentLayers}
+        onSelectionDragStart={onSelectionDragStart}
+        onSelectionDragUpdate={onSelectionDragUpdate}
+        onSelectionDragEnd={onSelectionDragEnd}
       />
-    </section>
+    </div>
   );
 }

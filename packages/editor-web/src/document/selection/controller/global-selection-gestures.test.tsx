@@ -202,9 +202,9 @@ describe("global selection gesture ownership", () => {
       kind: "none",
       revision: 0,
     });
-    expect(
-      fixture.options.selectionController.endpoint.getSnapshot(),
-    ).toBe(endpointBeforePointerDown);
+    expect(fixture.options.selectionController.endpoint.getSnapshot()).toBe(
+      endpointBeforePointerDown,
+    );
     expect(fixture.options.selectionController.localPaint.getSnapshot()).toBe(
       paintBeforePointerDown,
     );
@@ -430,7 +430,9 @@ describe("global selection gesture ownership", () => {
       kind: "none",
       revision: 0,
     });
-    expect(fixture.options.selectionController.localPaint.getSnapshot()).toEqual({
+    expect(
+      fixture.options.selectionController.localPaint.getSnapshot(),
+    ).toEqual({
       kind: "none",
     });
     expect(fixture.requestPresentation).not.toHaveBeenCalled();
@@ -578,6 +580,196 @@ describe("global selection gesture ownership", () => {
     hook.unmount();
     fixture.dispose();
   });
+
+  it("publishes semantic selection-drag snapshots only after the threshold", () => {
+    const fixture = pointerGestureFixture();
+    const onSelectionDragStart = vi.fn();
+    const onSelectionDragUpdate = vi.fn();
+    const onSelectionDragEnd = vi.fn();
+    const hook = renderHook(() =>
+      useGlobalSelectionGestures({
+        ...fixture.options,
+        onSelectionDragStart,
+        onSelectionDragUpdate,
+        onSelectionDragEnd,
+      }),
+    );
+
+    act(() =>
+      fixture.text.dispatchEvent(
+        pointerEvent("pointerdown", {
+          pointerId: 211,
+          clientX: 10,
+          clientY: 10,
+        }),
+      ),
+    );
+    act(() =>
+      document.dispatchEvent(
+        pointerEvent("pointermove", {
+          pointerId: 211,
+          clientX: 12,
+          clientY: 11,
+        }),
+      ),
+    );
+    expect(onSelectionDragStart).not.toHaveBeenCalled();
+    expect(onSelectionDragUpdate).not.toHaveBeenCalled();
+    expect(onSelectionDragEnd).not.toHaveBeenCalled();
+
+    act(() =>
+      document.dispatchEvent(
+        pointerEvent("pointermove", {
+          pointerId: 211,
+          clientX: 20,
+          clientY: 10,
+        }),
+      ),
+    );
+    expect(onSelectionDragStart).toHaveBeenCalledOnce();
+    expect(onSelectionDragStart).toHaveBeenLastCalledWith({
+      selection: expect.objectContaining({
+        direction: "forward",
+        anchor: expect.objectContaining({ blockId: "text" }),
+        focus: expect.objectContaining({ blockId: "text" }),
+      }),
+      anchor: expect.objectContaining({ blockId: "text" }),
+      focus: expect.objectContaining({ blockId: "text" }),
+      pointer: { clientX: 20, clientY: 10 },
+    });
+
+    act(() =>
+      document.dispatchEvent(
+        pointerEvent("pointermove", {
+          pointerId: 211,
+          clientX: 24,
+          clientY: 14,
+        }),
+      ),
+    );
+    expect(onSelectionDragUpdate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ pointer: { clientX: 24, clientY: 14 } }),
+    );
+
+    act(() =>
+      document.dispatchEvent(
+        pointerEvent("pointerup", {
+          pointerId: 211,
+          clientX: 25,
+          clientY: 15,
+        }),
+      ),
+    );
+    expect(onSelectionDragStart).toHaveBeenCalledOnce();
+    expect(onSelectionDragEnd).toHaveBeenCalledOnce();
+    expect(onSelectionDragEnd).toHaveBeenLastCalledWith(
+      expect.objectContaining({ pointer: { clientX: 25, clientY: 15 } }),
+    );
+    hook.unmount();
+    fixture.dispose();
+  });
+
+  it("does not publish a drag lifecycle for a click", () => {
+    const fixture = pointerGestureFixture();
+    const onSelectionDragStart = vi.fn();
+    const onSelectionDragEnd = vi.fn();
+    const hook = renderHook(() =>
+      useGlobalSelectionGestures({
+        ...fixture.options,
+        onSelectionDragStart,
+        onSelectionDragEnd,
+      }),
+    );
+
+    act(() => {
+      fixture.text.dispatchEvent(
+        pointerEvent("pointerdown", {
+          pointerId: 212,
+          clientX: 10,
+          clientY: 10,
+        }),
+      );
+      document.dispatchEvent(
+        pointerEvent("pointerup", {
+          pointerId: 212,
+          clientX: 10,
+          clientY: 10,
+        }),
+      );
+    });
+
+    expect(onSelectionDragStart).not.toHaveBeenCalled();
+    expect(onSelectionDragEnd).not.toHaveBeenCalled();
+    hook.unmount();
+    fixture.dispose();
+  });
+
+  it("refreshes a stationary drag point when an external ancestor scrolls", () => {
+    const fixture = pointerGestureFixture();
+    const scrollContainer = document.createElement("div");
+    scrollContainer.dataset.editorInteractionScope = "true";
+    fixture.list.before(scrollContainer);
+    scrollContainer.append(fixture.list);
+    const onSelectionDragUpdate = vi.fn();
+    const hook = renderHook(() =>
+      useGlobalSelectionGestures({
+        ...fixture.options,
+        onSelectionDragStart: vi.fn(),
+        onSelectionDragUpdate,
+      }),
+    );
+    beginFixtureDrag(fixture, 214);
+    onSelectionDragUpdate.mockClear();
+
+    act(() => scrollContainer.dispatchEvent(new Event("scroll")));
+
+    expect(onSelectionDragUpdate).toHaveBeenCalledOnce();
+    expect(onSelectionDragUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ pointer: { clientX: 20, clientY: 10 } }),
+    );
+    hook.unmount();
+    fixture.dispose();
+    scrollContainer.remove();
+  });
+
+  it.each(["pointercancel", "lostpointercapture", "unmount", "non-editable"])(
+    "ends a started selection drag once on %s",
+    (terminal) => {
+      const fixture = pointerGestureFixture();
+      const onSelectionDragStart = vi.fn();
+      const onSelectionDragEnd = vi.fn();
+      const hook = renderHook(() =>
+        useGlobalSelectionGestures({
+          ...fixture.options,
+          onSelectionDragStart,
+          onSelectionDragEnd,
+        }),
+      );
+      beginFixtureDrag(fixture, 213);
+
+      act(() => {
+        if (terminal === "pointercancel") {
+          document.dispatchEvent(
+            pointerEvent("pointercancel", { pointerId: 213 }),
+          );
+        } else if (terminal === "lostpointercapture") {
+          fixture.list.dispatchEvent(
+            pointerEvent("lostpointercapture", { pointerId: 213 }),
+          );
+        } else if (terminal === "non-editable") {
+          (fixture.options.editor as { editable: boolean }).editable = false;
+          hook.rerender();
+        } else {
+          hook.unmount();
+        }
+      });
+
+      expect(onSelectionDragStart).toHaveBeenCalledOnce();
+      expect(onSelectionDragEnd).toHaveBeenCalledOnce();
+      if (terminal !== "unmount") hook.unmount();
+      fixture.dispose();
+    },
+  );
 
   it("prevents native selection from the first claimed pointer event while preserving canonical affinity", () => {
     const fixture = pointerGestureFixture("backward");
@@ -1224,10 +1416,7 @@ function pointerGestureFixture(affinity: "backward" | "forward" | null = null) {
 
   const controller = createSelectionController();
   const commitSelectionPoint = vi.spyOn(controller, "commitSelectionPoint");
-  const extendSelection = vi.spyOn(
-    controller,
-    "extendSelection",
-  );
+  const extendSelection = vi.spyOn(controller, "extendSelection");
   const setPointerCapture = vi.fn();
   const releasePointerCapture = vi.fn();
   Object.defineProperties(list, {

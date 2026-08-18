@@ -71,11 +71,13 @@ body {
 
 .first-draft-route {
   display: grid;
-  grid-template-rows: auto minmax(40rem, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   place-content: initial;
   gap: 1rem;
-  min-height: 100vh;
+  block-size: 100dvh;
+  min-block-size: 0;
   padding: 1rem;
+  overflow: hidden;
   text-align: initial;
 }
 
@@ -94,12 +96,13 @@ body {
 
 .first-draft-route__editor {
   display: flex;
-  min-height: 40rem;
+  min-block-size: 0;
   flex-direction: column;
 }
 
 .first-draft-route__editor > .first-draft-example {
   flex: 1;
+  min-block-size: 0;
 }
 
 .first-draft-route__editor > output,
