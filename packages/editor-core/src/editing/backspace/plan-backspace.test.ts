@@ -128,6 +128,26 @@ describe("block-boundary Backspace planning", () => {
     });
   });
 
+  it("keeps an intervening atomic block as the previous selection target", () => {
+    const previousText = block(1, "textLeaf", "a0", null, "1");
+    const atomic = block(2, "atomLeaf", "a1");
+    const source = block(3, "textLeaf", "a2", null, "1");
+    const result = run(
+      [previousText, atomic, source],
+      source,
+      rich("textLeaf", ""),
+      { from: 0, to: 0 },
+      { [previousText.id]: rich("textLeaf", "previous") },
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.transaction.blocks[source.id]?.tombstone).not.toBeNull();
+    expect(result.transaction.selection).toStrictEqual({
+      kind: "atomic",
+      blockId: atomic.id,
+    });
+  });
+
   it("removes an ordinary exact wrapper when its sole text is empty", () => {
     const previous = block(1, "textLeaf", "a0", null, "1");
     const wrapper = block(2, "oneShell", "a1");

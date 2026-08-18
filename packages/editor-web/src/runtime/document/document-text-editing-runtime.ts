@@ -109,8 +109,36 @@ class ActiveTextSession {
   isInputReady(view: EditorView | null): boolean {
     return Boolean(
       view &&
-        view.dom.getAttribute("contenteditable") === "true" &&
-        view.dom.ownerDocument.activeElement === view.dom,
+      view.dom.getAttribute("contenteditable") === "true" &&
+      view.dom.ownerDocument.activeElement === view.dom,
+    );
+  }
+
+  hasAcknowledgedPresentation(
+    request: TextActivationRequest,
+    host: TextHostRegistration,
+    view: EditorView | null,
+  ): boolean {
+    const acknowledgement = this.acknowledgement;
+    const activation = this.obligation?.value;
+    const native = view?.dom.ownerDocument.getSelection();
+    const expected = acknowledgement?.expectedNativePoint;
+    return Boolean(
+      acknowledgement?.acknowledged &&
+      activation &&
+      view &&
+      acknowledgement.root === view.dom &&
+      acknowledgement.blockId === request.blockId &&
+      acknowledgement.canonicalSelectionRevision ===
+        request.canonicalSelectionRevision &&
+      acknowledgement.canonicalTextOffset === request.canonicalTextOffset &&
+      acknowledgement.projectionIdentity === host.projectionIdentity &&
+      activation.affinity === request.affinity &&
+      expected &&
+      native?.isCollapsed &&
+      native.focusNode === expected.node &&
+      native.focusOffset === expected.offset &&
+      this.isInputReady(view),
     );
   }
 
@@ -227,6 +255,16 @@ export class DocumentTextEditingRuntime {
       return { status: "rejected", reason: "composition-pinned" };
     }
     if (current?.blockId === blockId) {
+      if (
+        requestedHost &&
+        current.hasAcknowledgedPresentation(
+          request,
+          requestedHost,
+          this.sharedEditor.readView(),
+        )
+      ) {
+        return { status: "focused" };
+      }
       this.awaitingHostReattachmentFor = null;
       current.replaceRequest(request);
       this.activateSession(current);

@@ -4,8 +4,10 @@ import { join } from "node:path";
 import { StrictMode } from "react";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { BlockId } from "@repo/editor-core/kernel";
+import { createBlockRecord } from "@repo/editor-core/metadata";
 import { EditorView } from "@repo/editor-dom/prosemirror";
 import { EditorDocument } from "../runtime/document/editor-document-component.tsx";
+import { createSemanticDomTextLayout } from "../document/geometry/semantic-dom-coordinates.ts";
 import type { EditableEditor } from "../runtime/document/contracts.ts";
 import type { EditableEditorRuntimePort } from "../runtime/document/render-port.ts";
 import { createTestEditorSnapshot } from "./editor-snapshot-fixtures.ts";
@@ -501,6 +503,322 @@ describe("shared document text editing runtime", () => {
     editor.dispose();
   });
 
+  it("keeps an existing previous paragraph focused after deleting an empty paragraph", async () => {
+    const previousId = "backspace-previous-paragraph" as BlockId;
+    const emptyId = "backspace-empty-paragraph" as BlockId;
+    const editor = initializeTestEditableEditor({
+      definition: testEditableEditorDefinition,
+      snapshot: createTestEditorSnapshot([
+        { id: previousId, type: "paragraph", text: "Alpha" },
+        { id: emptyId, type: "paragraph", text: "" },
+      ]),
+    });
+    const runtime = editor as EditableEditorRuntimePort;
+    const rendered = render(<EditorDocument editor={editor} />);
+    activateText(editor, emptyId, 0);
+    const sharedView = runtime.readActiveTextView();
+    if (!sharedView) throw new Error("missing active shared view");
+    expectCanonicalCaret(runtime, emptyId, 0);
+
+    act(() => sharedView.dom.dispatchEvent(keyDown("Backspace")));
+
+    await waitFor(() => expect(editor.getRootBlockIds()).toEqual([previousId]));
+    await waitFor(() =>
+      expectSharedTextCaret(
+        rendered.container,
+        runtime,
+        sharedView,
+        previousId,
+        5,
+      ),
+    );
+    expect(blockShellOrNull(rendered.container, emptyId)).toBeNull();
+    expect(
+      textProjection(textHost(rendered.container, previousId)).hidden,
+    ).toBe(true);
+    expectSharedViewInvariants(rendered.container);
+
+    act(() => sharedView.dispatch(sharedView.state.tr.insertText("!")));
+    await waitFor(() =>
+      expect(editor.readBlockPlainText(previousId, "paragraph")).toBe("Alpha!"),
+    );
+    editor.dispose();
+  });
+
+  it("keeps the original paragraph immediately editable after Enter then Backspace", async () => {
+    const editor = initializeTestEditableEditor({
+      definition: testEditableEditorDefinition,
+      snapshot: createTestEditorSnapshot([
+        { id: firstId, type: "paragraph", text: "Alpha" },
+      ]),
+    });
+    const runtime = editor as EditableEditorRuntimePort;
+    const rendered = render(<EditorDocument editor={editor} />);
+    activateText(editor, firstId, 5);
+    const sharedView = runtime.readActiveTextView();
+    if (!sharedView) throw new Error("missing active shared view");
+
+    act(() => sharedView.dom.dispatchEvent(keyDown("Enter")));
+    await waitFor(() => expect(editor.getRootBlockIds()).toHaveLength(2));
+    const generatedId = editor.getRootBlockIds()[1];
+    if (!generatedId) throw new Error("missing generated paragraph");
+    await waitFor(() =>
+      expectSharedTextCaret(
+        rendered.container,
+        runtime,
+        sharedView,
+        generatedId,
+        0,
+      ),
+    );
+
+    act(() => sharedView.dom.dispatchEvent(keyDown("Backspace")));
+    await waitFor(() => expect(editor.getRootBlockIds()).toEqual([firstId]));
+    await waitFor(() =>
+      expectSharedTextCaret(
+        rendered.container,
+        runtime,
+        sharedView,
+        firstId,
+        5,
+      ),
+    );
+    act(() => sharedView.dispatch(sharedView.state.tr.insertText("!")));
+    await waitFor(() =>
+      expect(editor.readBlockPlainText(firstId, "paragraph")).toBe("Alpha!"),
+    );
+    expect(blockShellOrNull(rendered.container, generatedId)).toBeNull();
+    expectSharedViewInvariants(rendered.container);
+    editor.dispose();
+  });
+
+  it("activates a previous heading at its end without losing heading semantics", async () => {
+    const headingId = "backspace-heading" as BlockId;
+    const emptyId = "backspace-after-heading" as BlockId;
+    const editor = initializeTestEditableEditor({
+      definition: testEditableEditorDefinition,
+      snapshot: createTestEditorSnapshot([
+        {
+          id: headingId,
+          type: "heading",
+          text: "Title",
+          metadata: { level: 2 },
+        },
+        { id: emptyId, type: "paragraph", text: "" },
+      ]),
+    });
+    const runtime = editor as EditableEditorRuntimePort;
+    const rendered = render(<EditorDocument editor={editor} />);
+    activateText(editor, emptyId, 0);
+    const sharedView = runtime.readActiveTextView();
+    if (!sharedView) throw new Error("missing active shared view");
+
+    act(() => sharedView.dom.dispatchEvent(keyDown("Backspace")));
+    await waitFor(() => expect(editor.getRootBlockIds()).toEqual([headingId]));
+    await waitFor(() =>
+      expectSharedTextCaret(
+        rendered.container,
+        runtime,
+        sharedView,
+        headingId,
+        5,
+      ),
+    );
+    expect(editor.getBlock(headingId)).toMatchObject({
+      type: "heading",
+      metadata: { level: 2 },
+    });
+    expect(sharedView.dom.querySelector("h2")).not.toBeNull();
+    expect(textProjection(textHost(rendered.container, headingId)).hidden).toBe(
+      true,
+    );
+    expectSharedViewInvariants(rendered.container);
+    editor.dispose();
+  });
+
+  it("resolves wrapper cleanup to the nearest surviving text block above", async () => {
+    const previousId = "backspace-wrapper-previous" as BlockId;
+    const wrapperId = "backspace-list-item-wrapper" as BlockId;
+    const emptyId = "backspace-list-item-empty" as BlockId;
+    const base = createTestEditorSnapshot([
+      { id: previousId, type: "paragraph", text: "Above" },
+      { id: wrapperId, type: "itemWrapper" },
+      { id: emptyId, type: "childText", text: "" },
+    ]);
+    const snapshot = {
+      ...base,
+      blocks: {
+        ...base.blocks,
+        [wrapperId]: createBlockRecord({ id: wrapperId, type: "itemWrapper" }),
+        [emptyId]: createBlockRecord({
+          id: emptyId,
+          type: "childText",
+          parentId: wrapperId,
+        }),
+      },
+      rootBlockIds: [previousId, wrapperId],
+      childIdsByParentId: { [wrapperId]: [emptyId] },
+    };
+    const editor = initializeTestEditableEditor({
+      definition: testEditableEditorDefinition,
+      snapshot,
+    });
+    const runtime = editor as EditableEditorRuntimePort;
+    const rendered = render(<EditorDocument editor={editor} />);
+    activateText(editor, emptyId, 0);
+    const sharedView = runtime.readActiveTextView();
+    if (!sharedView) throw new Error("missing active shared view");
+
+    act(() => sharedView.dom.dispatchEvent(keyDown("Backspace")));
+    await waitFor(() => expect(editor.getRootBlockIds()).toEqual([previousId]));
+    await waitFor(() =>
+      expectSharedTextCaret(
+        rendered.container,
+        runtime,
+        sharedView,
+        previousId,
+        5,
+      ),
+    );
+    expect(blockShellOrNull(rendered.container, wrapperId)).toBeNull();
+    expect(blockShellOrNull(rendered.container, emptyId)).toBeNull();
+    expectSharedViewInvariants(rendered.container);
+    editor.dispose();
+  });
+
+  it("falls forward to the following text start when no previous target exists", async () => {
+    const emptyId = "backspace-first-empty" as BlockId;
+    const followingId = "backspace-following" as BlockId;
+    const editor = initializeTestEditableEditor({
+      definition: testEditableEditorDefinition,
+      snapshot: createTestEditorSnapshot([
+        { id: emptyId, type: "paragraph", text: "" },
+        { id: followingId, type: "paragraph", text: "Beta" },
+      ]),
+    });
+    const runtime = editor as EditableEditorRuntimePort;
+    const rendered = render(<EditorDocument editor={editor} />);
+    activateText(editor, emptyId, 0);
+    const sharedView = runtime.readActiveTextView();
+    if (!sharedView) throw new Error("missing active shared view");
+
+    act(() => sharedView.dom.dispatchEvent(keyDown("Backspace")));
+    await waitFor(() =>
+      expect(editor.getRootBlockIds()).toEqual([followingId]),
+    );
+    await waitFor(() =>
+      expectSharedTextCaret(
+        rendered.container,
+        runtime,
+        sharedView,
+        followingId,
+        0,
+      ),
+    );
+    expectSharedViewInvariants(rendered.container);
+    editor.dispose();
+  });
+
+  it("restores deletion selection through undo and redo without duplicating the shared view", async () => {
+    const previousId = "backspace-history-previous" as BlockId;
+    const emptyId = "backspace-history-empty" as BlockId;
+    const editor = initializeTestEditableEditor({
+      definition: testEditableEditorDefinition,
+      snapshot: createTestEditorSnapshot([
+        { id: previousId, type: "paragraph", text: "Alpha" },
+        { id: emptyId, type: "paragraph", text: "" },
+      ]),
+    });
+    const runtime = editor as EditableEditorRuntimePort;
+    const rendered = render(<EditorDocument editor={editor} />);
+    activateText(editor, emptyId, 0);
+    const sharedView = runtime.readActiveTextView();
+    if (!sharedView) throw new Error("missing active shared view");
+
+    act(() => sharedView.dom.dispatchEvent(keyDown("Backspace")));
+    await waitFor(() => expect(editor.getRootBlockIds()).toEqual([previousId]));
+    await waitFor(() =>
+      expectSharedTextCaret(
+        rendered.container,
+        runtime,
+        sharedView,
+        previousId,
+        5,
+      ),
+    );
+
+    act(() => expect(editor.undo()).toEqual({ status: "applied" }));
+    await waitFor(() =>
+      expect(editor.getRootBlockIds()).toEqual([previousId, emptyId]),
+    );
+    await waitFor(() =>
+      expectSharedTextCaret(
+        rendered.container,
+        runtime,
+        sharedView,
+        emptyId,
+        0,
+      ),
+    );
+    expectSharedViewInvariants(rendered.container);
+
+    act(() => expect(editor.redo()).toEqual({ status: "applied" }));
+    await waitFor(() => expect(editor.getRootBlockIds()).toEqual([previousId]));
+    await waitFor(() =>
+      expectSharedTextCaret(
+        rendered.container,
+        runtime,
+        sharedView,
+        previousId,
+        5,
+      ),
+    );
+    expect(blockShellOrNull(rendered.container, emptyId)).toBeNull();
+    expectSharedViewInvariants(rendered.container);
+    editor.dispose();
+  });
+
+  it("treats an acknowledged same-revision text presentation as idempotent", () => {
+    const editor = createEditor();
+    const runtime = editor as EditableEditorRuntimePort;
+    render(<EditorDocument editor={editor} />);
+    activateText(editor, firstId, 2);
+    const view = runtime.readActiveTextView();
+    if (!view) throw new Error("missing active shared view");
+    const native = document.getSelection();
+    if (!native) throw new Error("missing browser selection");
+    const setBaseAndExtent = vi.spyOn(native, "setBaseAndExtent");
+    const canonical = runtime.selectionController.getCanonicalSnapshot();
+    if (canonical.kind !== "document") {
+      throw new Error("missing canonical text selection");
+    }
+
+    expect(
+      runtime.requestTextPresentation(firstId, {
+        offset: 2,
+        canonicalSelectionRevision: canonical.revision,
+      }),
+    ).toBe(true);
+    expect(setBaseAndExtent).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(view.dom);
+
+    const start = createSemanticDomTextLayout(
+      view.dom,
+    ).pointFromCanonicalOffset(0);
+    if (!start) throw new Error("missing native start point");
+    native.setBaseAndExtent(start.node, start.offset, start.node, start.offset);
+    setBaseAndExtent.mockClear();
+    expect(
+      runtime.requestTextPresentation(firstId, {
+        offset: 2,
+        canonicalSelectionRevision: canonical.revision,
+      }),
+    ).toBe(true);
+    expect(setBaseAndExtent).toHaveBeenCalled();
+    expectNativeCaretOffset(view, 2);
+    editor.dispose();
+  });
+
   it("navigates vertically immediately after Enter activates a newly mounted paragraph", async () => {
     const editor = initializeTestEditableEditor({
       definition: testEditableEditorDefinition,
@@ -666,6 +984,15 @@ function blockShell(container: HTMLElement, blockId: BlockId): HTMLElement {
   return element;
 }
 
+function blockShellOrNull(
+  container: HTMLElement,
+  blockId: BlockId,
+): HTMLElement | null {
+  return container.querySelector<HTMLElement>(
+    `[data-editor-block-shell="true"][data-editor-block-id="${blockId}"]`,
+  );
+}
+
 function textHost(container: HTMLElement, blockId: BlockId): HTMLElement {
   const element = blockShell(container, blockId).querySelector<HTMLElement>(
     ":scope > [data-editor-text-shell='true']",
@@ -696,6 +1023,46 @@ function visibleTextRepresentations(host: HTMLElement): HTMLElement[] {
       ":scope > [data-editor-text-projection='true'], :scope > [data-editor-text-slot='true'] > .ProseMirror",
     ),
   ).filter((element) => getComputedStyle(element).display !== "none");
+}
+
+function expectSharedTextCaret(
+  container: HTMLElement,
+  editor: EditableEditorRuntimePort,
+  view: EditorView,
+  blockId: BlockId,
+  offset: number,
+): void {
+  expectCanonicalCaret(editor, blockId, offset);
+  expect(editor.isTextProjectionActive(blockId)).toBe(true);
+  expect(editor.readActiveTextView()).toBe(view);
+  expect(view.dom.parentElement).toBe(textSlot(textHost(container, blockId)));
+  expect(document.activeElement).toBe(view.dom);
+  expect(editor.readTextSelectionOffset(blockId)).toBe(offset);
+  expectNativeCaretOffset(view, offset);
+}
+
+function expectNativeCaretOffset(view: EditorView, offset: number): void {
+  const native = document.getSelection();
+  expect(native?.isCollapsed).toBe(true);
+  expect(native?.focusNode && view.dom.contains(native.focusNode)).toBe(true);
+  if (native?.focusNode) {
+    expect(
+      createSemanticDomTextLayout(view.dom).canonicalOffsetFromPoint(
+        native.focusNode,
+        native.focusOffset,
+      ),
+    ).toBe(offset);
+  }
+}
+
+function expectSharedViewInvariants(container: HTMLElement): void {
+  expect(container.querySelectorAll(".ProseMirror")).toHaveLength(1);
+  expect(container.querySelectorAll('[contenteditable="true"]')).toHaveLength(
+    1,
+  );
+  expect(
+    container.querySelectorAll('[data-editor-input-owner="true"]'),
+  ).toHaveLength(1);
 }
 
 function expectCanonicalCaret(

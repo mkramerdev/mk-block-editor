@@ -124,6 +124,7 @@ import type {
   ReadSelectionInlineMarkFormatStatesResult,
 } from "../../../selection/formatting/inline-mark-state.ts";
 import type {
+  CanonicalSelectionSettlementResult,
   EditorLogicalSelectionPoint,
   EditorSelectionTextAffinity,
   EditorSelectionTextAnchorResolutionResult,
@@ -628,7 +629,12 @@ export class EditorImplementation {
             selectionEffect,
             provenance: null,
           },
-          { structuralDraftAlreadyValidated: false },
+          {
+            structuralDraftAlreadyValidated: false,
+            selectionPresentation: restoreActiveTextProjection
+              ? "native-before-removal"
+              : "canonical-only",
+          },
         );
         return result.ok
           ? { status: "applied" }
@@ -2736,34 +2742,11 @@ export class EditorImplementation {
     });
     if (!result.ok) return false;
     const target = result.transaction.selection;
-    if (target && target.kind !== "none") {
-      const targetBlock = this.getBlock(target.blockId);
-      const targetDefinition = targetBlock
-        ? this.blockDefinitions[targetBlock.type]
-        : undefined;
-      if (targetBlock && !targetBlock.tombstone) {
-        const targetKind =
-          targetDefinition?.kind === "text"
-            ? "text"
-            : targetDefinition?.kind === "atomic"
-              ? "atomic"
-              : null;
-        if (targetKind === "text" && !current.blocks[target.blockId]) {
-          this.presentCanonicalTextSelection();
-        } else if (targetKind === "atomic") {
-          this.options.requestNativePresentation?.({
-            token: Symbol(`structural-presentation:${target.blockId}`),
-            blockId: target.blockId,
-            targetKind: "atomic",
-            graphRevision: this.getSelectionGraphRevision(),
-            preventScroll: true,
-            ...(target.kind === "text-offset" ? { offset: target.offset } : {}),
-            ...(target.kind === "block-end"
-              ? { placement: "end" as const }
-              : {}),
-          });
-        }
-      }
+    if (target.kind !== "none") {
+      const block = this.getBlock(target.blockId);
+      const kind = block ? this.blockDefinitions[block.type]?.kind : undefined;
+      if (kind === "text") this.presentCanonicalTextSelection(target.blockId);
+      else if (kind === "atomic") this.presentAtomicStructuralSelection(target);
     }
     return true;
   }
@@ -4603,13 +4586,18 @@ export class EditorImplementation {
     };
   }
 
-  private presentCanonicalTextSelection(): void {
+  private presentCanonicalTextSelection(expectedBlockId?: BlockId): void {
     const canonical = this.selectionController.getCanonicalSnapshot();
     const focus =
       canonical.kind === "document"
         ? canonical.snapshot.documentSelection.focus
         : null;
-    if (!focus?.textAnchor) return;
+    if (
+      !focus?.textAnchor ||
+      (expectedBlockId !== undefined && focus.blockId !== expectedBlockId)
+    ) {
+      return;
+    }
     this.options.presentTextProjection?.(focus.blockId, {
       offset: focus.textOffset,
       affinity: focus.affinity,
@@ -5086,15 +5074,37 @@ export class EditorImplementation {
                   : settled.retainedSelection,
             };
     }
-    const settled = this.selectionController.commitCanonicalSelection(
-      effect.kind === "clear" ? null : effect.selection,
-      this,
-      this.getSelectionGraphRevision(),
-      context,
-      this.options.resolveSelectionTextAnchor
-        ? { resolveTextAnchor: this.options.resolveSelectionTextAnchor }
-        : null,
-    );
+    let settled: CanonicalSelectionSettlementResult;
+    // A freshly created stable text anchor still has to be resolved during
+    // canonical normalization. Inactive text projections need to remain
+    // hydrated until that resolution has completed.
+    const releases: Array<() => void> = [];
+    try {
+      if (effect.kind === "selection") {
+        const blockIds = new Set<BlockId>();
+        if (effect.selection.anchor.textAnchor) {
+          blockIds.add(effect.selection.anchor.blockId);
+        }
+        if (effect.selection.focus.textAnchor) {
+          blockIds.add(effect.selection.focus.blockId);
+        }
+        for (const blockId of blockIds) {
+          const release = this.options.acquireTextContentAccess?.(blockId);
+          if (release) releases.push(release);
+        }
+      }
+      settled = this.selectionController.commitCanonicalSelection(
+        effect.kind === "clear" ? null : effect.selection,
+        this,
+        this.getSelectionGraphRevision(),
+        context,
+        this.options.resolveSelectionTextAnchor
+          ? { resolveTextAnchor: this.options.resolveSelectionTextAnchor }
+          : null,
+      );
+    } finally {
+      for (const release of releases.reverse()) release();
+    }
     if (settled.kind === "changed") {
       return settled.selection
         ? { kind: "settled", selection: settled.selection }

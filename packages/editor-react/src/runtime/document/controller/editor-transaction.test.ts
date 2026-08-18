@@ -193,6 +193,7 @@ function createTestEditor(
       editor: EditorImplementation,
     ) => void;
     readonly selectionAnchorRuntime?: AssociationAwareTestAnchorRuntime;
+    readonly selectionAnchorRequiresContentAccess?: boolean;
     readonly documentValidators?: InitializeEditorImplementationOptions["documentValidators"];
   } = {},
 ) {
@@ -403,6 +404,18 @@ function createTestEditor(
   const releaseNativeFocus = vi.fn();
   const presentTextProjection = vi.fn(() => ({ status: "focused" as const }));
   const blurEditor = vi.fn();
+  const contentAccessCounts = new Map<BlockId, number>();
+  const acquireTextContentAccess = vi.fn((blockId: BlockId) => {
+    contentAccessCounts.set(
+      blockId,
+      (contentAccessCounts.get(blockId) ?? 0) + 1,
+    );
+    return () => {
+      const next = (contentAccessCounts.get(blockId) ?? 1) - 1;
+      if (next === 0) contentAccessCounts.delete(blockId);
+      else contentAccessCounts.set(blockId, next);
+    };
+  });
   const editorRef: { current: EditorImplementation | null } = {
     current: null,
   };
@@ -424,13 +437,16 @@ function createTestEditor(
       return value ? extractPlainTextFromRichTextDocument(value) : "";
     },
     resolveSelectionTextAnchor: (point) =>
-      options.selectionAnchorRuntime?.resolve(point) ?? {
-        ok: true,
-        blockId: point.blockId,
-        textAnchor: point.textAnchor!,
-        textOffset: point.textOffset,
-        affinity: point.affinity,
-      },
+      options.selectionAnchorRequiresContentAccess &&
+      !contentAccessCounts.has(point.blockId)
+        ? { ok: false, reason: "missing-text", blockId: point.blockId }
+        : (options.selectionAnchorRuntime?.resolve(point) ?? {
+            ok: true,
+            blockId: point.blockId,
+            textAnchor: point.textAnchor!,
+            textOffset: point.textOffset,
+            affinity: point.affinity,
+          }),
     createSelectionTextAnchor: (input) => {
       if (options.selectionAnchorRuntime) {
         return options.selectionAnchorRuntime.create(input);
@@ -457,6 +473,7 @@ function createTestEditor(
     },
     validateBlockContent: (_blockType, value) => isRichTextDocument(value),
     contentCommit,
+    acquireTextContentAccess,
     requestNativeFocus,
     releaseNativeFocus,
     presentTextProjection,
@@ -473,6 +490,9 @@ function createTestEditor(
     commitContent,
     publishContentCommit,
     markInconsistent,
+    acquireTextContentAccess,
+    readTextContentAccessCount: (blockId: BlockId) =>
+      contentAccessCounts.get(blockId) ?? 0,
     requestNativeFocus,
     releaseNativeFocus,
     presentTextProjection,
@@ -2114,6 +2134,101 @@ describe("EditorImplementation active transaction", () => {
     ).toBe("leftright");
     fixture.dispose();
   });
+
+  it.each([
+    { status: "focused" as const },
+    { status: "pending" as const },
+    { status: "rejected" as const, reason: "native-focus-failed" as const },
+  ])(
+    "settles and presents an existing previous text target when pre-removal presentation is $status",
+    (preRemovalResult) => {
+      const previous = block(1, "paragraph");
+      const empty = block(2, "paragraph");
+      const anchorRuntime = createAssociationAwareTestAnchorRuntime();
+      const commits: CanonicalEditorCommit[] = [];
+      const fixture = createTestEditor({
+        blocks: [previous, empty],
+        content: new Map([
+          [previous.id, text("Alpha")],
+          [empty.id, text("")],
+        ]),
+        materializeAppliedBlocks: true,
+        selectionAnchorRuntime: anchorRuntime,
+        selectionAnchorRequiresContentAccess: true,
+        onCanonicalCommit: (commit) => commits.push(commit),
+      });
+      expect(
+        fixture.editor.selectionController.commitCanonicalSelection(
+          anchorRuntime.selection(empty.id, 0, "backward"),
+          fixture.editor,
+          fixture.editor.getSelectionGraphRevision(),
+          { publication: { kind: "standalone-local" }, cause: "keyboard" },
+          { resolveTextAnchor: anchorRuntime.resolve },
+        ),
+      ).toMatchObject({ kind: "changed" });
+      const canonicalBefore =
+        fixture.editor.selectionController.getCanonicalSnapshot();
+      expect(canonicalBefore.kind).toBe("document");
+      if (canonicalBefore.kind !== "document") return;
+      expect(canonicalBefore.snapshot.documentSelection.focus).toMatchObject({
+        blockId: empty.id,
+        textOffset: 0,
+      });
+      expect(
+        canonicalBefore.snapshot.documentSelection.focus?.textAnchor,
+      ).not.toBeNull();
+      fixture.presentTextProjection.mockReturnValueOnce(preRemovalResult);
+
+      expect(
+        fixture.editor.executeCoreBlockKeyBehavior({
+          key: "backspace",
+          blockId: empty.id,
+          blockType: empty.type,
+          cursorOffset: 0,
+        }),
+      ).toBe(true);
+
+      expect(fixture.editor.getRootBlockIds()).toEqual([previous.id]);
+      expect(fixture.editor.getBlock(empty.id)).toBeNull();
+      expect(transactionSelectionOffsets(commits[0]!)).toEqual({
+        before: { blockId: empty.id, offset: 0 },
+        after: { blockId: previous.id, offset: 5 },
+      });
+      const canonicalAfter =
+        fixture.editor.selectionController.getCanonicalSnapshot();
+      expect(canonicalAfter.kind).toBe("document");
+      if (canonicalAfter.kind !== "document") return;
+      expect(canonicalAfter.snapshot.documentSelection.focus).toMatchObject({
+        blockId: previous.id,
+        textOffset: 5,
+      });
+      expect(
+        canonicalAfter.snapshot.documentSelection.focus?.textAnchor,
+      ).not.toBeNull();
+      expect(fixture.presentTextProjection).toHaveBeenCalledTimes(2);
+      expect(fixture.presentTextProjection).toHaveBeenNthCalledWith(
+        1,
+        previous.id,
+        expect.objectContaining({
+          offset: 5,
+          canonicalSelectionRevision: canonicalAfter.revision,
+        }),
+      );
+      expect(fixture.presentTextProjection).toHaveBeenNthCalledWith(
+        2,
+        previous.id,
+        expect.objectContaining({
+          offset: 5,
+          canonicalSelectionRevision: canonicalAfter.revision,
+        }),
+      );
+      expect(fixture.acquireTextContentAccess).toHaveBeenCalledWith(
+        previous.id,
+      );
+      expect(fixture.readTextContentAccessCount(previous.id)).toBe(0);
+      fixture.dispose();
+    },
+  );
 
   it("joins a selected right block through core Backspace and replays its anchors without drift", () => {
     const left = block(1, "paragraph");
