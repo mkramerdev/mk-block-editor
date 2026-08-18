@@ -20,7 +20,7 @@ body {
   min-height: 100vh;
 }
 
-main {
+.playground-home {
   display: grid;
   place-content: center;
   min-height: 100vh;
@@ -36,18 +36,18 @@ main {
   text-transform: uppercase;
 }
 
-h1 {
+.playground-home h1 {
   margin: 0.5rem 0 1rem;
   font-size: clamp(2.5rem, 8vw, 5rem);
   letter-spacing: -0.05em;
 }
 
-p {
+.playground-home p {
   margin: 0 0 2rem;
   color: #525252;
 }
 
-code {
+.playground-home code {
   padding: 0.2rem 0.35rem;
   border-radius: 0.35rem;
   background: #e8e8e5;
@@ -69,17 +69,55 @@ code {
   background: #343434;
 }
 
+.first-draft-route {
+  display: grid;
+  grid-template-rows: auto minmax(40rem, 1fr);
+  place-content: initial;
+  gap: 1rem;
+  min-height: 100vh;
+  padding: 1rem;
+  text-align: initial;
+}
+
+.first-draft-route__header {
+  padding: 1rem 1rem 0;
+}
+
+.first-draft-route__header h1 {
+  margin: 0.25rem 0 0.5rem;
+  font-size: clamp(2rem, 5vw, 3.5rem);
+}
+
+.first-draft-route__header p {
+  margin-block-end: 0.5rem;
+}
+
+.first-draft-route__editor {
+  display: flex;
+  min-height: 40rem;
+  flex-direction: column;
+}
+
+.first-draft-route__editor > .first-draft-example {
+  flex: 1;
+}
+
+.first-draft-route__editor > output,
+.first-draft-route__editor > ul {
+  margin: 0.25rem 0;
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     color: #f5f5f5;
     background: #111111;
   }
 
-  p {
+  .playground-home p {
     color: #b5b5b5;
   }
 
-  code {
+  .playground-home code {
     background: #262626;
   }
 

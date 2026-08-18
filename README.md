@@ -1,159 +1,83 @@
-# Turborepo starter
+# Editor architecture
 
-This Turborepo starter is maintained by the Turborepo core team.
+The editor is split into generic model, React/runtime, DOM, web, Yjs, and
+product packages. Canonical document structure and content are independent of
+browser rendering and product integrations.
 
-## Using this example
+## Direct definition composition
 
-Run the following command:
+`EditorDefinition` is the complete static composition input:
 
-```sh
-npx create-turbo@latest
+```text
+EditorDefinition
+├─ blocks
+├─ inlineMarks
+├─ inlineAtoms
+├─ commands
+├─ keybindings
+├─ contentCodecs
+├─ typingTriggers
+├─ contentImport
+├─ content
+└─ documentValidators
 ```
 
-## What's inside?
+The generic compiler reads each field directly. Commands and keybindings have
+validated identities and scopes. Codec handlers have globally unique handler
+IDs. Structural validators are passed directly to the core editor.
 
-This Turborepo includes the following packages/apps:
+Product-specific definition checks run while constructing the product
+definition. Universal shape and identity checks run in the generic compiler.
 
-### Apps and Packages
+## Runtime boundaries
 
-- `playground`: a [Next.js](https://nextjs.org/) app
-- `playground-react`: a [Vite](https://vite.dev/) and [React](https://react.dev/) app
-- `@repo/ui`: a stub React component library shared by both playground applications
-- `@repo/eslint-config`: `eslint` configurations (includes `eslint-config-next` and `eslint-config-prettier`)
-- `@repo/typescript-config`: `tsconfig.json`s used throughout the monorepo
+`initializeEditor` validates a definition and snapshot, constructs the core
+editor and content runtime, and owns their core cleanup. Browser mounting owns
+standard block-local editing plugins, direct keybinding routing, selection,
+focus, geometry, clipboard translation, and canonical proposal acceptance.
 
-Each package/app is 100% [TypeScript](https://www.typescriptlang.org/).
+Product code owns product document layers and receives product sources
+directly. Storage, realtime, diagnostics, comments, additional-selection presentation,
+database sources, and product view state do not use runtime discovery.
 
-### Utilities
+## Headless typing triggers
 
-This Turborepo has some additional tools already setup for you:
+Definitions may declare:
 
-- [TypeScript](https://www.typescriptlang.org/) for static type checking
-- [ESLint](https://eslint.org/) for code linting
-- [Prettier](https://prettier.io) for code formatting
-
-### Build
-
-To build all apps and packages, run the following command:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
-
-```sh
-cd my-turborepo
-turbo build
+```ts
+typingTriggers: [
+  { id: "mention", trigger: "@" },
+  { id: "slash", trigger: "/" },
+],
 ```
 
-Without global `turbo`, use your package manager:
+Typing-trigger activation is headless and edge-driven from finalized accepted
+local typing. The runtime owns one immutable active session. Product code
+subscribes, filters its own mention/slash catalogs, renders its own menus, and
+owns highlighted-candidate, keyboard, pointer, loading, and unmatched-query
+policy. Dismissal does not mutate content. Inline and canonical-fragment
+acceptance validate the session ID and revision, then commit the compound
+replacement once through the ordinary transaction coordinator. Hydration,
+replay, remote changes, undo, redo, and existing trigger text do not activate
+local sessions.
 
-```sh
-cd my-turborepo
-npx turbo build
-pnpm dlx turbo build
-pnpm exec turbo build
-```
+Definitions and session snapshots are immutable. The generic runtime detects
+and mutates no candidate or menu state. Product mention acceptance emits only
+canonical atom identity metadata. Product slash planning remains pure
+preparation, uses the product table planner where required, and produces
+canonical fragments that the session-scoped acceptance API commits once.
 
-You can build a specific package by using a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
+## Package ownership
 
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
+| Package                                     | Owner                                                                                |
+| ------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `@repo/editor-model`                        | Canonical document, definitions, validation, editing plans, and codecs               |
+| `@repo/editor-react`                        | Core editor controller, history, focus, selection, and external stores               |
+| `@repo/editor-dom`                          | ProseMirror schema and browser-independent DOM editing adapters                      |
+| `@repo/editor-web`                          | React DOM document surface, mounting, geometry, clipboard, commands, and keybindings |
+| `@repo/editor-yjs` / `@repo/editor-yjs-dom` | Yjs content translation and DOM runtime                                              |
+| `@repo/editor-product-model`                | Product semantic model and table planning                                            |
+| `@repo/editor-product-web`                  | Product definitions, codecs, renderers, UI layers, and runtime assembly              |
 
-```sh
-turbo build --filter=playground
-```
-
-Without global `turbo`:
-
-```sh
-npx turbo build --filter=playground
-pnpm exec turbo build --filter=playground
-pnpm exec turbo build --filter=playground
-```
-
-### Develop
-
-To develop all apps and packages, run the following command:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
-
-```sh
-cd my-turborepo
-turbo dev
-```
-
-Without global `turbo`, use your package manager:
-
-```sh
-cd my-turborepo
-npx turbo dev
-pnpm exec turbo dev
-pnpm exec turbo dev
-```
-
-You can develop a specific package by using a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
-
-```sh
-turbo dev --filter=playground-react
-```
-
-Without global `turbo`:
-
-```sh
-npx turbo dev --filter=playground-react
-pnpm exec turbo dev --filter=playground-react
-pnpm exec turbo dev --filter=playground-react
-```
-
-### Remote Caching
-
-> [!TIP]
-> Vercel Remote Cache is free for all plans. Get started today at [vercel.com](https://vercel.com/signup?utm_source=remote-cache-sdk&utm_campaign=free_remote_cache).
-
-Turborepo can use a technique known as [Remote Caching](https://turborepo.dev/docs/core-concepts/remote-caching) to share cache artifacts across machines, enabling you to share build caches with your team and CI/CD pipelines.
-
-By default, Turborepo will cache locally. To enable Remote Caching you will need an account with Vercel. If you don't have an account you can [create one](https://vercel.com/signup?utm_source=turborepo-examples), then enter the following commands:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
-
-```sh
-cd my-turborepo
-turbo login
-```
-
-Without global `turbo`, use your package manager:
-
-```sh
-cd my-turborepo
-npx turbo login
-pnpm exec turbo login
-pnpm exec turbo login
-```
-
-This will authenticate the Turborepo CLI with your [Vercel account](https://vercel.com/docs/concepts/personal-accounts/overview).
-
-Next, you can link your Turborepo to your Remote Cache by running the following command from the root of your Turborepo:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
-
-```sh
-turbo link
-```
-
-Without global `turbo`:
-
-```sh
-npx turbo link
-pnpm exec turbo link
-pnpm exec turbo link
-```
-
-## Useful Links
-
-Learn more about the power of Turborepo:
-
-- [Tasks](https://turborepo.dev/docs/crafting-your-repository/running-tasks)
-- [Caching](https://turborepo.dev/docs/crafting-your-repository/caching)
-- [Remote Caching](https://turborepo.dev/docs/core-concepts/remote-caching)
-- [Filtering](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters)
-- [Configuration Options](https://turborepo.dev/docs/reference/configuration)
-- [CLI Usage](https://turborepo.dev/docs/reference/command-line-reference)
+Public APIs use explicit package subpaths. Product packages depend on generic
+packages; generic packages do not import product packages.

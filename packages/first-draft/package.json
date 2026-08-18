@@ -1,0 +1,94 @@
+{
+  "name": "@repo/editor-first-draft",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Standalone full editor reproduction surface composed only from generic editor packages.",
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "exports": {
+    "./read-model": {
+      "types": "./src/read-model/index.ts",
+      "development": "./src/read-model/index.ts",
+      "import": "./dist/read-model/index.js"
+    },
+    "./editor": {
+      "types": "./src/editor/index.ts",
+      "development": "./src/editor/index.ts",
+      "import": "./dist/editor/index.js"
+    },
+    "./definition": {
+      "types": "./src/definition/index.ts",
+      "development": "./src/definition/index.ts",
+      "import": "./dist/definition/index.js"
+    },
+    "./fixture": {
+      "types": "./src/fixture/index.ts",
+      "development": "./src/fixture/index.ts",
+      "import": "./dist/fixture/index.js"
+    },
+    "./transport": {
+      "types": "./src/transport/index.ts",
+      "development": "./src/transport/index.ts",
+      "import": "./dist/transport/index.js"
+    },
+    "./protocol": {
+      "types": "./src/transport/message-protocol.ts",
+      "development": "./src/transport/message-protocol.ts",
+      "import": "./dist/transport/message-protocol.js"
+    },
+    "./server": {
+      "types": "./src/server/index.ts",
+      "development": "./src/server/index.ts",
+      "import": "./dist/server/index.js"
+    },
+    "./first-draft.css": {
+      "development": "./src/first-draft.css",
+      "default": "./dist/first-draft.css"
+    }
+  },
+  "scripts": {
+    "build": "pnpm run clean && tsc -p tsconfig.build.json && node -e \"require('node:fs').copyFileSync('src/first-draft.css', 'dist/first-draft.css')\"",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "dev": "tsc -p tsconfig.build.json --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:postgres": "vitest run --config vitest.postgres.config.ts",
+    "check-types": "tsc --noEmit",
+    "typecheck": "pnpm run check-types",
+    "lint": "eslint . --max-warnings 0",
+    "seed:postgres": "tsx scripts/seed-postgres-example.ts",
+    "reset:postgres": "tsx scripts/reset-postgres.ts"
+  },
+  "dependencies": {
+    "@repo/editor-core": "workspace:*",
+    "@repo/editor-react": "workspace:*",
+    "@repo/editor-web": "workspace:*",
+    "@repo/editor-yjs": "workspace:*",
+    "@repo/editor-yjs-dom": "workspace:*",
+    "fractional-indexing": "^4.0.0",
+    "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "@repo/eslint-config": "workspace:*",
+    "@repo/typescript-config": "workspace:*",
+    "@testing-library/react": "^16.3.0",
+    "@types/node": "^22.15.3",
+    "@types/pg": "^8.15.6",
+    "@types/react": "19.2.2",
+    "@types/react-dom": "19.2.2",
+    "@vitejs/plugin-react": "^6.0.5",
+    "eslint": "^9.39.1",
+    "jsdom": "^27.2.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "tsx": "^4.21.0",
+    "typescript": "5.9.2",
+    "vitest": "^4.0.8"
+  },
+  "peerDependencies": {
+    "react": ">=18.0.0",
+    "react-dom": ">=18.0.0"
+  }
+}

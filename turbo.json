@@ -1,5 +1,11 @@
 {
   "$schema": "https://turborepo.dev/schema.json",
+  "globalEnv": [
+    "EDITOR_DOCUMENT_POSTGRES_URL",
+    "FIRST_DRAFT_SEED_DOCUMENT_ID",
+    "VITE_EDITOR_REALTIME_URL",
+    "VITE_FIRST_DRAFT_DOCUMENT_ID"
+  ],
   "ui": "tui",
   "tasks": {
     "build": {

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://turborepo.dev/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "check-types": {
+      "dependsOn": ["^build", "^check-types"]
+    },
+    "dev": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "persistent": true,
+      "passThroughEnv": [
+        "EDITOR_DOCUMENT_POSTGRES_URL",
+        "EDITOR_REALTIME_*",
+        "NODE_ENV"
+      ]
+    }
+  }
+}

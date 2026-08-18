@@ -1,0 +1,265 @@
+.editor-web-document {
+  width: 100%;
+  min-width: 0;
+  overflow-x: clip;
+}
+
+.editor-web-block-list {
+  display: grid;
+  grid-template-columns:
+    [full-start] var(--editor-side-left-width)
+    [middle-start] minmax(0, 1fr)
+    [middle-end] var(--editor-side-right-width)
+    [full-end];
+  width: 100%;
+  min-width: 0;
+  position: relative;
+  isolation: isolate;
+}
+
+.editor-web-block-list[data-editor-text-selection-drag-active="true"] {
+  cursor: text;
+}
+
+.editor-web-text {
+  position: relative;
+  /* Layer 2 is editor foreground: glyphs, the native caret, and the active
+   * editable root. Product backgrounds stay in normal-flow layer 0. */
+  z-index: 2;
+}
+
+.editor-web-text-shell,
+[data-editor-text-slot="true"] {
+  position: relative;
+  box-sizing: border-box;
+  display: block;
+  inline-size: 100%;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+[data-editor-object-root="true"] {
+  position: relative;
+}
+
+.editor-web-block {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
+  min-height: 0;
+  position: relative;
+}
+
+.editor-web-block-list > .editor-web-block[data-editor-root-layout="normal"] {
+  grid-column: middle-start / middle-end;
+}
+
+.editor-web-block-list > .editor-web-block[data-editor-root-layout="full"] {
+  grid-column: full-start / full-end;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.editor-web-text {
+  position: relative;
+  box-sizing: border-box;
+  display: block;
+  inline-size: 100%;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  min-height: 1em;
+  padding: 0;
+  white-space: break-spaces;
+  overflow-wrap: anywhere;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0;
+  cursor: text;
+}
+
+[data-editor-text-projection="true"][hidden] {
+  display: none;
+}
+
+[data-editor-text-root="true"]:focus,
+[data-editor-text-root="true"]:focus-visible {
+  outline: none;
+}
+
+.editor-web-text > p,
+.editor-web-text > h1,
+.editor-web-text > h2,
+.editor-web-text > h3,
+.editor-web-text > h4,
+.editor-web-text > h5,
+.editor-web-text > h6,
+.editor-web-text > blockquote,
+.editor-web-text > pre {
+  font: inherit;
+  color: inherit;
+  line-height: inherit;
+  letter-spacing: inherit;
+  margin: 0;
+}
+
+.editor-web-text [data-editor-placeholder] {
+  position: relative;
+}
+
+.editor-web-text [data-editor-placeholder]::before {
+  content: attr(data-editor-placeholder);
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  pointer-events: none;
+  user-select: none;
+}
+
+.editor-web-text[data-editor-placeholder-visibility="active"]:not(
+    [data-editor-input-owner="true"]
+  )
+  [data-editor-placeholder]::before {
+  content: none;
+}
+
+[data-editor-document-layer-host="true"] {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  pointer-events: none;
+}
+
+.editor-web-selection-paint-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.editor-web-selection-paint-band {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.editor-web-selection-paint-band--underlay {
+  /* Canonical text-range paint sits above product surfaces and below editor
+   * foreground. Product packages must not elevate opaque block surfaces into
+   * this band; elevate only their interactive controls instead. */
+  z-index: 1;
+}
+
+.editor-web-selection-paint-band--overlay {
+  z-index: 5;
+}
+
+.editor-web-block-list[data-editor-native-selection-paint-mode="hidden-for-global-selection"]
+  [data-editor-text-root="true"] {
+  caret-color: transparent;
+}
+
+/* Ordinary canonical ranges remain the real ProseMirror input selection while
+ * generic selection paint owns their visible highlight. Keep the browser
+ * range transparent so it cannot become a second painter. Explicit internal
+ * hosts use their own ownership marker and composition uses a different mode. */
+.editor-web-block-list[data-editor-native-selection-paint-mode="hidden-for-global-selection"]
+  [data-editor-text-root="true"]:not(
+    [data-editor-block-internal-selection-host="true"],
+    [data-editor-block-internal-selection-host="true"] *
+  )::selection,
+.editor-web-block-list[data-editor-native-selection-paint-mode="hidden-for-global-selection"]
+  [data-editor-text-root="true"]:not(
+    [data-editor-block-internal-selection-host="true"],
+    [data-editor-block-internal-selection-host="true"] *
+  )
+  *::selection {
+  color: inherit;
+  background: transparent;
+}
+
+.editor-web-selection-paint-rect {
+  position: absolute;
+  box-sizing: border-box;
+}
+
+.editor-web-selection-paint-rect[data-editor-selection-paint="text-fragment"] {
+  background: color-mix(
+    in srgb,
+    var(--editor-selection-paint-color, Highlight) 32%,
+    transparent
+  );
+}
+
+.editor-web-selection-paint-caret {
+  position: absolute;
+  box-sizing: border-box;
+  background: var(--editor-selection-paint-color, Highlight);
+  pointer-events: none;
+}
+
+.editor-web-selection-paint-segment[data-editor-selection-paint-perimeter="true"] {
+  z-index: 1;
+}
+
+.editor-web-selection-paint-segment[data-editor-selection-paint-perimeter="true"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border: 0 solid transparent;
+}
+
+.editor-web-selection-paint-segment[data-editor-selection-paint-edge-top="true"]::after {
+  border-block-start-width: 2px;
+}
+
+.editor-web-selection-paint-segment[data-editor-selection-paint-edge-right="true"]::after {
+  border-inline-end-width: 2px;
+}
+
+.editor-web-selection-paint-segment[data-editor-selection-paint-edge-bottom="true"]::after {
+  border-block-end-width: 2px;
+}
+
+.editor-web-selection-paint-segment[data-editor-selection-paint-edge-left="true"]::after {
+  border-inline-start-width: 2px;
+}
+
+@media (forced-colors: active) {
+  .editor-web-block-list[data-editor-native-selection-paint-mode="hidden-for-global-selection"]
+    [data-editor-text-root="true"]:not(
+      [data-editor-block-internal-selection-host="true"],
+      [data-editor-block-internal-selection-host="true"] *
+    )::selection,
+  .editor-web-block-list[data-editor-native-selection-paint-mode="hidden-for-global-selection"]
+    [data-editor-text-root="true"]:not(
+      [data-editor-block-internal-selection-host="true"],
+      [data-editor-block-internal-selection-host="true"] *
+    )
+    *::selection {
+    color: inherit;
+    background: transparent;
+    forced-color-adjust: none;
+  }
+
+  .editor-web-selection-paint-rect[data-editor-selection-paint="text-fragment"] {
+    background: Highlight;
+    forced-color-adjust: none;
+  }
+
+  .editor-web-selection-paint-segment[data-editor-selection-paint-perimeter="true"] {
+    forced-color-adjust: none;
+  }
+
+  .editor-web-selection-paint-segment[data-editor-selection-paint-perimeter="true"]::after {
+    border-color: Highlight;
+  }
+}
+
+.editor-web-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

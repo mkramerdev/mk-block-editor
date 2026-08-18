@@ -1,0 +1,372 @@
+import {
+  contentSelection,
+  wholeSelection,
+  wrapperSelection,
+} from "@repo/editor-core/selection";
+import type { BlockId } from "@repo/editor-core/kernel";
+import type { EditorSelectionGraphReader } from "@repo/editor-react/selection";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { EditorWebContentRuntime } from "../../../runtime/content/content-runtime.ts";
+import { resolveEditorSelectionPointerHit } from "./dom-selection-hit-testing.ts";
+
+describe("editor selection pointer hit testing", () => {
+  afterEach(() => {
+    document.body.replaceChildren();
+    Reflect.deleteProperty(document, "caretPositionFromPoint");
+    Reflect.deleteProperty(document, "caretRangeFromPoint");
+    Reflect.deleteProperty(Range.prototype, "getClientRects");
+    vi.restoreAllMocks();
+  });
+
+  it("clamps vertical drag overflow to the nearest live block shell", () => {
+    const blockId = "last-root" as BlockId;
+    const list = document.createElement("div");
+    const shell = document.createElement("div");
+    list.dataset.editorBlockListRoot = "true";
+    Object.assign(shell.dataset, {
+      editorBlockShell: "true",
+      editorBlockId: blockId,
+    });
+    list.getBoundingClientRect = () => rectangle(0, 0, 100, 100);
+    shell.getBoundingClientRect = () => rectangle(0, 60, 100, 20);
+    list.append(shell);
+    document.body.append(list);
+    const graph: EditorSelectionGraphReader = {
+      getBlock: (id) =>
+        id === blockId
+          ? {
+              id: blockId,
+              type: "divider",
+              parentId: null,
+              metadataVersion: "1",
+              contentVersion: null,
+            }
+          : null,
+      getParentId: () => null,
+      getRootBlockIds: () => [blockId],
+      getChildBlockIds: () => [],
+      readBlockSelectionModel: () => wholeSelection(),
+    };
+
+    const hit = resolveEditorSelectionPointerHit({
+      list,
+      target: list,
+      clientX: 50,
+      clientY: 108,
+      contentRuntime: {} as EditorWebContentRuntime,
+      graph,
+    });
+
+    expect(hit?.target.block.id).toBe(blockId);
+    expect(hit?.textOffset).toBe(1);
+  });
+
+  it("uses semantic DOM mapping for an active projection", () => {
+    const blockId = "active" as BlockId;
+    const list = document.createElement("div");
+    const shell = document.createElement("div");
+    const root = document.createElement("div");
+    list.dataset.editorBlockListRoot = "true";
+    Object.assign(shell.dataset, {
+      editorBlockShell: "true",
+      editorBlockId: blockId,
+    });
+    root.dataset.editorTextRoot = "true";
+    root.setAttribute("contenteditable", "true");
+    root.innerHTML = "a<br>b";
+    shell.append(root);
+    list.append(shell);
+    document.body.append(list);
+    const graph: EditorSelectionGraphReader = {
+      getBlock: (id) =>
+        id === blockId
+          ? {
+              id: blockId,
+              type: "paragraph",
+              parentId: null,
+              metadataVersion: "1",
+              contentVersion: "1",
+            }
+          : null,
+      getParentId: () => null,
+      getRootBlockIds: () => [blockId],
+      getChildBlockIds: () => [],
+      readBlockSelectionModel: () => contentSelection(),
+    };
+    const contentRuntime = {
+      readBlockProjection: () => ({
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              { type: "text", text: "a" },
+              { type: "hard_break" },
+              { type: "text", text: "b" },
+            ],
+          },
+        ],
+      }),
+      acquireBlockContent: (id: BlockId, blockType: "paragraph", reason: "canonical-transaction") => ({
+        blockId: id,
+        blockType,
+        reason,
+        release: vi.fn(),
+      }),
+      createTextAnchorInContext: (_lease: unknown, input: { readonly textOffset: number }) => ({
+        ok: true,
+        codec: "pointer-test",
+        payload: { encoded: btoa(String(input.textOffset)), assoc: 0 },
+        textOffset: input.textOffset,
+      }),
+    } as unknown as EditorWebContentRuntime;
+
+    const caretRangeFromPoint = vi.fn(() => {
+      const range = document.createRange();
+      range.setStart(root, 2);
+      range.collapse(true);
+      return range;
+    });
+    Object.assign(document, { caretRangeFromPoint });
+    const hit = resolveEditorSelectionPointerHit({
+      list,
+      target: root.firstChild,
+      clientX: 10,
+      clientY: 10,
+      contentRuntime,
+      graph,
+    });
+
+    expect(hit?.textOffset).toBe(2);
+    expect(caretRangeFromPoint).toHaveBeenCalledOnce();
+  });
+
+  it("preserves opposite affinities without creating a stable text anchor", () => {
+    const blockId = "wrapped" as BlockId;
+    const list = document.createElement("div");
+    const shell = document.createElement("div");
+    const root = document.createElement("div");
+    const text = document.createTextNode("abcdef");
+    list.dataset.editorBlockListRoot = "true";
+    Object.assign(shell.dataset, {
+      editorBlockShell: "true",
+      editorBlockId: blockId,
+    });
+    root.dataset.editorTextRoot = "true";
+    root.setAttribute("contenteditable", "true");
+    root.append(text);
+    shell.append(root);
+    list.append(shell);
+    document.body.append(list);
+    list.getBoundingClientRect = () => rectangle(0, 0, 240, 260);
+    shell.getBoundingClientRect = () => rectangle(0, 180, 240, 80);
+    root.getBoundingClientRect = () => rectangle(90, 190, 140, 60);
+    Object.defineProperty(Range.prototype, "getClientRects", {
+      configurable: true,
+      value: vi.fn(function (this: Range) {
+        const offset = this.startOffset;
+        const row = offset < 3 ? 0 : 1;
+        const column = offset % 3;
+        return [
+          rectangle(100 + column * 10, 200 + row * 20, 10, 18),
+        ] as unknown as DOMRectList;
+      }),
+    });
+    Object.defineProperty(document, "caretPositionFromPoint", {
+      configurable: true,
+      value: () => ({ offsetNode: text, offset: 3 }),
+    });
+    const affinities: unknown[] = [];
+    const contentRuntime = {
+      readBlockProjection: () => ({
+        type: "doc",
+        content: [
+          { type: "paragraph", content: [{ type: "text", text: "abcdef" }] },
+        ],
+      }),
+      acquireBlockContent: (id: BlockId, blockType: "paragraph", reason: "canonical-transaction") => ({
+        blockId: id,
+        blockType,
+        reason,
+        release: vi.fn(),
+      }),
+      createTextAnchorInContext: (_lease: unknown, input: {
+        readonly textOffset: number;
+        readonly affinity?: "backward" | "forward" | null;
+      }) => {
+        affinities.push(input.affinity);
+        return {
+          ok: true,
+          codec: "pointer-test",
+          payload: { encoded: btoa(String(input.textOffset)), assoc: 0 },
+          textOffset: input.textOffset,
+          affinity: input.affinity ?? null,
+        };
+      },
+    } as unknown as EditorWebContentRuntime;
+    const graph: EditorSelectionGraphReader = {
+      getBlock: (id) =>
+        id === blockId
+          ? {
+              id: blockId,
+              type: "paragraph",
+              parentId: null,
+              metadataVersion: "1",
+              contentVersion: "1",
+            }
+          : null,
+      getParentId: () => null,
+      getRootBlockIds: () => [blockId],
+      getChildBlockIds: () => [],
+      readBlockSelectionModel: () => contentSelection(),
+    };
+    const resolve = (clientX: number, clientY: number) =>
+      resolveEditorSelectionPointerHit({
+        list,
+        target: text,
+        clientX,
+        clientY,
+        contentRuntime,
+        graph,
+      });
+
+    const backward = resolve(190, 209);
+    const forward = resolve(101, 229);
+    expect(backward).toEqual(
+      expect.objectContaining({ textOffset: 3, affinity: "backward" }),
+    );
+    expect(backward?.target.block.id).toBe(blockId);
+    expect(forward).toEqual(
+      expect.objectContaining({ textOffset: 3, affinity: "forward" }),
+    );
+    expect(forward?.target.block.id).toBe(blockId);
+    expect(affinities).toEqual([]);
+
+    Reflect.deleteProperty(document, "caretPositionFromPoint");
+    vi.restoreAllMocks();
+  });
+
+  it("rejects wrapper geometry as an origin but allows it during extension", () => {
+    const wrapperId = "columns" as BlockId;
+    const childId = "heading" as BlockId;
+    const list = document.createElement("div");
+    const wrapper = document.createElement("div");
+    const control = document.createElement("div");
+    const child = document.createElement("div");
+    const text = document.createElement("div");
+    list.dataset.editorBlockListRoot = "true";
+    Object.assign(wrapper.dataset, {
+      editorBlockShell: "true",
+      editorBlockId: wrapperId,
+    });
+    Object.assign(child.dataset, {
+      editorBlockShell: "true",
+      editorBlockId: childId,
+    });
+    text.dataset.editorTextRoot = "true";
+    text.textContent = "heading";
+    child.append(text);
+    wrapper.append(control, child);
+    list.append(wrapper);
+    document.body.append(list);
+    wrapper.getBoundingClientRect = () => rectangle(0, 0, 200, 80);
+    child.getBoundingClientRect = () => rectangle(0, 0, 90, 40);
+    text.getBoundingClientRect = () => rectangle(0, 0, 90, 40);
+    const graph: EditorSelectionGraphReader = {
+      getBlock: (id) =>
+        id === wrapperId || id === childId
+          ? {
+              id,
+              type: id === wrapperId ? "columns" : "heading",
+              parentId: id === childId ? wrapperId : null,
+              metadataVersion: "1",
+              contentVersion: id === childId ? "1" : null,
+            }
+          : null,
+      getParentId: (id) => (id === childId ? wrapperId : null),
+      getRootBlockIds: () => [wrapperId],
+      getChildBlockIds: (id) => (id === wrapperId ? [childId] : []),
+      readBlockSelectionModel: (id) =>
+        id === wrapperId ? wrapperSelection() : contentSelection(),
+    };
+    const contentRuntime = {
+      readBlockProjection: () => ({
+        type: "doc",
+        content: [
+          { type: "paragraph", content: [{ type: "text", text: "heading" }] },
+        ],
+      }),
+      acquireBlockContent: (id: BlockId, blockType: "paragraph", reason: "canonical-transaction") => ({
+        blockId: id,
+        blockType,
+        reason,
+        release: vi.fn(),
+      }),
+      createTextAnchorInContext: (_lease: unknown, input: { readonly textOffset: number }) => ({
+        ok: true,
+        codec: "pointer-test",
+        payload: { encoded: btoa(String(input.textOffset)), assoc: 0 },
+        textOffset: input.textOffset,
+      }),
+    } as unknown as EditorWebContentRuntime;
+    const originalElementFromPoint = Object.getOwnPropertyDescriptor(
+      document,
+      "elementFromPoint",
+    );
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: () => text,
+    });
+
+    expect(
+      resolveEditorSelectionPointerHit({
+        list,
+        target: control,
+        clientX: 100,
+        clientY: 20,
+        contentRuntime,
+        graph,
+        requireStartEligible: true,
+      }),
+    ).toBeNull();
+
+    expect(
+      resolveEditorSelectionPointerHit({
+        list,
+        target: control,
+        clientX: 100,
+        clientY: 20,
+        contentRuntime,
+        graph,
+      })?.target.block.id,
+    ).toBe(childId);
+    if (originalElementFromPoint) {
+      Object.defineProperty(
+        document,
+        "elementFromPoint",
+        originalElementFromPoint,
+      );
+    } else {
+      Reflect.deleteProperty(document, "elementFromPoint");
+    }
+  });
+});
+
+function rectangle(
+  left: number,
+  top: number,
+  width: number,
+  height: number,
+): DOMRect {
+  return {
+    x: left,
+    y: top,
+    left,
+    top,
+    right: left + width,
+    bottom: top + height,
+    width,
+    height,
+    toJSON: () => ({}),
+  } as DOMRect;
+}

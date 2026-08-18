@@ -1,0 +1,41 @@
+{
+  "name": "@repo/editor-yjs-dom",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Canonical Yjs content runtime and stable relative-position anchors.",
+  "main": "./dist/api/index.js",
+  "types": "./src/api/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/api/index.ts",
+      "development": "./src/api/index.ts",
+      "import": "./dist/api/index.js"
+    }
+  },
+  "scripts": {
+    "build": "pnpm run clean && tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json --watch",
+    "check-types": "tsc --noEmit",
+    "typecheck": "pnpm run check-types",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "lint": "eslint . --max-warnings 0",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@repo/editor-core": "workspace:*",
+    "@repo/editor-yjs": "workspace:*"
+  },
+  "devDependencies": {
+    "@repo/eslint-config": "workspace:*",
+    "@repo/typescript-config": "workspace:*",
+    "@vitest/coverage-v8": "^4.0.15",
+    "@types/node": "^22.15.3",
+    "eslint": "^9.39.1",
+    "jsdom": "^27.2.0",
+    "typescript": "5.9.2",
+    "vitest": "^4.0.8"
+  }
+}

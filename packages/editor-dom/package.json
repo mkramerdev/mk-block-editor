@@ -1,0 +1,69 @@
+{
+  "name": "@repo/editor-dom",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Block-local DOM ProseMirror layer for the web editor. Owns per-block state/view factories, plugins, keymaps, inline node views, and DOM helpers.",
+  "exports": {
+    "./block-editor": {
+      "types": "./src/api/block-editor.ts",
+      "development": "./src/api/block-editor.ts",
+      "import": "./dist/api/block-editor.js"
+    },
+    "./schema": {
+      "types": "./src/api/schema.ts",
+      "development": "./src/api/schema.ts",
+      "import": "./dist/api/schema.js"
+    },
+    "./keymap": {
+      "types": "./src/api/keymap.ts",
+      "development": "./src/api/keymap.ts",
+      "import": "./dist/api/keymap.js"
+    },
+    "./caret": {
+      "types": "./src/api/caret.ts",
+      "development": "./src/api/caret.ts",
+      "import": "./dist/api/caret.js"
+    },
+    "./clipboard": {
+      "types": "./src/api/clipboard.ts",
+      "development": "./src/api/clipboard.ts",
+      "import": "./dist/api/clipboard.js"
+    },
+    "./prosemirror": {
+      "types": "./src/api/prosemirror.ts",
+      "development": "./src/api/prosemirror.ts",
+      "import": "./dist/api/prosemirror.js"
+    }
+  },
+  "scripts": {
+    "build": "pnpm run clean && tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json --watch",
+    "check-types": "tsc --noEmit",
+    "typecheck": "pnpm run check-types",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "lint": "eslint . --max-warnings 0",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@repo/editor-core": "workspace:*",
+    "prosemirror-dropcursor": "^1.8.2",
+    "prosemirror-keymap": "^1.2.3",
+    "prosemirror-model": "^1.25.4",
+    "prosemirror-state": "^1.4.4",
+    "prosemirror-transform": "^1.12.0",
+    "prosemirror-view": "^1.39.2"
+  },
+  "devDependencies": {
+    "@repo/eslint-config": "workspace:*",
+    "@repo/typescript-config": "workspace:*",
+    "@vitest/coverage-v8": "^4.0.15",
+    "@types/node": "^22.15.3",
+    "eslint": "^9.39.1",
+    "jsdom": "^27.2.0",
+    "typescript": "5.9.2",
+    "vitest": "^4.0.8"
+  }
+}

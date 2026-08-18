@@ -1,0 +1,104 @@
+{
+  "name": "@repo/editor-web",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Generic React DOM editor surface",
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "exports": {
+    "./block-renderer": {
+      "types": "./src/api/block-renderer.ts",
+      "development": "./src/api/block-renderer.ts",
+      "import": "./dist/api/block-renderer.js"
+    },
+    "./document-runtime": {
+      "types": "./src/api/document-runtime.ts",
+      "development": "./src/api/document-runtime.ts",
+      "import": "./dist/api/document-runtime.js"
+    },
+    "./editor-definition": {
+      "types": "./src/api/editor-definition.ts",
+      "development": "./src/api/editor-definition.ts",
+      "import": "./dist/api/editor-definition.js"
+    },
+    "./read-runtime": {
+      "types": "./src/api/read-runtime.ts",
+      "development": "./src/api/read-runtime.ts",
+      "import": "./dist/api/read-runtime.js"
+    },
+    "./editor": {
+      "types": "./src/api/editor.ts",
+      "development": "./src/api/editor.ts",
+      "import": "./dist/api/editor.js"
+    },
+    "./clipboard-runtime": {
+      "types": "./src/api/clipboard-runtime.ts",
+      "development": "./src/api/clipboard-runtime.ts",
+      "import": "./dist/api/clipboard-runtime.js"
+    },
+    "./editable-block-renderer": {
+      "types": "./src/api/editable-block-renderer.ts",
+      "development": "./src/api/editable-block-renderer.ts",
+      "import": "./dist/api/editable-block-renderer.js"
+    },
+    "./keybindings": {
+      "types": "./src/api/keybindings.ts",
+      "development": "./src/api/keybindings.ts",
+      "import": "./dist/api/keybindings.js"
+    },
+    "./block-operations": {
+      "types": "./src/api/block-operations.ts",
+      "development": "./src/api/block-operations.ts",
+      "import": "./dist/api/block-operations.js"
+    },
+    "./typing-triggers": {
+      "types": "./src/api/typing-triggers.ts",
+      "development": "./src/api/typing-triggers.ts",
+      "import": "./dist/api/typing-triggers.js"
+    },
+    "./styles.css": {
+      "development": "./src/styles/editor.css",
+      "default": "./dist/index.css"
+    }
+  },
+  "scripts": {
+    "build": "pnpm run clean && tsc -p tsconfig.build.json && node -e \"require('node:fs').copyFileSync('src/styles/editor.css', 'dist/index.css')\"",
+    "dev": "tsc -p tsconfig.build.json --watch",
+    "check-types": "tsc --noEmit && tsc -p tsconfig.contracts.json",
+    "typecheck": "pnpm run check-types",
+    "typecheck:contracts": "tsc -p tsconfig.contracts.json",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "lint": "eslint . --max-warnings 0",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@repo/editor-dom": "workspace:*",
+    "@repo/editor-core": "workspace:*",
+    "@repo/editor-react": "workspace:*"
+  },
+  "devDependencies": {
+    "@repo/eslint-config": "workspace:*",
+    "@repo/typescript-config": "workspace:*",
+    "@vitest/coverage-v8": "^4.0.15",
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "^16.3.0",
+    "@types/node": "^22.15.3",
+    "@types/react": "19.2.2",
+    "@types/react-dom": "19.2.2",
+    "@vitejs/plugin-react": "^6.0.5",
+    "eslint": "^9.39.1",
+    "jsdom": "^27.2.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "typescript": "5.9.2",
+    "vitest": "^4.0.8"
+  },
+  "peerDependencies": {
+    "react": ">=18.0.0",
+    "react-dom": ">=18.0.0"
+  }
+}

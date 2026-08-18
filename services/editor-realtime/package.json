@@ -1,0 +1,40 @@
+{
+  "name": "@repo/editor-realtime",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node --enable-source-maps dist/index.js",
+    "check-types": "tsc --noEmit",
+    "typecheck": "pnpm run check-types",
+    "lint": "eslint . --max-warnings 0",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build:dependencies": "pnpm --filter \"@repo/editor-realtime^...\" build",
+    "test": "pnpm run build:dependencies && vitest run",
+    "test:postgres": "pnpm run build:dependencies && vitest run --config vitest.postgres.config.ts",
+    "test:watch": "pnpm run build:dependencies && vitest",
+    "test:coverage": "pnpm run build:dependencies && vitest run --coverage"
+  },
+  "dependencies": {
+    "@repo/editor-first-draft": "workspace:*",
+    "dotenv": "^17.2.3",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@repo/eslint-config": "workspace:*",
+    "@repo/editor-core": "workspace:*",
+    "@repo/editor-web": "workspace:*",
+    "@repo/typescript-config": "workspace:*",
+    "@types/node": "^22.15.3",
+    "@types/pg": "^8.15.6",
+    "@types/ws": "^8.5.14",
+    "@vitest/coverage-v8": "^4.0.15",
+    "eslint": "^9.39.1",
+    "pg": "^8.16.3",
+    "tsx": "^4.21.0",
+    "typescript": "5.9.2",
+    "vitest": "^4.0.8"
+  }
+}
