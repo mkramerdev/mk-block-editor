@@ -173,6 +173,7 @@ export function useEditableClipboardEvents({
           { deletion: range },
           {
             provenance: null,
+            selectionPresentation: "native-final-selection",
           },
         ),
       paste: (

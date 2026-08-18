@@ -464,6 +464,133 @@ describe("shared document text editing runtime", () => {
     editor.dispose();
   });
 
+  it("synchronizes geometry when pending presentation activates during initial host registration", async () => {
+    const editor = initializeTestEditableEditor({
+      definition: testEditableEditorDefinition,
+      snapshot: createTestEditorSnapshot([
+        { id: firstId, type: "paragraph", text: "first" },
+      ]),
+    });
+    const runtime = editor as EditableEditorRuntimePort;
+    const rendered = render(<EditorDocument editor={editor} />);
+    activateText(editor, firstId, 5);
+    const activeView = runtime.readActiveTextView();
+    if (!activeView) throw new Error("missing active shared view");
+    const updateMountedTextRoot = vi.spyOn(
+      runtime.geometryRegistration,
+      "updateMountedTextRoot",
+    );
+    act(() => activeView.dom.dispatchEvent(keyDown("Enter")));
+    await waitFor(() => expect(editor.getRootBlockIds()).toHaveLength(2));
+    const generatedId = editor.getRootBlockIds()[1];
+    if (!generatedId) throw new Error("missing generated paragraph");
+    const generatedHost = textHost(rendered.container, generatedId);
+    const projection = textProjection(generatedHost);
+    await waitFor(() =>
+      expect(activeView.dom.parentElement).toBe(textSlot(generatedHost)),
+    );
+    expect(activeView.dom.parentElement).toBe(
+      textSlot(generatedHost),
+    );
+    expect(projection.hidden).toBe(true);
+    expect(updateMountedTextRoot).toHaveBeenCalledWith(
+      generatedId,
+      activeView.dom,
+    );
+
+    editor.dispose();
+  });
+
+  it("navigates vertically immediately after Enter activates a newly mounted paragraph", async () => {
+    const editor = initializeTestEditableEditor({
+      definition: testEditableEditorDefinition,
+      snapshot: createTestEditorSnapshot([
+        { id: firstId, type: "paragraph", text: "first" },
+        { id: secondId, type: "paragraph", text: "second" },
+      ]),
+    });
+    const runtime = editor as EditableEditorRuntimePort;
+    const rendered = render(<EditorDocument editor={editor} />);
+    const restoreGeometry = installDeterministicTextGeometry(() => {
+      const roots = editor.getRootBlockIds();
+      return roots.length === 3 ? roots[1] ?? null : null;
+    });
+
+    try {
+      activateText(editor, firstId, 5);
+      const sharedView = runtime.readActiveTextView();
+      if (!sharedView) throw new Error("missing active shared view");
+      act(() => sharedView.dom.dispatchEvent(keyDown("Enter")));
+
+      await waitFor(() => expect(editor.getRootBlockIds()).toHaveLength(3));
+      const generatedId = editor.getRootBlockIds()[1];
+      if (!generatedId) throw new Error("missing generated paragraph");
+      const generatedHost = textHost(rendered.container, generatedId);
+      const generatedProjection = textProjection(generatedHost);
+      await waitFor(() => {
+        expect(runtime.readActiveTextView()).toBe(sharedView);
+        expect(sharedView.dom.parentElement).toBe(textSlot(generatedHost));
+      });
+
+      expectCanonicalCaret(runtime, generatedId, 0);
+      expect(runtime.readTextSelectionOffset(generatedId)).toBe(0);
+      expect(generatedProjection.hidden).toBe(true);
+      expect(visibleTextRepresentations(generatedHost)).toEqual([
+        sharedView.dom,
+      ]);
+      expect(rendered.container.querySelectorAll(".ProseMirror")).toHaveLength(
+        1,
+      );
+      expect(
+        rendered.container.querySelectorAll('[contenteditable="true"]'),
+      ).toHaveLength(1);
+      expect(
+        rendered.container.querySelectorAll(
+          '[data-editor-input-owner="true"]',
+        ),
+      ).toHaveLength(1);
+
+      const generatedProjectionHtml = generatedProjection.innerHTML;
+      generatedProjection.textContent = "hidden-projection-only";
+      expect(editor.geometry.readTextCanonicalLength(generatedId)).toBe(0);
+      generatedProjection.innerHTML = generatedProjectionHtml;
+
+      const arrowUp = keyDown("ArrowUp");
+      act(() => sharedView.dom.dispatchEvent(arrowUp));
+      expect(arrowUp.defaultPrevented).toBe(true);
+      expectCanonicalCaretInBlock(runtime, firstId);
+      expect(sharedView.dom.parentElement).toBe(
+        textSlot(textHost(rendered.container, firstId)),
+      );
+      expect(document.activeElement).toBe(sharedView.dom);
+      expect(runtime.readTextSelectionOffset(firstId)).toBe(
+        readCanonicalCaretOffset(runtime, firstId),
+      );
+
+      const arrowDownToGenerated = keyDown("ArrowDown");
+      act(() => sharedView.dom.dispatchEvent(arrowDownToGenerated));
+      expect(arrowDownToGenerated.defaultPrevented).toBe(true);
+      expectCanonicalCaret(runtime, generatedId, 0);
+
+      const arrowDownToFollowing = keyDown("ArrowDown");
+      act(() => sharedView.dom.dispatchEvent(arrowDownToFollowing));
+      expect(arrowDownToFollowing.defaultPrevented).toBe(true);
+      expectCanonicalCaretInBlock(runtime, secondId);
+
+      const arrowLeft = keyDown("ArrowLeft");
+      act(() => sharedView.dom.dispatchEvent(arrowLeft));
+      expect(arrowLeft.defaultPrevented).toBe(true);
+      expectCanonicalCaret(runtime, generatedId, 0);
+      const arrowRight = keyDown("ArrowRight");
+      act(() => sharedView.dom.dispatchEvent(arrowRight));
+      expect(arrowRight.defaultPrevented).toBe(true);
+      expectCanonicalCaretInBlock(runtime, secondId);
+    } finally {
+      restoreGeometry();
+      editor.dispose();
+    }
+  });
+
   it("keeps read-only documents permanently free of views and editable roots", () => {
     const editor = initializeTestReadEditor({
       definition: testReadEditorDefinition,
@@ -569,6 +696,160 @@ function visibleTextRepresentations(host: HTMLElement): HTMLElement[] {
       ":scope > [data-editor-text-projection='true'], :scope > [data-editor-text-slot='true'] > .ProseMirror",
     ),
   ).filter((element) => getComputedStyle(element).display !== "none");
+}
+
+function expectCanonicalCaret(
+  editor: EditableEditorRuntimePort,
+  blockId: BlockId,
+  offset: number,
+): void {
+  const canonical = editor.selectionController.getCanonicalSnapshot();
+  expect(canonical.kind).toBe("document");
+  if (canonical.kind !== "document") return;
+  expect(canonical.snapshot.documentSelection.anchor).toMatchObject({
+    blockId,
+    textOffset: offset,
+  });
+  expect(canonical.snapshot.documentSelection.focus).toMatchObject({
+    blockId,
+    textOffset: offset,
+  });
+}
+
+function expectCanonicalCaretInBlock(
+  editor: EditableEditorRuntimePort,
+  blockId: BlockId,
+): void {
+  const canonical = editor.selectionController.getCanonicalSnapshot();
+  expect(canonical.kind).toBe("document");
+  if (canonical.kind !== "document") return;
+  const { anchor, focus } = canonical.snapshot.documentSelection;
+  expect(anchor?.blockId).toBe(blockId);
+  expect(focus?.blockId).toBe(blockId);
+  expect(anchor?.textOffset).toBe(focus?.textOffset);
+}
+
+function readCanonicalCaretOffset(
+  editor: EditableEditorRuntimePort,
+  blockId: BlockId,
+): number | null {
+  const canonical = editor.selectionController.getCanonicalSnapshot();
+  if (canonical.kind !== "document") return null;
+  const { anchor, focus } = canonical.snapshot.documentSelection;
+  return anchor?.blockId === blockId &&
+    focus?.blockId === blockId &&
+    anchor.textOffset === focus.textOffset
+    ? focus.textOffset
+    : null;
+}
+
+function keyDown(key: string): KeyboardEvent {
+  return new KeyboardEvent("keydown", {
+    key,
+    bubbles: true,
+    cancelable: true,
+  });
+}
+
+function installDeterministicTextGeometry(
+  readGeneratedId: () => BlockId | null,
+): () => void {
+  const originalElementRect = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "getBoundingClientRect",
+  );
+  const originalRangeRects = Object.getOwnPropertyDescriptor(
+    Range.prototype,
+    "getClientRects",
+  );
+  const originalRangeRect = Object.getOwnPropertyDescriptor(
+    Range.prototype,
+    "getBoundingClientRect",
+  );
+  const geometryRect = (left: number, top: number, width: number, height: number) =>
+    ({
+      x: left,
+      y: top,
+      left,
+      top,
+      right: left + width,
+      bottom: top + height,
+      width,
+      height,
+      toJSON: () => ({}),
+    }) as DOMRect;
+  const blockTop = (element: Element | null): number => {
+    const blockId = element
+      ?.closest<HTMLElement>('[data-editor-block-id]')
+      ?.dataset.editorBlockId;
+    if (blockId === firstId) return 100;
+    if (blockId === readGeneratedId()) return 200;
+    if (blockId === secondId) return 300;
+    return 20;
+  };
+  const rangeRoot = (range: Range): HTMLElement | null => {
+    const node = range.commonAncestorContainer;
+    const element =
+      node instanceof HTMLElement ? node : node.parentElement;
+    return (
+      element?.closest<HTMLElement>(
+        '.ProseMirror, [data-editor-text-projection="true"]',
+      ) ?? null
+    );
+  };
+  Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
+    configurable: true,
+    value: function (this: HTMLElement) {
+      if (this.hidden) return geometryRect(0, 0, 0, 0);
+      return geometryRect(120, blockTop(this), 300, 20);
+    },
+  });
+  Object.defineProperty(Range.prototype, "getClientRects", {
+    configurable: true,
+    value: function (this: Range) {
+      const root = rangeRoot(this);
+      if (!root || root.hidden) return [] as unknown as DOMRectList;
+      return [
+        geometryRect(120 + this.startOffset * 8, blockTop(root), 1, 18),
+      ] as unknown as DOMRectList;
+    },
+  });
+  Object.defineProperty(Range.prototype, "getBoundingClientRect", {
+    configurable: true,
+    value: function (this: Range) {
+      const root = rangeRoot(this);
+      return !root || root.hidden
+        ? geometryRect(0, 0, 0, 0)
+        : geometryRect(
+            120 + this.startOffset * 8,
+            blockTop(root),
+            1,
+            18,
+          );
+    },
+  });
+  return () => {
+    restoreDescriptor(
+      HTMLElement.prototype,
+      "getBoundingClientRect",
+      originalElementRect,
+    );
+    restoreDescriptor(Range.prototype, "getClientRects", originalRangeRects);
+    restoreDescriptor(
+      Range.prototype,
+      "getBoundingClientRect",
+      originalRangeRect,
+    );
+  };
+}
+
+function restoreDescriptor(
+  target: object,
+  property: string,
+  descriptor: PropertyDescriptor | undefined,
+): void {
+  if (descriptor) Object.defineProperty(target, property, descriptor);
+  else Reflect.deleteProperty(target, property);
 }
 
 function typographySnapshot(element: HTMLElement) {

@@ -532,34 +532,38 @@ export function initializeEditableEditor({
             input.blockId,
             input.projection,
           );
-        const unregisterProjection =
-          editableCapability.text.registerHost(input);
+        let disposed = false;
+        const reconcileMountedTextRoot = () => {
+          if (disposed || editor.isDisposed()) return;
+          const activeView = editableCapability?.text.readActiveView();
+          const geometryRoot =
+            editableCapability?.text.isActive(input.blockId) && activeView
+              ? activeView.dom
+              : input.projection;
+          if (
+            editor.geometryRegistration.updateMountedTextRoot(
+              input.blockId,
+              geometryRoot,
+            )
+          ) {
+            return;
+          }
+          unregisterGeometry();
+          if (disposed || editor.isDisposed()) return;
+          unregisterGeometry =
+            editor.geometryRegistration.registerMountedTextRoot(
+              input.blockId,
+              geometryRoot,
+            );
+        };
         const unsubscribeActivity =
           editableCapability.text.subscribeToBlockActivity(
             input.blockId,
-            () => {
-              const activeView = editableCapability?.text.readActiveView();
-              const geometryRoot =
-                editableCapability?.text.isActive(input.blockId) && activeView
-                  ? activeView.dom
-                  : input.projection;
-              if (
-                editor.geometryRegistration.updateMountedTextRoot(
-                  input.blockId,
-                  geometryRoot,
-                )
-              ) {
-                return;
-              }
-              unregisterGeometry();
-              unregisterGeometry =
-                editor.geometryRegistration.registerMountedTextRoot(
-                  input.blockId,
-                  geometryRoot,
-                );
-            },
+            reconcileMountedTextRoot,
           );
-        let disposed = false;
+        const unregisterProjection =
+          editableCapability.text.registerHost(input);
+        reconcileMountedTextRoot();
         return {
           update(options: { readonly placeholder?: TextPlaceholder }) {
             if (!disposed) {

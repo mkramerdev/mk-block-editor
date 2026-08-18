@@ -1,14 +1,14 @@
 .first-draft-example {
-  --fd-background: oklch(1 0 0);
-  --fd-foreground: oklch(0.145 0 0);
-  --fd-panel: oklch(0.97 0 0);
-  --fd-control: oklch(1 0 0);
-  --fd-border: oklch(0.922 0 0);
-  --fd-table-border: oklch(0.72 0 0);
-  --fd-muted: oklch(0.556 0 0);
-  --fd-accent: #2563eb;
-  --fd-shadow: rgb(15 23 42 / 14%);
-  color-scheme: light;
+  --fd-background: oklch(0.225 0 0);
+  --fd-foreground: oklch(0.875 0 0);
+  --fd-panel: oklch(0.269 0 0);
+  --fd-control: oklch(0.205 0 0);
+  --fd-border: oklch(0.35 0 0);
+  --fd-table-border: oklch(0.5 0 0);
+  --fd-muted: oklch(0.708 0 0);
+  --fd-accent: #60a5fa;
+  --fd-shadow: rgb(0 0 0 / 38%);
+  color-scheme: dark;
   position: relative;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -28,6 +28,13 @@
 .first-draft-example .editor-web-document {
   --first-draft-layout-side-left-width: var(--editor-side-left-width);
   --first-draft-layout-side-right-width: var(--editor-side-right-width);
+}
+
+/* Product menus render inside editor-web's document-layer host. Elevate that
+ * stacking context above First Draft's in-flow block controls so fixed menus
+ * are not capped below controls such as the callout icon. */
+.first-draft-example [data-editor-document-layer-host="true"] {
+  z-index: 30;
 }
 
 .first-draft-block-hover-tracker {
@@ -360,19 +367,6 @@
   forced-color-adjust: none;
   outline: 2px solid var(--editor-selection-paint-color, Highlight);
   outline-offset: -2px;
-}
-
-.dark .first-draft-example {
-  --fd-background: oklch(0.225 0 0);
-  --fd-foreground: oklch(0.875 0 0);
-  --fd-panel: oklch(0.269 0 0);
-  --fd-control: oklch(0.205 0 0);
-  --fd-border: oklch(0.35 0 0);
-  --fd-table-border: oklch(0.5 0 0);
-  --fd-muted: oklch(0.708 0 0);
-  --fd-accent: #60a5fa;
-  --fd-shadow: rgb(0 0 0 / 38%);
-  color-scheme: dark;
 }
 
 .first-draft-example *,

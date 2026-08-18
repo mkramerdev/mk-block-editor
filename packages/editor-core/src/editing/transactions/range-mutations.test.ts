@@ -298,6 +298,55 @@ describe("ordinary structural range mutations", () => {
     expect(result.rootBlockIds).toEqual([leading.id, trailing.id]);
     expect(result.stagedContent[leading.id]?.plainText).toBe("ab");
     expect(result.stagedContent[trailing.id]?.plainText).toBe("yz");
+    expect(result.selection).toEqual({
+      kind: "text-offset",
+      blockId: leading.id,
+      offset: 2,
+    });
+  });
+
+  it("uses the nearest surviving start-side text point when the first selected block is removed", () => {
+    const removed = block(1, "divider");
+    const trailing = block(2, "heading");
+    const result = applied(
+      apply(
+        graph([removed, trailing]),
+        new Map([[trailing.id, text("heading", "wxyz")]]),
+        [
+          deleteRange(
+            range(
+              [
+                {
+                  kind: "block",
+                  blockId: removed.id,
+                  blockType: removed.type,
+                  parentId: null,
+                },
+                {
+                  kind: "text",
+                  blockId: trailing.id,
+                  blockType: trailing.type,
+                  parentId: null,
+                  from: 0,
+                  to: 2,
+                  expectedContentVersion: "1",
+                },
+              ],
+              { kind: "block", blockId: removed.id },
+              { kind: "text", blockId: trailing.id, offset: 2 },
+            ),
+          ),
+        ],
+      ),
+    );
+
+    expect(result.rootBlockIds).toEqual([trailing.id]);
+    expect(result.stagedContent[trailing.id]?.plainText).toBe("yz");
+    expect(result.selection).toEqual({
+      kind: "text-offset",
+      blockId: trailing.id,
+      offset: 0,
+    });
   });
 
   it("keeps an empty definition-owned text survivor when all roots are removed", () => {

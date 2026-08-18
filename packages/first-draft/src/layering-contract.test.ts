@@ -72,11 +72,19 @@ describe("First Draft editor layer ownership", () => {
       firstDraftCss,
       ".first-draft-example .callout-block__picker",
     );
+    const calloutIcon = zIndex(firstDraftCss, ".callout-block__icon-wrap");
+    const documentLayers = zIndex(
+      firstDraftCss,
+      '.first-draft-example [data-editor-document-layer-host="true"]',
+    );
+    const slashMenu = zIndex(firstDraftCss, ".first-draft-slash-menu");
 
     expect(overlay).toBeGreaterThan(text);
     expect(badges).toBeGreaterThan(overlay);
     expect(controls).toBeGreaterThan(overlay);
     expect(picker).toBeGreaterThan(controls);
+    expect(documentLayers).toBeGreaterThan(calloutIcon);
+    expect(slashMenu).toBeGreaterThan(documentLayers);
     expect(declaration(editorCss, ".editor-web-selection-paint-band")).toMatch(
       /pointer-events:\s*none/u,
     );

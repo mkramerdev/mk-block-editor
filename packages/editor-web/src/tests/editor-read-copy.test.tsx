@@ -1,5 +1,6 @@
 import { act, render, waitFor } from "@testing-library/react";
 import type { BlockId } from "@repo/editor-core/kernel";
+import { blockTextCoordinateCodec } from "@repo/editor-dom/caret";
 import { createEditorLogicalSelectionPoint } from "@repo/editor-react/selection";
 import { describe, expect, it } from "vitest";
 import { createWebSelectionTextAnchorAtOffset } from "../document/selection/anchors/text-anchor.ts";
@@ -168,6 +169,194 @@ describe("editable canonical clipboard paste", () => {
   });
 });
 
+describe("editable canonical clipboard cut", () => {
+  it.each(["forward", "backward"] as const)(
+    "settles a %s partial cross-block cut at the canonical start in every selection layer",
+    async (direction) => {
+      const first = `cut-${direction}-first` as BlockId;
+      const middle = `cut-${direction}-middle` as BlockId;
+      const last = `cut-${direction}-last` as BlockId;
+      const editor = initializeEditableEditor({
+        definition: editableCopyDefinition,
+        snapshot: createTestEditorSnapshot([
+          { id: first, type: "paragraph", text: "alpha" },
+          { id: middle, type: "paragraph", text: "middle" },
+          { id: last, type: "paragraph", text: "omega" },
+        ]),
+      });
+      const runtime = editor as EditableEditorRuntimePort;
+      const rendered = render(<EditorDocument editor={editor} />);
+
+      act(() => {
+        expect(editor.focusText(last, { offset: 2 }).status).not.toBe(
+          "rejected",
+        );
+      });
+      const sharedView = runtime.readActiveTextView();
+      if (!sharedView) throw new Error("Expected active shared editor view");
+      act(() => {
+        if (direction === "forward") {
+          settleTextRange(editor, first, 2, last, 2, "backward", "forward");
+        } else {
+          settleTextRange(editor, last, 2, first, 2, "forward", "backward");
+        }
+      });
+      if (direction === "forward") {
+        expectCanonicalRange(runtime, first, 2, last, 2);
+      } else {
+        expectCanonicalRange(runtime, last, 2, first, 2);
+      }
+
+      let contentAtFirstClipboardWrite: readonly string[] | null = null;
+      const clipboard = new MemoryDataTransfer({}, () => {
+        contentAtFirstClipboardWrite ??= [
+          editor.readBlockPlainText(first, "paragraph"),
+          editor.readBlockPlainText(middle, "paragraph"),
+          editor.readBlockPlainText(last, "paragraph"),
+        ];
+      });
+      const cut = clipboardEvent("cut", clipboard);
+      act(() => sharedView.dom.dispatchEvent(cut));
+
+      expect(cut.defaultPrevented).toBe(true);
+      expect(contentAtFirstClipboardWrite).toEqual([
+        "alpha",
+        "middle",
+        "omega",
+      ]);
+      expect(clipboard.getData("text/plain")).toBe("pha\nmiddle\nom");
+      expect(editor.getRootBlockIds()).toEqual([first, last]);
+      expect(editor.readBlockPlainText(first, "paragraph")).toBe("al");
+      expect(editor.readBlockPlainText(last, "paragraph")).toBe("ega");
+      expectCanonicalCollapsedCaret(runtime, first, 2);
+
+      await waitFor(() => {
+        expect(runtime.readActiveTextView()).toBe(sharedView);
+        expect(sharedView.dom.parentElement).toBe(
+          textSlot(rendered.container, first),
+        );
+        expect(runtime.readTextSelectionOffset(first)).toBe(2);
+      });
+      expect(runtime.isTextProjectionActive(first)).toBe(true);
+      expect(runtime.isTextProjectionActive(last)).toBe(false);
+      expect(textProjection(rendered.container, first).hidden).toBe(true);
+      expect(sharedView.state.selection.empty).toBe(true);
+      expect(
+        blockTextCoordinateCodec.proseMirrorPositionToCanonicalOffset(
+          sharedView.state.selection.head,
+          sharedView.state,
+        ),
+      ).toBe(2);
+
+      const nativeSelection = document.getSelection();
+      expect(nativeSelection?.isCollapsed).toBe(true);
+      expect(nativeSelection?.focusNode).not.toBeNull();
+      expect(sharedView.dom.contains(nativeSelection!.focusNode)).toBe(true);
+      expect(
+        blockTextCoordinateCodec.domPointToCanonicalOffset(
+          sharedView,
+          nativeSelection!.focusNode!,
+          nativeSelection!.focusOffset,
+        ),
+      ).toBe(2);
+      expect(rendered.container.querySelectorAll(".ProseMirror")).toHaveLength(
+        1,
+      );
+      expect(
+        rendered.container.querySelectorAll('[contenteditable="true"]'),
+      ).toHaveLength(1);
+      expect(
+        rendered.container.querySelectorAll('[data-editor-input-owner="true"]'),
+      ).toHaveLength(1);
+      expect(
+        (
+          editor as unknown as {
+            readonly history: readonly unknown[];
+          }
+        ).history,
+      ).toHaveLength(1);
+      expectRecordedDocumentSelectionBefore(
+        editor,
+        direction === "forward" ? first : last,
+        2,
+        direction === "forward" ? last : first,
+        2,
+      );
+
+      act(() => expect(editor.undo()).toEqual({ status: "applied" }));
+      expect(editor.getRootBlockIds()).toEqual([first, middle, last]);
+      expect(editor.readBlockPlainText(first, "paragraph")).toBe("alpha");
+      expect(editor.readBlockPlainText(middle, "paragraph")).toBe("middle");
+      expect(editor.readBlockPlainText(last, "paragraph")).toBe("omega");
+      expectCanonicalRangeDirection(runtime, direction);
+
+      act(() => expect(editor.redo()).toEqual({ status: "applied" }));
+      expect(editor.getRootBlockIds()).toEqual([first, last]);
+      expect(editor.readBlockPlainText(first, "paragraph")).toBe("al");
+      expect(editor.readBlockPlainText(last, "paragraph")).toBe("ega");
+      expectCanonicalCollapsedCaret(runtime, first, 2);
+      await waitFor(() => {
+        expect(runtime.readActiveTextView()).toBe(sharedView);
+        expect(sharedView.dom.parentElement).toBe(
+          textSlot(rendered.container, first),
+        );
+        expect(runtime.readTextSelectionOffset(first)).toBe(2);
+      });
+
+      rendered.unmount();
+      editor.dispose();
+    },
+  );
+
+  it("does not mutate twice when the keyboard fallback is followed by a native cut event", async () => {
+    const first = "keyboard-cut-first" as BlockId;
+    const last = "keyboard-cut-last" as BlockId;
+    const editor = initializeEditableEditor({
+      definition: editableCopyDefinition,
+      snapshot: createTestEditorSnapshot([
+        { id: first, type: "paragraph", text: "alpha" },
+        { id: last, type: "paragraph", text: "omega" },
+      ]),
+    });
+    const runtime = editor as EditableEditorRuntimePort;
+    const rendered = render(<EditorDocument editor={editor} />);
+    act(() => {
+      expect(editor.focusText(last, { offset: 2 }).status).not.toBe("rejected");
+      settleTextRange(editor, first, 2, last, 2, "backward", "forward");
+    });
+    const sharedView = runtime.readActiveTextView();
+    if (!sharedView) throw new Error("Expected active shared editor view");
+
+    const shortcut = new KeyboardEvent("keydown", {
+      key: "x",
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    act(() => sharedView.dom.dispatchEvent(shortcut));
+    expect(editor.readBlockPlainText(first, "paragraph")).toBe("al");
+    expect(editor.readBlockPlainText(last, "paragraph")).toBe("ega");
+    expectCanonicalCollapsedCaret(runtime, first, 2);
+
+    const nativeCut = clipboardEvent("cut", new MemoryDataTransfer());
+    act(() => sharedView.dom.dispatchEvent(nativeCut));
+    expect(editor.readBlockPlainText(first, "paragraph")).toBe("al");
+    expect(editor.readBlockPlainText(last, "paragraph")).toBe("ega");
+    expectCanonicalCollapsedCaret(runtime, first, 2);
+    expect(
+      (
+        editor as unknown as {
+          readonly history: readonly unknown[];
+        }
+      ).history,
+    ).toHaveLength(1);
+    await waitFor(() => expect(runtime.readTextSelectionOffset(first)).toBe(2));
+
+    rendered.unmount();
+    editor.dispose();
+  });
+});
+
 function copySelectedRange(editable: boolean): MemoryDataTransfer {
   const editor: Editor = editable
     ? initializeEditableEditor({
@@ -201,10 +390,12 @@ function settleTextRange(
   anchorOffset: number,
   focusBlockId: BlockId,
   focusOffset: number,
+  anchorAffinity: "forward" | "backward" | null = null,
+  focusAffinity: "forward" | "backward" | null = null,
 ) {
   const runtime = resolveEditorRuntimePort(editor);
-  const anchor = point(anchorBlockId, anchorOffset);
-  const focus = point(focusBlockId, focusOffset);
+  const anchor = point(anchorBlockId, anchorOffset, anchorAffinity);
+  const focus = point(focusBlockId, focusOffset, focusAffinity);
   const settled = runtime.selectionController.extendSelection(
     anchor,
     focus,
@@ -214,12 +405,17 @@ function settleTextRange(
   );
   if (!settled) throw new Error("Expected canonical text selection");
 
-  function point(pointBlockId: BlockId, offset: number) {
+  function point(
+    pointBlockId: BlockId,
+    offset: number,
+    affinity: "forward" | "backward" | null,
+  ) {
     const stable = createWebSelectionTextAnchorAtOffset({
       contentRuntime: runtime.contentRuntime,
       blockId: pointBlockId,
       blockType: "paragraph",
       textOffset: offset,
+      affinity,
     });
     if (!stable.ok) throw new Error(stable.message);
     const result = createEditorLogicalSelectionPoint({
@@ -227,6 +423,7 @@ function settleTextRange(
       blockId: pointBlockId,
       textOffset: stable.textOffset,
       textAnchor: stable.textAnchor,
+      affinity,
     });
     if (!result) throw new Error("Expected selection point");
     return result;
@@ -252,12 +449,102 @@ function expectCanonicalCollapsedCaret(
   });
 }
 
+function expectCanonicalRange(
+  editor: EditableEditorRuntimePort,
+  anchorBlockId: BlockId,
+  anchorOffset: number,
+  focusBlockId: BlockId,
+  focusOffset: number,
+): void {
+  const canonical = editor.selectionController.getCanonicalSnapshot();
+  expect(canonical.kind).toBe("document");
+  if (canonical.kind !== "document") return;
+  expect(canonical.snapshot.documentSelection.anchor).toMatchObject({
+    blockId: anchorBlockId,
+    textOffset: anchorOffset,
+  });
+  expect(canonical.snapshot.documentSelection.focus).toMatchObject({
+    blockId: focusBlockId,
+    textOffset: focusOffset,
+  });
+}
+
+function expectCanonicalRangeDirection(
+  editor: EditableEditorRuntimePort,
+  direction: "forward" | "backward",
+): void {
+  const canonical = editor.selectionController.getCanonicalSnapshot();
+  expect(canonical.kind).toBe("document");
+  if (canonical.kind !== "document") return;
+  expect(canonical.snapshot.documentSelection.direction).toBe(direction);
+  expect(canonical.snapshot.documentSelection.anchor).not.toEqual(
+    canonical.snapshot.documentSelection.focus,
+  );
+}
+
+function expectRecordedDocumentSelectionBefore(
+  editor: Editor,
+  anchorBlockId: BlockId,
+  anchorOffset: number,
+  focusBlockId: BlockId,
+  focusOffset: number,
+): void {
+  const history = (
+    editor as unknown as {
+      readonly history: readonly {
+        readonly selectionBefore:
+          | { readonly kind: "none" }
+          | {
+              readonly kind: "document";
+              readonly selection: {
+                readonly anchor: {
+                  readonly blockId: BlockId;
+                  readonly textOffset: number;
+                };
+                readonly focus: {
+                  readonly blockId: BlockId;
+                  readonly textOffset: number;
+                };
+              };
+            };
+      }[];
+    }
+  ).history;
+  const recorded = history[0]?.selectionBefore;
+  expect(recorded?.kind).toBe("document");
+  if (recorded?.kind !== "document") return;
+  expect(recorded.selection.anchor).toMatchObject({
+    blockId: anchorBlockId,
+    textOffset: anchorOffset,
+  });
+  expect(recorded.selection.focus).toMatchObject({
+    blockId: focusBlockId,
+    textOffset: focusOffset,
+  });
+}
+
 function textRoot(container: HTMLElement, id: BlockId): HTMLElement {
   const root = container.querySelector<HTMLElement>(
     `[data-editor-block-id="${id}"] [data-editor-text-root="true"]`,
   );
   if (!root) throw new Error(`Expected mounted text root ${id}`);
   return root;
+}
+
+function textSlot(container: HTMLElement, id: BlockId): HTMLElement {
+  const slot = container.querySelector<HTMLElement>(
+    `[data-editor-block-id="${id}"] [data-editor-text-slot="true"]`,
+  );
+  if (!slot) throw new Error(`Expected mounted text slot ${id}`);
+  return slot;
+}
+
+function textProjection(container: HTMLElement, id: BlockId): HTMLElement {
+  const projection = container.querySelector<HTMLElement>(
+    `[data-editor-block-id="${id}"] [data-editor-text-projection="true"]`,
+  );
+  if (!projection) throw new Error(`Expected mounted text projection ${id}`);
+  return projection;
 }
 
 function snapshot() {
@@ -284,13 +571,17 @@ function clipboardEvent(
 class MemoryDataTransfer {
   readonly values = new Map<string, string>();
 
-  constructor(initial: Readonly<Record<string, string>> = {}) {
+  constructor(
+    initial: Readonly<Record<string, string>> = {},
+    private readonly onSetData?: () => void,
+  ) {
     for (const [format, value] of Object.entries(initial)) {
       this.values.set(format, value);
     }
   }
 
   setData(format: string, value: string): void {
+    this.onSetData?.();
     this.values.set(format, value);
   }
 
