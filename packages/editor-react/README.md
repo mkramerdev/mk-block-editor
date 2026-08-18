@@ -11,6 +11,7 @@ Public package entrypoints are owned by `src/api/*` and build to `dist/api/*`.
 - `@repo/editor-react` -> `src/api/index.ts`
 - `@repo/editor-react/store` -> `src/api/store.ts`
 - `@repo/editor-react/selection` -> `src/api/selection.ts`
+- `@repo/editor-react/selection-model` -> `src/selection/model/types.ts`
 - `@repo/editor-react/editor` -> `src/api/editor.ts`
 
 Implementation code must import concrete source modules directly. It must not import `src/api/*` or the public `@repo/editor-react` subpaths.
@@ -27,12 +28,19 @@ Implementation code must import concrete source modules directly. It must not im
 - `src/selection/materialization` - platform-neutral selection-to-`CanonicalBlockFragment` materialization.
 - `src/selection/editing` - authoritative resolved edit ranges for structural mutations.
 - `src/selection/formatting` - inline mark state and formatting plans.
-- `src/runtime/document` - the concrete Editor implementation, its sole linear history array and cursor, the one active structural transaction draft, canonical insertion composition, graph state, operation execution, reconciliation, and mounted-block domains.
+- `src/runtime/document/api` - public controller contracts and command identities.
+- `src/runtime/document/controller` - the concrete Editor implementation, its
+  sole linear history array and cursor, the active structural transaction
+  draft, graph state, commit coordination, and reconciliation.
+- `src/runtime/document/operations` - structural and canonical edit
+  composition, operation preparation, and selection effects.
 - `src/runtime/inline-content` - inline command planning and execution.
 
 ## Boundaries
 
-This package stays platform-neutral. It must not import DOM, React DOM, React Native, ProseMirror, Yjs DOM, storage, realtime transport, Postgres, SQLite, app routes, or product-web code.
+This package stays platform-neutral. It must not import DOM, React DOM, React
+Native, ProseMirror, Yjs DOM, storage, realtime transport, PostgreSQL, app
+routes, or product-composition code.
 
 The Editor consumes prepared snapshots from outer layers and emits local operations through caller-provided callbacks. Product, storage, realtime, and routing wrappers attach document identity outside this package.
 
@@ -101,10 +109,10 @@ settlement, and unchanged state publish nothing.
 Run these after API or domain changes:
 
 ```bash
-pnpm --filter @repo/editor-react typecheck
+pnpm --filter @repo/editor-react check-types
 pnpm --filter @repo/editor-react test
-pnpm --filter @repo/editor-web typecheck
-pnpm --filter @repo/editor-product-web typecheck
+pnpm --filter @repo/editor-web check-types
+pnpm --filter @repo/editor-first-draft check-types
 ```
 
 ## Dependencies

@@ -390,6 +390,9 @@ importers:
       fractional-indexing:
         specifier: ^4.0.0
         version: 4.0.0
+      mk-autoscroll:
+        specifier: ^0.1.0
+        version: 0.1.0
       pg:
         specifier: ^8.16.3
         version: 8.23.0
@@ -2204,6 +2207,9 @@ packages:
   minimatch@9.0.5:
     resolution: {integrity: sha512-G6T0ZX48xgozx7587koeX9Ys2NYy6Gmv//P89sEte9V9whIapMNF4idKxnW2QtCcLiTWlb/wfCabAtAFWhhBow==}
     engines: {node: '>=16 || 14 >=14.17'}
+
+  mk-autoscroll@0.1.0:
+    resolution: {integrity: sha512-QbPE+Q3RTpLtnjNTYKQE0tDRULb4aRGxsowOzvj+kpdyFdp6tlLe/tNvhmoRYDwfJ0q8a08iUbBeD/uIQ0/wQw==}
 
   ms@2.1.3:
     resolution: {integrity: sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==}
@@ -4530,6 +4536,8 @@ snapshots:
   minimatch@9.0.5:
     dependencies:
       brace-expansion: 2.0.2
+
+  mk-autoscroll@0.1.0: {}
 
   ms@2.1.3: {}
 

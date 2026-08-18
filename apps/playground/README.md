@@ -1,11 +1,12 @@
 # Next.js playground
 
-This app is a [Next.js](https://nextjs.org/) playground.
-
-Run it from the repository root:
+This Next.js playground runs on
+[http://localhost:3000](http://localhost:3000).
 
 ```sh
 pnpm --filter playground dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) and edit `app/page.tsx` to get started.
+The current home route is the repository's basic Next.js playground. A
+`/full-editor` page is present but currently renders no editor surface, so it
+is not a functional editor example.

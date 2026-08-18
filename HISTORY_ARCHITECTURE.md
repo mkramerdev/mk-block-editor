@@ -87,12 +87,9 @@ The authoritative producer boundary covers:
 Internal transaction steps and content effects never record independently.
 Failed validation, failed application, and no-op edits record nothing.
 
-Typing grouping is ephemeral editing-layer state. Compatible edits compose
-forward operations chronologically and inverse operations in reverse order,
-while retaining the first `selectionBefore` and final `selectionAfter`.
-Structural, metadata, paste, cut, formatting, discontinuous selection, timeout,
-undo, redo, and editor disposal end the group. Grouping metadata is never stored
-in an entry.
+Each accepted history-producing commit calls `recordHistoryEntry` once. The
+current implementation has no typing-group state, timeout, or operation
+coalescing layer, so consecutive typing commits remain separate undo entries.
 
 ## External ingress
 

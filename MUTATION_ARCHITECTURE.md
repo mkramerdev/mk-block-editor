@@ -86,7 +86,7 @@ placement, and selection atomically.
 | Mention acceptance                                                                                                                 | Compound trigger replacement, atom insertion, optional trailing content, and caret | Ordered inline plan -> `commitPreparedContentTransaction`    |
 | Slash acceptance                                                                                                                   | Compound trigger removal plus graph/content change                                 | Structural plan -> `applyPreparedGraphTransaction`           |
 | Cut, rich paste, multi-block paste, and multi-block replacement                                                                    | Compound graph/content composition                                                 | Canonical edit composition -> graph coordinator              |
-| Block create, delete, transform, split, merge, move, reparent, drag/drop, and subtree insertion                                    | Compound structural action                                                         | Structural plan -> `applyPreparedGraphTransaction`           |
+| Block create, delete, transform, split, merge, move, reparent, and subtree insertion APIs                                          | Compound structural action                                                         | Structural plan -> `applyPreparedGraphTransaction`           |
 | Product-owned table and column structure                                                                                           | Compound graph/content/metadata action                                             | Typed public Editor transaction -> graph coordinator         |
 | Block metadata                                                                                                                     | Singular or multi-block batch                                                      | `updateBlockMetadata()` -> `applyPreparedGraphTransaction`   |
 | Content undo and redo                                                                                                              | Stored forward or inverse content plan                                             | `commitPreparedContentTransaction` without history recording |
@@ -98,6 +98,9 @@ Product sources and renderers do not receive the concrete coordinator or
 content-runtime application methods. Feature code may prepare immutable typed
 plans, but it does not own commit execution, history, persistence, or
 notification.
+
+The block-operation API can move and duplicate blocks, but First Draft has no
+mounted block drag-and-drop producer. Its visible grip is inert.
 
 Product table mutations follow the final ownership path:
 
@@ -120,6 +123,14 @@ Product validation is supplied through the feature-neutral document-validator
 boundary. Product clipboard codecs and block-internal selection subsystems are
 explicit semantic contributions. Generic packages neither import product table
 code nor inspect product table schema or DOM markers.
+
+For supported ordinary Backspace and forward Delete, the block-local DOM plugin
+claims `beforeinput`, maps the browser-provided target range to ProseMirror
+positions, and dispatches one deletion transaction before contenteditable DOM
+mutation. That proposal then follows the same canonical content route shown
+above. Composition, structural boundaries, inline-atom keymap handling, and
+unusable target ranges remain with their existing owners; the last case falls
+back to native DOM mutation and ProseMirror recovery.
 
 ## Content preparation and settlement
 
@@ -210,45 +221,56 @@ not observe React rendering, native-focus transitions, text-projection activatio
 ProseMirror attachment, browser selection, or additional selection presentation:
 
 ```text
-committed canonical transaction
-  -> one semantic transaction notification
-  -> product semantic transaction conversion
-  -> one SQLite transaction updating projection and active outbox
-  -> writer and realtime publication
-  -> PostgreSQL acceptance
-  -> accepted-outcome reconciliation
+finalized semantic editor transaction
+  -> First Draft transport conversion
+  -> direct WebSocket publication
+  -> realtime service protocol and transaction validation
+  -> PostgreSQL revision check and acceptance
+  -> acceptance reply to the sender
+  -> accepted transaction broadcast/replay to other clients
+  -> remote canonical transaction application
 ```
 
-The active outbox retains the original editor transaction identity. Accepted
-application records the canonical effects and ledger row, removes a correlated
-local outbox row, satisfies remaining dependencies, and updates projection
-authority in one SQLite transaction. The runtime uses the returned correlation
-to acknowledge the original editor transaction; a remote acceptance is never
-classified as local merely because it affects the same document.
+`@repo/editor-first-draft/transport` converts graph, metadata, and Yjs content
+effects into the current wire transaction. `handleTransaction` sends that
+frame only while the captured socket is open; it has no retry queue or durable
+browser outbox. The realtime service serializes persistence for a document,
+accepts against the current PostgreSQL revision, acknowledges the sender, and
+broadcasts an accepted replay to other subscribed clients. Clients apply an
+unseen replay through `applyRemoteTransaction`.
 
-Transaction-owned `selectionBefore` and `selectionAfter`, plus their shared
-selection revision, travel with the durable outbox submission and its live
-accepted sidecar. The PostgreSQL accepted commit ledger remains content-only.
-Standalone local selections continue through the document interaction
-boundary and standalone live transport; they are not duplicated by content
-transactions.
+Canonical transaction selection is not embedded in the persisted transport
+transaction. The First Draft finalized-commit observer publishes the committed
+author selection separately through the presence channel. Standalone local
+selection settlements use that same presence boundary without creating a
+content transaction.
+
+Durable browser outbox storage, offline replay, and SQLite rebasing are not
+implemented. A socket that is connecting, closing, closed, or marked failed
+causes direct publication to throw.
 
 ## Yjs operation boundary
 
-Canonical snapshots remain the source of initial block content. A block
-created from a snapshot has a disposable local Yjs projection until its
-causal base has been checkpointed or published. Its first local operation
-contains the projection bootstrap plus the incremental edit, making the
-operation independently applicable by persistence, realtime, and a freshly
-hydrated client. Later operations contain only causal increments.
+Every existing text block is initialized with an exact canonical projection and
+an opaque Yjs checkpoint. The runtime hydrates a block-local `Y.Doc` lazily
+from that checkpoint and may release the live context when no lease retains it.
 
-Likewise, the first authoritative remote operation replaces an unpublished
-disposable projection instead of merging two independently generated Yjs
-histories. Once that remote base is adopted, subsequent updates apply
-incrementally. This replacement is internal to the canonical content runtime;
-it neither creates a ProseMirror view nor emits a local operation, history
-entry, persistence write, or realtime echo.
+An ordinary local commit prepares canonical operations, plans Yjs mutations,
+and mutates the existing block-local `Y.Doc` once. All Yjs update events
+captured for that block are merged into the exact effective operation update.
+That incremental update is immediately merged with the previously accepted
+checkpoint, and the exact prepared canonical result becomes the maintained
+read projection. The runtime does not encode the complete live document after
+each ordinary edit.
 
-Checkpoint hydration marks its causal base as already published. Compensation
-restores both canonical content and base-publication state if an atomic editor
-transaction fails.
+Introduced text blocks must establish an initial complete Yjs state. Subsequent
+local operations are incremental. Accepted remote updates are checked against
+the current state vector, applied to a live context when present, and merged
+immediately into the maintained opaque checkpoint. Context release and later
+hydration therefore use a checkpoint that already includes every accepted
+update; checkpoint correctness is not delayed until a read request.
+
+All blocks are validated before live application. If an unexpected failure
+occurs after live Yjs mutation begins, the runtime does not run reverse
+compensation. It marks itself inconsistent and throws a fatal mutation error;
+callers must recover from authoritative state rather than assuming rollback.

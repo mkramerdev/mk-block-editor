@@ -45,6 +45,7 @@ EditorDefinition
 |- content
 |- renderers on each block definition
 |- blockInternalSelectionSubsystems
+|- selectionFragment
 |- documentValidators
 |- commands (editable definitions)
 `- keybindings (editable definitions)
@@ -103,17 +104,23 @@ and transaction notification remain one finalized action.
 ## Runtime and DOM ownership
 
 `initializeReadEditor` and `initializeEditableEditor` validate their semantic
-definition, snapshot, and mode-specific renderer registry. `EditorDocument`
-owns one `BlockList`;
+definition, snapshot, and the renderers attached directly to its block
+definitions. `EditorDocument` owns one `BlockList`;
 `BlockList` is the root grid and directly contains root `BlockShell` elements.
 Each shell is registered structural DOM and
 directly contains the caller's product renderer.
 
 `ReadTextBlockPrimitive` owns the PM-free canonical `.editor-web-text`
-projection. `EditableTextBlockPrimitive` delegates inactive blocks to that
-same primitive and mounts ProseMirror only for one mechanical active text
-projection. `BlockShell` owns neither native focus nor semantic selection and
-is never a focus target.
+projection. Every editable document text runtime owns exactly one
+`SharedTextEditor`, which creates at most one `EditorView` lazily. Activation
+rebinds that same view to the selected text block and moves its DOM into the
+active block's slot. Individual block React mounts do not create or own
+EditorViews. Inactive blocks retain exact canonical read projections, including
+while the active projection is mounted and hidden. `BlockShell` owns neither
+native focus nor semantic selection and is never a focus target.
+
+Read editors allocate no `SharedTextEditor` or ProseMirror view, and their
+static runtime entrypoint does not load the editable ProseMirror path.
 
 The browser is the sole native-focus authority, read through the candidate
 target's `ownerDocument.activeElement`. Text and atomic targets register in a
@@ -180,8 +187,8 @@ selection-controller-owned standalone settlement stream. Transaction-owned
 ephemeral author-selection sidecar. Reconciliation, remote,
 projection-restoration, browser-focus, and unchanged settlements do not
 publish. Presence wiring consumes canonical settlement;
-the 30-second presence lease remains an intentional liveness policy and is
-unchanged by this focus refactor.
+the current First Draft adapter publishes revisioned ephemeral selection updates
+over its existing collaboration socket.
 
 Enter, boundary Backspace, and forward boundary Delete use one universal core
 behavior port. The DOM layer claims Delete only at canonical text end; the web

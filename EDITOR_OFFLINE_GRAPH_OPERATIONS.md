@@ -1,134 +1,94 @@
-# Offline Block Graph Operations
+# Offline graph operations
 
-## Goal
+**Status: Proposed; not implemented in the current repository.**
 
-Offline block graph edits must not replay as full snapshot overwrites.
+This document records a possible future offline graph-operation design. The
+current First Draft client publishes finalized semantic transactions directly
+over a WebSocket. It has no durable browser database, active outbox, offline
+replay, queued graph rebase, or crash-recovery submission log. The direct
+transport is therefore not offline-safe.
 
-Block content can use Yjs binary updates for mergeable text/content state, but block graph operations need their own operation-log and rebase model.
+## Current invariants
 
-Block graph operations include:
+The following statements describe the implementation that exists today:
 
-- block creation;
-- block deletion;
-- block move/reorder;
-- parent/container changes;
-- one-field metadata updates that affect graph behavior.
+- `EditorOperation` is the canonical logical replay format for structure,
+  metadata, and block-local content.
+- The editor owns semantic placement, graph validation, one bounded linear
+  history, and atomic canonical transaction preparation/commit.
+- A finalized local transaction is converted by
+  `@repo/editor-first-draft/transport` and sent directly to
+  `@repo/editor-realtime`.
+- The service validates and accepts transactions against the current
+  PostgreSQL revision, then broadcasts accepted transactions for replay.
+- A stale, unavailable, or rejected submission is reported to the client; it
+  is not durably queued in the browser.
+- Complete snapshots and remote operations still pass through the current
+  definition-aware validation and canonical runtime boundaries.
 
-## Offline Flow
+## Proposed future behavior
 
-The Editor first applies a semantic graph operation using
-`{ parentId, childIndex }`. After the operation is coherent, it emits the
-resolved neighboring sibling IDs. The product persistence adapter uses that
-short-lived gap description to allocate its own persistent ordering value.
+A future offline-capable product layer could persist accepted state and one
+active transaction queue in a browser-owned durable store. That layer would
+sit outside the generic editor packages and would retain the original editor
+transaction identity, semantic operation identity, local ordering, dependency
+information, and the accepted base revision.
 
-The product writes the resulting semantic transaction once, as an active
-SQLite outbox transaction. That row is both the crash-recovery input and the
-future transport unit; the editor does not retain a pending-operation list and
-SQLite does not duplicate the operation in a second queue:
+Conceptually, a durable queue item could contain:
 
 ```ts
-interface ActiveEditorOutboxTransaction {
-  outboxEntryId: string;
-  editorTransactionId: string;
-  operationId: string;
-  localSequence: number;
-  operation: EditorCommitOperation;
-  dependencies: readonly string[];
-  selectionRevision: number;
-  selectionBefore: EditorTransactionSelection;
-  selectionAfter: EditorTransactionSelection;
+interface ProposedOfflineTransaction {
+  readonly editorTransactionId: string;
+  readonly operationId: string;
+  readonly localSequence: number;
+  readonly acceptedBaseRevision: number;
+  readonly operation: EditorOperation;
+  readonly dependencies: readonly string[];
 }
 ```
 
-On reconnect:
+The exact schema, storage technology, and package boundary are intentionally
+unspecified because none exists in this repository.
 
-1. Fetch the current Postgres block graph head.
-2. Load active outbox transactions from SQLite in local order.
-3. Purely replay them over accepted state to reconstruct visible state and
-   reject irreconcilable dependency chains.
+### Proposed reconnect sequence
+
+1. Fetch the authoritative PostgreSQL graph head and accepted transaction
+   sequence.
+2. Load locally durable pending transactions in local order.
+3. Replay them purely over accepted state, rejecting operations whose semantic
+   dependencies can no longer be satisfied.
 4. Prepare the FIFO head against the current accepted revision and durably
-   store its exact commit identity, submission JSON, and hash.
-5. Lease and send that exact attempt; uncertain delivery reuses it.
-6. Apply the accepted record and remove its correlated outbox transaction in
-   one SQLite transaction.
+   record the exact physical submission attempt.
+5. Send that attempt; uncertain delivery must reuse its identity.
+6. On acceptance, atomically advance local accepted state and remove the
+   correlated pending transaction.
 
-## Required Conflict Rules
+### Proposed conflict rules
 
-Create block:
+Rebase should operate on canonical identities and semantic placement, never on
+array indexes captured from an old graph:
 
-- block id must be stable across offline/replay;
-- if the target parent still exists, insert by recorded intent;
-- if the target parent was deleted, either reject the operation or move it to an explicit fallback location.
+- inserts retain their created block identities and resolve a current semantic
+  destination;
+- moves require the source subtree to remain live and the destination to remain
+  structurally valid;
+- deletes are idempotent only when the intended identity has already been
+  removed compatibly;
+- metadata changes require explicit field conflict policy;
+- rich-text updates retain their block-local content-runtime authority;
+- dependent operations fail together when an earlier created identity or
+  placement can no longer be established; and
+- history continues to store editor operations, not database ordering values or
+  complete document snapshots.
 
-Delete block:
+### Proposed ownership
 
-- deletion must be idempotent;
-- tombstones should be used so concurrent content edits and moves can be resolved deterministically;
-- if the block was already deleted remotely, the local delete can become an accepted no-op.
+The generic editor would continue to own semantic planning, validation,
+history, and canonical application. A future product persistence adapter would
+own durable queue identity, ordering-value allocation, retry policy, and pure
+rebase. `@repo/editor-realtime` and the First Draft PostgreSQL acceptance layer
+would remain authoritative for accepted revisions.
 
-Move/reorder block:
-
-- replay accepted product rows through the product startup adapter to rebuild
-  explicit Editor root and child sequences;
-- apply the recorded forward or inverse structural `EditorOperation` through
-  the ordinary operation executor against the current Editor graph;
-- allocate a fresh product ordering value for every newly emitted placement;
-- if the moved block was deleted remotely, reject or no-op the move.
-
-Content edits for deleted blocks:
-
-- if graph tombstone wins, content updates for that block must be ignored or rejected;
-- do not resurrect deleted blocks from content updates alone.
-
-Concurrent product creates at the same position:
-
-- order deterministically in the persistence layer using its ordering value
-  plus a stable tie-breaker such as `{clientId, clientSequence}`.
-
-Metadata changes:
-
-- use explicit field-level merge rules where possible;
-- otherwise use a documented last-writer or conflict policy.
-
-## Source Commit Rules
-
-Postgres should reject stale graph commits unless they can be safely applied.
-
-On stale rejection:
-
-1. storage fetches the latest graph head;
-2. storage rebases queued outbox transactions;
-3. an exact-base rejection releases only that rejected physical attempt,
-   preserves the original editor transaction and semantic operation IDs, and
-   prepares a new commit ID after accepted catch-up;
-4. storage retries only transactions that pure replay still accepts;
-5. unsafe operations and their dependent chains leave the active outbox and
-   are surfaced to the editor/product.
-
-## Ownership
-
-`storage-sqlite` owns accepted state and the active outbox. SQLite is the
-authority; replay is pure and ordinary replay status is not persisted.
-
-The generic Editor owns semantic placement, graph validation, and its single
-linear operation-pair history. Product persistence owns ordering-value
-allocation, outbox transaction identity, rebase rules, and deterministic
-conflict handling.
-
-Structural commands, undo, and redo all apply `EditorOperation` values through
-the ordinary atomic operation executor. Subtree removal, restoration, and
-replacement are single reductions; history stores only the affected operation
-data and never persistent ordering values or complete document snapshots.
-
-Complete snapshots enter through one mandatory definition-aware validation
-pipeline. Product row ordering may materialize the semantic snapshot, but it
-cannot waive generic containment, definition, metadata, inline-content, or
-structural invariants.
-
-Local publication ordering is atomic document/selection settlement, history
-recording and availability update, semantic `onChange`, then product persistence
-conversion.
-
-`demo-postgres` owns source-of-truth revision checks and commit acceptance/rejection.
-
-`product-web` must not contain offline graph replay, rebase, or conflict-resolution logic.
+This design must not be read as a guarantee that current First Draft edits
+survive browser closure, network loss, or a failed direct WebSocket
+publication.

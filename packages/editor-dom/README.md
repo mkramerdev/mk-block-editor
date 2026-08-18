@@ -16,22 +16,35 @@ boundary.
 
 Enter, boundary Backspace, and forward boundary Delete bindings contribute
 exactly one generic structural command each for a collapsed projected caret.
-Forward Delete compares the canonical caret with canonical rich-text size,
-including Unicode code points, inline atoms, and hard breaks. Same-block and
-range deletion remain block-local. The bindings respect IME
-composition and prevent browser defaults only after the editor command reports
-success. Canonical ranges are consumed before these block-local bindings.
-Structural planning remains in
+The keymap uses ProseMirror-local parent offsets for the ordinary zero/end
+distinction and computes a canonical offset only when it actually emits a
+structural behavior. Inline atoms retain their explicit keymap deletion.
+
+Ordinary same-block backward and forward deletion is claimed by the input
+plugin from `beforeinput` when the browser supplies one usable target range.
+Both DOM endpoints are mapped before native mutation, and the plugin dispatches
+one normal ProseMirror deletion transaction. The browser therefore continues
+to choose surrogate, combining, variation-selector, joined-emoji, and other
+native deletion boundaries. Composition, structural boundaries, invalid or
+empty ranges, and environments without a usable target range are not claimed;
+the last case deliberately retains ProseMirror's native DOM-recovery fallback.
+
+The keymap and input plugin respect active composition. Browser default is
+prevented only after a path has claimed the event. Canonical ranges are
+consumed before the structural key bindings. Structural planning remains in
 `@repo/editor-core`; transaction execution and history remain in the runtime.
 
 Optional slash and mention trigger strings are declared as headless
 `EditorDefinition.typingTriggers` data. Trigger recognition and product menus
-are not part of Phase 1. DOM rectangles may anchor product-owned UI or identify
-a candidate drop target, but they never determine document structure.
+are not owned by `@repo/editor-dom`. DOM rectangles may anchor product-owned UI
+or identify a candidate drop target, but they never determine document
+structure.
 
-Public exports include the block-local schema/view construction helpers and
-the typed plugin option contracts. There are no host intents, block-specific
-keyboard pipelines, alternate barrels, or aliases.
+The public subpaths are `block-editor`, `schema`, `keymap`, `caret`,
+`clipboard`, and `prosemirror`. There is no package-root export. These subpaths
+expose the block-local schema/view helpers, typed plugin contracts, coordinate
+codecs, semantic clipboard codecs, and the deliberately shared ProseMirror
+types used at the web boundary.
 
 ## Semantic content codecs
 

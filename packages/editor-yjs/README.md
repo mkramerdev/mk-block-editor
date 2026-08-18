@@ -1,121 +1,93 @@
 # @repo/editor-yjs
 
-Runtime-neutral Yjs helpers for block-local editor content.
-
-Editable blocks have block-local content documents, and each block-local content
-document is backed by its own `Y.Doc`. This package owns the Yjs parts of that
-boundary only: block content document creation, block-local metadata, encoded
-updates, state vectors, update observation, semantic origins, and neutral
-observability hooks.
+`@repo/editor-yjs` provides runtime-neutral Yjs primitives for block-local
+editor content. Each editable text block can be represented by its own `Y.Doc`;
+this package supplies document contexts, canonical rich-text conversion,
+metadata conventions, updates, state vectors, checkpoint creation, semantic
+origins, and observability hooks without depending on DOM or React code.
 
 ## Boundary
 
-Keep here:
+This package owns:
 
-- block-content `Y.Doc` context creation;
-- block-local content identity using `blockId`;
-- block-content registry lifecycle for one editing instance;
-- metadata conventions for `blockId` and `documentKind`;
-- encoded update and state-vector helpers;
-- block-content update observation;
-- semantic editor Yjs origins;
-- runtime-neutral observability helpers.
+- creation and validation of one block-content `Y.Doc` context;
+- canonical metadata for `blockId`, document kind, and the `content` fragment;
+- canonical rich-text reads, writes, mutation planning, and offset conversion;
+- update application, encoding, merging primitives, and state vectors;
+- opaque checkpoint creation and format/version constants;
+- block-content update observation and semantic origins; and
+- runtime-neutral awareness-disconnect observability.
 
-Keep out:
+It does not own an editor-wide content registry, editor history, a Yjs undo
+manager, ProseMirror binding, selection presentation, transport, persistence,
+PostgreSQL, browser storage, routing, or rendering. The concrete editor content
+runtime and relative text anchors live in `@repo/editor-yjs-dom`; browser
+runtime assembly lives in `@repo/editor-web`.
 
-- document loading, persistence, realtime routing, cache keys, and app routes;
-- DOM binding, ProseMirror state/view code, and `y-prosemirror` mapping;
-- cursor, decoration, selection, awareness UI, or additional-selection rendering;
-- browser IndexedDB/SQLite storage and server/Postgres storage;
-- realtime transports or provider setup;
-- editor hydration, rendering, block activation, or selection policy;
-- page-wide/shared editor `Y.Doc` architecture.
+## Public surface
 
-Outer storage, realtime, and product composition layers may wrap emitted block
-content updates with their own route identity when they load, save, subscribe, or
-cache an editor instance. Generic Yjs block content state does not store or emit
-that route identity.
+The package exports both a root entrypoint and a checkpoint-format subpath:
 
-Concrete DOM binding lives in `@repo/editor-yjs-dom`. Browser runtime assembly
-lives in `@repo/editor-web`. Product storage and persistence live in product
-packages such as `@repo/editor-storage-sqlite`.
+- `@repo/editor-yjs`
+- `@repo/editor-yjs/checkpoint-format`
 
-## Source Layout
-
-- `src/api/index.ts` owns the complete public root surface. The package exposes
-  only `@repo/editor-yjs`; no public subpaths are exported.
-- `src/block-content/doc/` owns block-content `Y.Doc` context creation and
-  registry lifecycle.
-- `src/block-content/metadata/` owns canonical metadata constants, contracts,
-  reads, writes, and validation.
-- `src/block-content/observation/` owns raw update observation for validated
-  block-content contexts.
-- `src/fragments/` owns neutral Yjs fragment context helpers for fragments
-  inside an already validated block content document.
-- `src/updates/` owns encoded Yjs update helpers, state-vector helpers, and the
-  isolated temporary `Y.Doc` metadata probe used before applying updates.
-- `src/origins/` owns semantic editor Yjs transaction origin constants and
-  origin contracts.
-- `src/observability/` owns neutral Yjs observability hooks that do not render
-  UI.
-- `src/architecture/package-boundaries.test.ts` enforces the root-only export,
-  `src/api` ownership, runtime-neutral imports, and
-  package boundary rules.
-
-Implementation files import concrete domain files. They do not import
-`src/api/index.ts` or `@repo/editor-yjs`; those are reserved for external
-consumers and API tests.
-
-## Public API
+The root includes focused helpers as well as the Yjs primitives needed by the
+runtime boundary. For example:
 
 ```ts
 import {
   EDITOR_YJS_ORIGINS,
   applyBlockContentUpdate,
+  applyPlannedCanonicalYjsContentMutation,
   createBlockContentDocContext,
   createBlockContentFragmentContext,
+  createYjsBlockContentCheckpoint,
   encodeBlockContentStateVector,
   encodeBlockContentUpdate,
+  ensureCanonicalYjsBlockContent,
   observeBlockContentUpdates,
-  observeEditorYjsAwarenessDisconnects,
+  planCanonicalYjsContentMutation,
+  readCanonicalYjsBlockContent,
 } from "@repo/editor-yjs";
 
-import type {
-  BlockContentDocContext,
-  EditorYjsFragmentContext,
-  EditorYjsObservabilityHooks,
-} from "@repo/editor-yjs";
+import {
+  EDITOR_YJS_CONTENT_FORMAT,
+  EDITOR_YJS_CONTENT_FORMAT_VERSION,
+} from "@repo/editor-yjs/checkpoint-format";
 ```
 
+The root also re-exports selected Yjs types and functions such as `YDoc`,
+`applyUpdate`, `encodeStateAsUpdate`, `encodeStateVector`, `diffUpdate`, and
+`mergeUpdates`. See `src/api/index.ts` for the complete public root surface.
+
 `createBlockContentDocContext({ blockId })` creates or wraps one block-local
-`Y.Doc`, writes canonical metadata into the `meta` map, and returns the primary
-rich-text fragment named `content`. Each block-content context is one block-local
-`Y.Doc` keyed by `BlockId`.
+document, writes the canonical metadata, and returns its primary `content`
+fragment. `createBlockContentFragmentContext(...)` addresses another fragment
+inside an already validated block-content document; it does not create another
+document or assign product semantics.
 
-`createBlockContentFragmentContext(...)` is for secondary fragments inside an
-already validated block-content document. It does not create another document
-or assign product semantics to those fragments.
+`createYjsBlockContentCheckpoint(blockId, content)` creates a complete initial
+checkpoint from canonical rich text. The format constants are available from
+both the root and the public `checkpoint-format` subpath.
 
-## Runtime Neutrality
+## Source layout and tests
 
-This package must remain free of DOM, ProseMirror, `@repo/editor-web`,
-`@repo/editor-yjs-dom`, storage, realtime transport, product, app route,
-React DOM, and React Native imports. DOM binding belongs in
-`@repo/editor-yjs-dom`; browser runtime assembly belongs in `@repo/editor-web`;
-storage and persistence belong in storage or product packages.
-
-This package does not own editor history or a Yjs undo manager. The editor core
-records logical content operations and their inverses in its single linear
-history.
+- `src/block-content/doc` owns block-local context creation.
+- `src/block-content/canonical-rich-text.ts` owns canonical/Yjs conversion and
+  incremental mutation planning.
+- `src/block-content/checkpoint.ts` and
+  `src/block-content/checkpoint-format.ts` own checkpoint construction and its
+  public format identity.
+- `src/updates`, `src/origins`, `src/fragments`, and `src/observability` own the
+  corresponding neutral helpers.
+- Public-surface coverage is in `src/api/index.test.ts`; domain tests live next
+  to the implementation they cover.
 
 ## Validation
 
-Run these after changes:
-
 ```sh
-pnpm --filter @repo/editor-yjs typecheck
+pnpm --filter @repo/editor-yjs check-types
+pnpm --filter @repo/editor-yjs lint
 pnpm --filter @repo/editor-yjs test
-pnpm --filter @repo/editor-yjs-dom typecheck
-pnpm --filter @repo/editor-yjs-dom test
-pnpm --filter @repo/editor-web typecheck
+pnpm --filter @repo/editor-yjs build
 ```

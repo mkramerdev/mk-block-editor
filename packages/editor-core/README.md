@@ -1,4 +1,4 @@
-# Editor Model
+# @repo/editor-core
 
 `@repo/editor-core` is the platform-neutral document, definition, selection,
 operation, metadata, codec, and editing model used by editor implementations.
@@ -54,22 +54,35 @@ export const productReadBlockDefinitions = {
 };
 ```
 
-The collection deliberately has no annotation, cast, factory, or index
-signature. Its exact keys remain inferred. The complete product editor uses
-the web runtime's complete definition types, preserving inferred keys while
-checking the whole composition:
+Keeping a definition collection unannotated is one available composition
+pattern: TypeScript retains its exact keys until the collection crosses a
+generic `Readonly<Record<BlockType, ...>>` boundary. Products may instead
+intentionally widen a collection when exact-key inference is not useful. First
+Draft currently returns the widened `EditableEditorDefinition` contract.
+
+When renderers are attached, use the web definition types rather than the
+platform-neutral `BlockDefinition` type:
 
 ```ts
+import type {
+  EditableEditorDefinition,
+  ReadEditorDefinition,
+} from "@repo/editor-web/document-runtime";
+
 export const productEditableEditorDefinition = {
   blocks: productEditableBlockDefinitions,
+  defaultRoot: "noteText",
   inlineMarks: productInlineMarks,
+  inlineAtoms: productInlineAtoms,
   commands: productCommands,
   keybindings: productKeybindings,
 } satisfies EditableEditorDefinition;
 
 export const productReadEditorDefinition = {
   blocks: productReadBlockDefinitions,
+  defaultRoot: "noteText",
   inlineMarks: productInlineMarks,
+  inlineAtoms: productInlineAtoms,
 } satisfies ReadEditorDefinition;
 ```
 

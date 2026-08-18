@@ -1,11 +1,19 @@
 # React playground
 
-This app is a [Vite](https://vite.dev/) and [React](https://react.dev/) playground.
-
-Run it from the repository root:
+This Vite and React playground runs on
+[http://localhost:3001](http://localhost:3001).
 
 ```sh
 pnpm --filter playground-react dev
 ```
 
-Open [http://localhost:3001](http://localhost:3001) and edit `src/App.tsx` to get started.
+Registered routes are:
+
+- `/` - playground home;
+- `/full-editor` - currently a registered placeholder with no rendered editor;
+- `/first-draft` - the collaborative First Draft editor.
+
+`/first-draft` requires PostgreSQL and `@repo/editor-realtime`; follow the
+[root development setup](../../README.md). Set `VITE_EDITOR_REALTIME_URL` to
+override the WebSocket URL and `VITE_FIRST_DRAFT_DOCUMENT_ID` to override the
+seeded document ID.
