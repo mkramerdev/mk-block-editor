@@ -194,6 +194,29 @@ describe("First Draft definition ownership", () => {
         childBlockIds: [summary, body],
       }),
     ).toEqual([summary, body]);
+
+    viewState.selectTab(tabs, "missing-pane" as BlockId);
+    expect(
+      policy.resolveVisibleChildBlockIds({
+        blockId: tabs,
+        blockType: "tabs",
+        childBlockIds: [firstPane, secondPane],
+      }),
+    ).toEqual([firstPane]);
+  });
+
+  it("declares wrapper-owned open-boundary range deletion policies", () => {
+    for (const type of ["callout", "quote", "code"] as const) {
+      expect(firstDraftBlockDefinitions[type].rangeDeletion).toEqual({
+        kind: "unwrap-boundary-contents",
+      });
+    }
+    expect(firstDraftBlockDefinitions.columns.rangeDeletion).toEqual({
+      kind: "unwrap-boundary-child",
+    });
+    expect(firstDraftBlockDefinitions.tabs.rangeDeletion).toEqual({
+      kind: "unwrap-visible-boundary-child",
+    });
   });
 });
 

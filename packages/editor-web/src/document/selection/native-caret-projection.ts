@@ -41,7 +41,11 @@ export function projectNativeCaret(
   if (!directPoint) return { status: "rejected" };
   let attemptedAffinityProjection = false;
 
-  if (affinity === "backward" && offset > 0) {
+  if (
+    affinity === "backward" &&
+    offset > 0 &&
+    typeof selection.modify === "function"
+  ) {
     const precedingPoint = layout.pointFromCanonicalOffset(offset - 1);
     if (!precedingPoint) return { status: "rejected" };
     attemptedAffinityProjection = true;
@@ -54,7 +58,8 @@ export function projectNativeCaret(
     selection.modify("move", "forward", "lineboundary");
   } else if (
     affinity === "forward" &&
-    offset < layout.length
+    offset < layout.length &&
+    typeof selection.modify === "function"
   ) {
     const followingPoint = layout.pointFromCanonicalOffset(offset + 1);
     if (!followingPoint) return { status: "rejected" };

@@ -20,6 +20,7 @@ import {
   materializeCanonicalBlockCreation,
   planBlockBoundaryBackspace,
   planBlockBoundaryDelete,
+  planStructuralRangeDeletion,
   planGenericEnter,
   deleteRange as createDeleteRangeOperation,
   insertBlocks as createInsertBlocksOperation,
@@ -2228,6 +2229,82 @@ export class EditorImplementation {
 
   deleteRange(range: StructuralEditRange): void {
     this.appendActiveTransactionOperation(createDeleteRangeOperation(range));
+  }
+
+  executeStructuralRangeDeletion(
+    range: StructuralEditRange,
+    options: {
+      readonly intent: "cut" | "delete";
+      readonly resolveVisibleChildBlockIds?: (input: {
+        readonly blockId: BlockId;
+        readonly blockType: BlockType;
+        readonly childBlockIds: readonly BlockId[];
+      }) => readonly BlockId[];
+      readonly provenance?: EditorLocalMutationProvenance | null;
+      readonly selectionPresentation?:
+        | "canonical-only"
+        | "native-final-selection";
+    },
+  ): EditorStructuralTransactionResult {
+    const current = this.getCommandState();
+    const planned = planStructuralRangeDeletion({
+      intent: options.intent,
+      range,
+      graphRevision: current.blockGraphVersion,
+      blocks: current.blocks,
+      rootBlockIds: current.rootBlockIds,
+      childIdsByParentId: current.childIdsByParentId,
+      blockDefinitions: this.blockDefinitions,
+      readContent: (blockId, blockType) => {
+        const block = current.blocks[blockId];
+        const content = this.readBlockContent(blockId, blockType);
+        return block && !block.tombstone && isRichTextDocument(content)
+          ? {
+              content,
+              plainText: this.readBlockPlainText(blockId, blockType),
+              version: block.contentVersion,
+            }
+          : null;
+      },
+      validateContent: (blockType, content) =>
+        this.options.validateBlockContent?.(blockType, content) ??
+        this.defaultContentValidation(blockType, content),
+      ...(options.resolveVisibleChildBlockIds
+        ? {
+            resolveVisibleChildBlockIds: options.resolveVisibleChildBlockIds,
+          }
+        : {}),
+    });
+    if (!planned.ok) {
+      return {
+        ok: false,
+        phase: "planning",
+        failure: {
+          ok: false,
+          operationIndex: null,
+          failureKind:
+            planned.reason === "stale-range"
+              ? "stale-precondition"
+              : "invalid-plan",
+          message: planned.message,
+        },
+      };
+    }
+    const result = this.executeStructuralTransaction(planned.plan, {
+      provenance: options.provenance ?? null,
+      selectionPresentation:
+        options.selectionPresentation === "native-final-selection"
+          ? "native-before-removal"
+          : "canonical-only",
+    });
+    if (
+      result.ok &&
+      options.selectionPresentation === "native-final-selection" &&
+      result.transaction.selection.kind === "text-offset"
+    ) {
+      this.presentCanonicalTextSelection(result.transaction.selection.blockId);
+    }
+    return result;
   }
 
   insertBlocks(

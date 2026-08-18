@@ -1,7 +1,6 @@
 "use client";
 
 import { useLayoutEffect } from "react";
-import { executeStructuralEditComposition } from "@repo/editor-react/editor";
 import type { BlockType } from "@repo/editor-core/document";
 import type { BlockId } from "@repo/editor-core/kernel";
 import type {
@@ -683,15 +682,20 @@ export function useGlobalSelectionGestures({
         const captured = selectionController.getCommittedSnapshot();
         const capture = captured ? captureStructuralSelection(captured) : null;
         if (!capture?.isCurrent()) return;
-        const result = executeStructuralEditComposition(
-          editor,
-          {
-            deletion: capture.range,
-          },
-          {
-            provenance: null,
-          },
-        );
+        if (
+          capture.range.start.kind === "text" &&
+          capture.range.end.kind === "text" &&
+          capture.range.start.blockId === capture.range.end.blockId
+        ) {
+          return;
+        }
+        const result = editor.executeStructuralRangeDeletion(capture.range, {
+          intent: "delete",
+          provenance: null,
+          selectionPresentation: "native-final-selection",
+          resolveVisibleChildBlockIds:
+            editor.definition.selectionFragment?.resolveVisibleChildBlockIds,
+        });
         if (!result.ok) return;
         event.preventDefault();
         event.stopPropagation();

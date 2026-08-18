@@ -60,6 +60,21 @@ export interface CompoundWrapperPolicy {
   readonly emptyPrimary: "remove-wrapper";
 }
 
+/** Canonical cleanup of a wrapper crossed by an open range-deletion boundary. */
+export type CanonicalRangeDeletionPolicy =
+  | {
+      /** Promote this wrapper's surviving children and remove the wrapper. */
+      readonly kind: "unwrap-boundary-contents";
+    }
+  | {
+      /** Unwrap only the direct child branch containing the end boundary. */
+      readonly kind: "unwrap-boundary-child";
+    }
+  | {
+      /** Promote the visible boundary child and remove this complete wrapper. */
+      readonly kind: "unwrap-visible-boundary-child";
+    };
+
 /** Product-owned runtime configuration for one persisted block type. */
 export interface BlockDefinition {
   /** Structural behavior supplied by this definition. */
@@ -101,4 +116,6 @@ export interface BlockDefinition {
   readonly underflow?: WrapperUnderflowPolicy;
   /** Canonical compound-wrapper behavior independent of renderer state. */
   readonly compound?: CompoundWrapperPolicy;
+  /** Definition-owned cleanup when an open range ends inside this wrapper. */
+  readonly rangeDeletion?: CanonicalRangeDeletionPolicy;
 }

@@ -84,6 +84,7 @@ const definitions: Readonly<Record<BlockType, BlockDefinition>> = {
     contentBoundary: false,
     content: { required: ["block"], additional: "block" },
     defaultContent: "paragraph",
+    rangeDeletion: { kind: "unwrap-boundary-contents" },
   },
   quote: {
     kind: "wrapper",
@@ -92,6 +93,7 @@ const definitions: Readonly<Record<BlockType, BlockDefinition>> = {
     renderer,
     contentBoundary: false,
     content: { required: ["paragraph"] },
+    rangeDeletion: { kind: "unwrap-boundary-contents" },
   },
 };
 
@@ -2051,6 +2053,94 @@ describe("EditorImplementation active transaction", () => {
       blockId: left.id,
       offset: 2,
     });
+    fixture.dispose();
+  });
+
+  it("commits open-boundary range deletion once and undoes the join atomically", () => {
+    const start = block(1, "paragraph");
+    const middle = block(2, "paragraph");
+    const end = block(3, "paragraph");
+    const fixture = createTestEditor({
+      blocks: [start, middle, end],
+      content: new Map([
+        [start.id, text("abcDEF")],
+        [middle.id, text("middle")],
+        [end.id, text("GHIjkl")],
+      ]),
+    });
+    const range: StructuralEditRange = {
+      graphRevision: 1,
+      selectionRevision: 3,
+      blocks: [
+        {
+          kind: "text",
+          blockId: start.id,
+          blockType: start.type,
+          parentId: null,
+          from: 3,
+          to: 6,
+          expectedContentVersion: "1",
+        },
+        {
+          kind: "block",
+          blockId: middle.id,
+          blockType: middle.type,
+          parentId: null,
+        },
+        {
+          kind: "text",
+          blockId: end.id,
+          blockType: end.type,
+          parentId: null,
+          from: 0,
+          to: 3,
+          expectedContentVersion: "1",
+        },
+      ],
+      start: { kind: "text", blockId: start.id, offset: 3 },
+      end: { kind: "text", blockId: end.id, offset: 3 },
+    };
+
+    const result = fixture.editor.executeStructuralRangeDeletion(range, {
+      intent: "cut",
+      provenance: null,
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    expect(fixture.editor.getRootBlockIds()).toEqual([start.id]);
+    expect(fixture.editor.getBlock(start.id)).toMatchObject({
+      id: start.id,
+      type: "paragraph",
+    });
+    expect(
+      extractPlainTextFromRichTextDocument(fixture.content.get(start.id)!),
+    ).toBe("abcjkl");
+    expect(fixture.editor.getBlock(end.id)).toBeNull();
+    expect(fixture.onCanonicalCommit).toHaveBeenCalledTimes(1);
+    expect(fixture.publications).toHaveBeenCalledTimes(1);
+    expect(result.ok ? result.transaction.selection : null).toEqual({
+      kind: "text-offset",
+      blockId: start.id,
+      offset: 3,
+    });
+
+    expect(fixture.editor.undo()).toEqual({ status: "applied" });
+    expect(fixture.editor.getRootBlockIds()).toEqual([
+      start.id,
+      middle.id,
+      end.id,
+    ]);
+    expect(
+      extractPlainTextFromRichTextDocument(fixture.content.get(start.id)!),
+    ).toBe("abcDEF");
+    expect(
+      extractPlainTextFromRichTextDocument(fixture.content.get(end.id)!),
+    ).toBe("GHIjkl");
+    expect(fixture.editor.redo()).toEqual({ status: "applied" });
+    expect(fixture.editor.getRootBlockIds()).toEqual([start.id]);
+    expect(
+      extractPlainTextFromRichTextDocument(fixture.content.get(start.id)!),
+    ).toBe("abcjkl");
     fixture.dispose();
   });
 

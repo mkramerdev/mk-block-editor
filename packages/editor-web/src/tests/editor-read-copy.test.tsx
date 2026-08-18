@@ -225,9 +225,9 @@ describe("editable canonical clipboard cut", () => {
         "omega",
       ]);
       expect(clipboard.getData("text/plain")).toBe("pha\nmiddle\nom");
-      expect(editor.getRootBlockIds()).toEqual([first, last]);
-      expect(editor.readBlockPlainText(first, "paragraph")).toBe("al");
-      expect(editor.readBlockPlainText(last, "paragraph")).toBe("ega");
+      expect(editor.getRootBlockIds()).toEqual([first]);
+      expect(editor.readBlockPlainText(first, "paragraph")).toBe("alega");
+      expect(editor.getBlock(last)).toBeNull();
       expectCanonicalCollapsedCaret(runtime, first, 2);
 
       await waitFor(() => {
@@ -291,9 +291,9 @@ describe("editable canonical clipboard cut", () => {
       expectCanonicalRangeDirection(runtime, direction);
 
       act(() => expect(editor.redo()).toEqual({ status: "applied" }));
-      expect(editor.getRootBlockIds()).toEqual([first, last]);
-      expect(editor.readBlockPlainText(first, "paragraph")).toBe("al");
-      expect(editor.readBlockPlainText(last, "paragraph")).toBe("ega");
+      expect(editor.getRootBlockIds()).toEqual([first]);
+      expect(editor.readBlockPlainText(first, "paragraph")).toBe("alega");
+      expect(editor.getBlock(last)).toBeNull();
       expectCanonicalCollapsedCaret(runtime, first, 2);
       await waitFor(() => {
         expect(runtime.readActiveTextView()).toBe(sharedView);
@@ -334,14 +334,14 @@ describe("editable canonical clipboard cut", () => {
       cancelable: true,
     });
     act(() => sharedView.dom.dispatchEvent(shortcut));
-    expect(editor.readBlockPlainText(first, "paragraph")).toBe("al");
-    expect(editor.readBlockPlainText(last, "paragraph")).toBe("ega");
+    expect(editor.readBlockPlainText(first, "paragraph")).toBe("alega");
+    expect(editor.getBlock(last)).toBeNull();
     expectCanonicalCollapsedCaret(runtime, first, 2);
 
     const nativeCut = clipboardEvent("cut", new MemoryDataTransfer());
     act(() => sharedView.dom.dispatchEvent(nativeCut));
-    expect(editor.readBlockPlainText(first, "paragraph")).toBe("al");
-    expect(editor.readBlockPlainText(last, "paragraph")).toBe("ega");
+    expect(editor.readBlockPlainText(first, "paragraph")).toBe("alega");
+    expect(editor.getBlock(last)).toBeNull();
     expectCanonicalCollapsedCaret(runtime, first, 2);
     expect(
       (
@@ -355,6 +355,57 @@ describe("editable canonical clipboard cut", () => {
     rendered.unmount();
     editor.dispose();
   });
+
+  it.each(["Backspace", "Delete"] as const)(
+    "uses the Cut composition for cross-block %s without replacing block-local deletion",
+    async (key) => {
+      const first = `range-${key}-first` as BlockId;
+      const last = `range-${key}-last` as BlockId;
+      const editor = initializeEditableEditor({
+        definition: editableCopyDefinition,
+        snapshot: createTestEditorSnapshot([
+          { id: first, type: "paragraph", text: "alpha" },
+          { id: last, type: "paragraph", text: "omega" },
+        ]),
+      });
+      const runtime = editor as EditableEditorRuntimePort;
+      const rendered = render(<EditorDocument editor={editor} />);
+      act(() => {
+        expect(editor.focusText(last, { offset: 2 }).status).not.toBe(
+          "rejected",
+        );
+        settleTextRange(editor, first, 2, last, 2, "backward", "forward");
+      });
+      const sharedView = runtime.readActiveTextView();
+      if (!sharedView) throw new Error("Expected active shared editor view");
+      const event = new KeyboardEvent("keydown", {
+        key,
+        bubbles: true,
+        cancelable: true,
+      });
+
+      act(() => sharedView.dom.dispatchEvent(event));
+
+      expect(event.defaultPrevented).toBe(true);
+      expect(editor.getRootBlockIds()).toEqual([first]);
+      expect(editor.readBlockPlainText(first, "paragraph")).toBe("alega");
+      expect(editor.getBlock(last)).toBeNull();
+      expectCanonicalCollapsedCaret(runtime, first, 2);
+      expect(
+        (
+          editor as unknown as {
+            readonly history: readonly unknown[];
+          }
+        ).history,
+      ).toHaveLength(1);
+      await waitFor(() =>
+        expect(runtime.readTextSelectionOffset(first)).toBe(2),
+      );
+
+      rendered.unmount();
+      editor.dispose();
+    },
+  );
 });
 
 function copySelectedRange(editable: boolean): MemoryDataTransfer {

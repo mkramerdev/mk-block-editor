@@ -3,6 +3,7 @@ import { createBlockRichTextContentFromPlainText } from "@repo/editor-core/conte
 import {
   createCanonicalBlockFragment,
   createCanonicalBlockRecord,
+  type StructuralEditRange,
 } from "@repo/editor-core/editing";
 import {
   executeStructuralEditComposition,
@@ -94,6 +95,157 @@ describe("First Draft transaction conversion", () => {
       owner: "Ada",
     });
     expect(transport.graph).toBeNull();
+    editor.dispose();
+  });
+
+  it("serializes an open-boundary join without donor content or a new wire shape", () => {
+    const { editor, changes } = createTestEditor();
+    const startId = asBlockId("fd-paragraph-intro");
+    const donorId = asBlockId("fd-paragraph-byline");
+    const start = editor.getBlock(startId)!;
+    const donor = editor.getBlock(donorId)!;
+    const startText = editor.readBlockPlainText(start.id, start.type)!;
+    const donorText = editor.readBlockPlainText(donor.id, donor.type)!;
+    const range: StructuralEditRange = {
+      graphRevision: editor.getSelectionGraphRevision(),
+      selectionRevision: 1,
+      blocks: [
+        {
+          kind: "text",
+          blockId: start.id,
+          blockType: start.type,
+          parentId: start.parentId,
+          from: 2,
+          to: startText.length,
+          expectedContentVersion: start.contentVersion,
+        },
+        {
+          kind: "text",
+          blockId: donor.id,
+          blockType: donor.type,
+          parentId: donor.parentId,
+          from: 0,
+          to: 2,
+          expectedContentVersion: donor.contentVersion,
+        },
+      ],
+      start: { kind: "text", blockId: start.id, offset: 2 },
+      end: { kind: "text", blockId: donor.id, offset: 2 },
+    };
+
+    expect(
+      editor.executeStructuralRangeDeletion(range, {
+        intent: "cut",
+        provenance: null,
+      }),
+    ).toMatchObject({ ok: true });
+    expect(changes).toHaveLength(1);
+    const change = changes[0];
+    if (!change || change.kind !== "block-graph") {
+      throw new Error("Expected one block-graph change");
+    }
+    const transport = convertEditorTransactionToTransport(change);
+    expect(transport.graph?.changes).toContainEqual({
+      kind: "delete",
+      blockId: donor.id,
+    });
+    expect(transport.content.map(({ blockId }) => blockId)).toEqual([start.id]);
+    const decoded = decodeFirstDraftMessage(
+      encodeFirstDraftMessage({
+        type: "proposed-editor-transaction",
+        transaction: transport,
+      }),
+    );
+    expect(decoded).toMatchObject({
+      ok: true,
+      message: {
+        type: "proposed-editor-transaction",
+        transaction: {
+          graph: transport.graph,
+        },
+      },
+    });
+    expect(editor.getBlock(donor.id)).toBeNull();
+    expect(editor.readBlockPlainText(start.id, start.type)).toBe(
+      startText.slice(0, 2) + donorText.slice(2),
+    );
+    editor.dispose();
+  });
+
+  it("consumes an ordered-list boundary item while retaining contiguous definition-owned numbering", () => {
+    const { editor, changes } = createTestEditor();
+    const start = editor.getBlock(asBlockId("fd-heading-3"))!;
+    const middle = editor.getBlock(asBlockId("fd-paragraph-before-rollout"))!;
+    const list = editor.getBlock(asBlockId("fd-ordered-list"))!;
+    const item1 = editor.getBlock(asBlockId("fd-ordered-1"))!;
+    const donor = editor.getBlock(asBlockId("fd-ordered-1-text"))!;
+    const item2 = editor.getBlock(asBlockId("fd-ordered-2"))!;
+    const item3 = editor.getBlock(asBlockId("fd-ordered-3"))!;
+    const startText = editor.readBlockPlainText(start.id, start.type)!;
+    const donorText = editor.readBlockPlainText(donor.id, donor.type)!;
+    const startMetadata = start.metadata;
+    const range: StructuralEditRange = {
+      graphRevision: editor.getSelectionGraphRevision(),
+      selectionRevision: 1,
+      blocks: [
+        {
+          kind: "text",
+          blockId: start.id,
+          blockType: start.type,
+          parentId: start.parentId,
+          from: 3,
+          to: startText.length,
+          expectedContentVersion: start.contentVersion,
+        },
+        {
+          kind: "block",
+          blockId: middle.id,
+          blockType: middle.type,
+          parentId: middle.parentId,
+        },
+        {
+          kind: "text",
+          blockId: donor.id,
+          blockType: donor.type,
+          parentId: donor.parentId,
+          from: 0,
+          to: 3,
+          expectedContentVersion: donor.contentVersion,
+        },
+      ],
+      start: { kind: "text", blockId: start.id, offset: 3 },
+      end: { kind: "text", blockId: donor.id, offset: 3 },
+    };
+
+    expect(
+      editor.executeStructuralRangeDeletion(range, {
+        intent: "cut",
+        provenance: null,
+      }),
+    ).toMatchObject({ ok: true });
+    expect(editor.getBlock(start.id)).toMatchObject({
+      id: start.id,
+      type: "heading",
+      metadata: startMetadata,
+    });
+    expect(editor.readBlockPlainText(start.id, start.type)).toBe(
+      startText.slice(0, 3) + donorText.slice(3),
+    );
+    expect(editor.getBlock(item1.id)).toBeNull();
+    expect(editor.getBlock(donor.id)).toBeNull();
+    expect(editor.getChildBlockIds(list.id)).toEqual([item2.id, item3.id]);
+    expect(
+      editor
+        .getChildBlockIds(list.id)
+        .map((itemId) => editor.getBlock(itemId)?.metadata?.ordinal),
+    ).toEqual([undefined, undefined]);
+    expect(changes).toHaveLength(1);
+    const change = changes[0];
+    if (!change || change.kind !== "block-graph") {
+      throw new Error("Expected one ordered-list graph change");
+    }
+    const transport = convertEditorTransactionToTransport(change);
+    expect(transport.content.map(({ blockId }) => blockId)).toEqual([start.id]);
     editor.dispose();
   });
 

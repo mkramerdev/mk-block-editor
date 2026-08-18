@@ -6,6 +6,7 @@ export type {
   BlockMetadataValidator,
   BlockParentConstraint,
   CanonicalListPolicy,
+  CanonicalRangeDeletionPolicy,
   CompoundWrapperPolicy,
   TextBlockSplitMap,
   WrapperUnderflowPolicy,

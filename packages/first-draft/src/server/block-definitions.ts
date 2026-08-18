@@ -95,6 +95,7 @@ export const firstDraftBlockModelDefinitions = Object.freeze({
     type: "quote",
     content: { required: ["paragraph"] },
     contentBoundary: false,
+    rangeDeletion: { kind: "unwrap-boundary-contents" },
   },
   code: {
     kind: "wrapper",
@@ -103,6 +104,7 @@ export const firstDraftBlockModelDefinitions = Object.freeze({
     content: { required: ["paragraph"] },
     contentBoundary: false,
     data: { language: "plaintext" },
+    rangeDeletion: { kind: "unwrap-boundary-contents" },
   },
   callout: {
     kind: "wrapper",
@@ -112,6 +114,7 @@ export const firstDraftBlockModelDefinitions = Object.freeze({
     contentBoundary: false,
     defaultContent: "paragraph",
     data: { icon: "info" },
+    rangeDeletion: { kind: "unwrap-boundary-contents" },
   },
   toggleHeading: {
     kind: "wrapper",
@@ -174,6 +177,7 @@ export const firstDraftBlockModelDefinitions = Object.freeze({
     contentBoundary: false,
     defaultContent: "column",
     underflow: { kind: "promote-single-child-contents" },
+    rangeDeletion: { kind: "unwrap-boundary-child" },
   },
   column: {
     kind: "wrapper",
@@ -192,6 +196,7 @@ export const firstDraftBlockModelDefinitions = Object.freeze({
     content: { required: ["tabPane"], additional: "tabPane" },
     contentBoundary: false,
     defaultContent: "tabPane",
+    rangeDeletion: { kind: "unwrap-visible-boundary-child" },
   },
   tabPane: {
     kind: "wrapper",

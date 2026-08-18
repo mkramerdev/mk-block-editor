@@ -170,14 +170,13 @@ export function useEditableClipboardEvents({
     };
     const commands = {
       cut: (range: import("@repo/editor-core/editing").StructuralEditRange) =>
-        executeStructuralEditComposition(
-          editor,
-          { deletion: range },
-          {
-            provenance: null,
-            selectionPresentation: "native-final-selection",
-          },
-        ),
+        editor.executeStructuralRangeDeletion(range, {
+          intent: "cut",
+          provenance: null,
+          selectionPresentation: "native-final-selection",
+          resolveVisibleChildBlockIds:
+            definition.selectionFragment?.resolveVisibleChildBlockIds,
+        }),
       paste: (
         captured: NonNullable<ReturnType<typeof captureSelection>>,
         fragment: import("@repo/editor-core/editing").CanonicalBlockFragment,
@@ -261,6 +260,7 @@ export function useEditableClipboardEvents({
           return;
         }
         fallbackClipboardByEditor.set(editor, memory);
+        if (!captured.isCurrent()) return;
         if (editor.ownsActiveElement(doc)) {
           if (captured.kind === "internal") captured.cut();
           else commands.cut(captured.range);

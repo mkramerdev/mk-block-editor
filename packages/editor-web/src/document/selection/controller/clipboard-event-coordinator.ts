@@ -117,7 +117,10 @@ export function createEditorClipboardEventHandlers(
         !context.boundary.writeSelection(event.clipboardData, captured.snapshot)
       )
         return false;
+      // Preflight keeps an already-stale capture unclaimed; the second check
+      // revalidates after browser ownership has been claimed.
       if (!captured.isCurrent() || !claim(event)) return false;
+      if (!captured.isCurrent()) return false;
       const result =
         captured.kind === "internal"
           ? captured.cut()

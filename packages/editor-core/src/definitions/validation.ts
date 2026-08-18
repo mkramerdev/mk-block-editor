@@ -20,6 +20,7 @@ const definitionFields = new Set([
   "replaceWith",
   "underflow",
   "compound",
+  "rangeDeletion",
   "validateMetadata",
   "renderer",
 ]);
@@ -200,6 +201,7 @@ export function assertValidBlockDefinition(
       "underflow",
       "compound",
       "list",
+      "rangeDeletion",
     ]);
     return;
   }
@@ -212,6 +214,7 @@ export function assertValidBlockDefinition(
       "underflow",
       "compound",
       "list",
+      "rangeDeletion",
     ]);
     return;
   }
@@ -299,6 +302,19 @@ export function assertValidBlockDefinition(
     ) {
       throw new Error(
         `wrapper block definition ${type} compound policy is invalid`,
+      );
+    }
+  }
+  if (definition.rangeDeletion !== undefined) {
+    if (
+      !isRecord(definition.rangeDeletion) ||
+      Object.keys(definition.rangeDeletion).some((field) => field !== "kind") ||
+      (definition.rangeDeletion.kind !== "unwrap-boundary-contents" &&
+        definition.rangeDeletion.kind !== "unwrap-boundary-child" &&
+        definition.rangeDeletion.kind !== "unwrap-visible-boundary-child")
+    ) {
+      throw new Error(
+        `wrapper block definition ${type} rangeDeletion policy is invalid`,
       );
     }
   }

@@ -15,6 +15,7 @@ export {
 } from "../editing/enter/plan-enter.ts";
 export { planBlockBoundaryBackspace } from "../editing/backspace/plan-backspace.ts";
 export { planBlockBoundaryDelete } from "../editing/delete/plan-delete.ts";
+export { planStructuralRangeDeletion } from "../editing/range-deletion/plan-range-deletion.ts";
 export {
   assertValidCanonicalBlockFragment,
   createCanonicalBlockFragment,
@@ -49,6 +50,11 @@ export type {
   PlanBlockBoundaryDeleteInput,
   PlanBlockBoundaryDeleteResult,
 } from "../editing/delete/plan-delete.ts";
+export type {
+  PlanStructuralRangeDeletionInput,
+  PlanStructuralRangeDeletionResult,
+  StructuralRangeDeletionIntent,
+} from "../editing/range-deletion/plan-range-deletion.ts";
 export type {
   CanonicalSelectionNavigationResult,
   CanonicalNavigationInput,
