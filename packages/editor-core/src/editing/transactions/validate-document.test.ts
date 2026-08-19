@@ -289,7 +289,6 @@ describe("ordered structural document validation", () => {
         };
       },
       validateContent: () => true,
-      focus: { kind: "text-offset", blockId: roots[0]!.id, offset: 2 },
     });
 
     expect(result).toEqual({ valid: true, issues: [] });

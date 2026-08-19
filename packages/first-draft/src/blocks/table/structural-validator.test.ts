@@ -2,46 +2,55 @@ import { describe, expect, it } from "vitest";
 import type { Block, BlockType } from "@repo/editor-core/document";
 import type { BlockDefinition } from "@repo/editor-core/definitions";
 import type { StructuralDocumentValidatorInput } from "@repo/editor-core/editing";
-import type { BlockId } from "@repo/editor-core/kernel";
+import { asBlockId, type BlockId } from "@repo/editor-core/kernel";
 import { createFirstDraftEditorDefinition } from "../../first-draft-definition.tsx";
 import { createFirstDraftViewStateStore } from "../view-state.tsx";
 import { validateFirstDraftTableStructure } from "./structural-validator.ts";
 
-const id = (value: string) => value as BlockId;
+const id = asBlockId;
 const definitions = {} as Readonly<Record<BlockType, BlockDefinition>>;
 
 describe("validateFirstDraftTableStructure", () => {
-  it.each([
-    [[1]],
-    [[2, 2]],
-    [[3, 3, 3]],
-  ])("accepts a rectangular table with row widths %j", (widths) => {
-    expect(validateFirstDraftTableStructure(tableGraph("table-a", widths))).toEqual([]);
-  });
+  it.each([[[1]], [[2, 2]], [[3, 3, 3]]])(
+    "accepts a rectangular table with row widths %j",
+    (widths) => {
+      expect(
+        validateFirstDraftTableStructure(tableGraph("table-a", widths)),
+      ).toEqual([]);
+    },
+  );
 
   it("rejects unequal rows, empty rows, and empty tables", () => {
-    expect(validateFirstDraftTableStructure(tableGraph("unequal", [2, 1]))).toContain(
-      "table unequal rows must have equal cell counts",
-    );
-    expect(validateFirstDraftTableStructure(tableGraph("empty-row", [1, 0]))).toContain(
-      "table row empty-row-row-2 must have at least one cell",
-    );
-    expect(validateFirstDraftTableStructure(tableGraph("empty-table", []))).toContain(
-      "table empty-table must have at least one row",
-    );
+    expect(
+      validateFirstDraftTableStructure(tableGraph("unequal", [2, 1])),
+    ).toContain("table unequal rows must have equal cell counts");
+    expect(
+      validateFirstDraftTableStructure(tableGraph("empty-row", [1, 0])),
+    ).toContain("table row empty-row-row-2 must have at least one cell");
+    expect(
+      validateFirstDraftTableStructure(tableGraph("empty-table", [])),
+    ).toContain("table empty-table must have at least one row");
   });
 
   it("rejects invalid live direct child types", () => {
     const invalidTable = tableGraph("bad-table-child", [1]);
     const rowId = id("bad-table-child-row-1");
-    invalidTable.blocks[rowId] = block(rowId, "paragraph", id("bad-table-child"));
+    invalidTable.blocks[rowId] = block(
+      rowId,
+      "paragraph",
+      id("bad-table-child"),
+    );
     expect(validateFirstDraftTableStructure(invalidTable)).toContain(
       "table bad-table-child may contain only table rows",
     );
 
     const invalidRow = tableGraph("bad-row-child", [1]);
     const cellId = id("bad-row-child-cell-1-1");
-    invalidRow.blocks[cellId] = block(cellId, "paragraph", id("bad-row-child-row-1"));
+    invalidRow.blocks[cellId] = block(
+      cellId,
+      "paragraph",
+      id("bad-row-child-row-1"),
+    );
     expect(validateFirstDraftTableStructure(invalidRow)).toContain(
       "table row bad-row-child-row-1 may contain only table cells",
     );
@@ -161,10 +170,20 @@ function combine(
   };
 }
 
-function block(blockId: BlockId, type: BlockType, parentId: BlockId | null): Block {
-  return { id: blockId, type, parentId };
+function block(
+  blockId: BlockId,
+  type: BlockType,
+  parentId: BlockId | null,
+): Block {
+  return { id: blockId, type, parentId, tombstone: null };
 }
 
-type MutableValidatorInput = {
-  -readonly [Key in keyof StructuralDocumentValidatorInput]: StructuralDocumentValidatorInput[Key];
+type MutableValidatorInput = Omit<
+  StructuralDocumentValidatorInput,
+  "blocks" | "rootBlockIds" | "childIdsByParentId" | "candidateBlockIds"
+> & {
+  blocks: Record<BlockId, Block>;
+  rootBlockIds: BlockId[];
+  childIdsByParentId: Partial<Record<BlockId, readonly BlockId[]>>;
+  candidateBlockIds?: readonly BlockId[];
 };

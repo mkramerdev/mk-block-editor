@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { VersionedBlock } from "@repo/editor-core/document";
-import type { BlockId } from "@repo/editor-core/kernel";
+import { asContentVersion, type BlockId } from "@repo/editor-core/kernel";
 import {
   contentSelection,
   wholeSelection,
@@ -324,8 +324,9 @@ function createFixture(input: readonly FixtureBlock[]) {
         id: id(entry.id),
         type: entry.text === undefined ? "atomic" : "paragraph",
         parentId: entry.parentId ? id(entry.parentId) : null,
+        tombstone: null,
         metadataVersion: "1",
-        contentVersion: entry.text === undefined ? null : "1",
+        contentVersion: entry.text === undefined ? null : asContentVersion("1"),
       },
     ]),
   );

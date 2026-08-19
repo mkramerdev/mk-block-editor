@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { EditorDefinition } from "./contracts.ts";
+import type { EditableEditorDefinition } from "./contracts.ts";
 import {
   compileEditorInlineAtoms,
   validateEditorInlineAtomOccurrence,
@@ -14,8 +14,8 @@ const mention = {
 } as const;
 
 function definition(
-  inlineAtoms: EditorDefinition["inlineAtoms"],
-): EditorDefinition {
+  inlineAtoms: EditableEditorDefinition["inlineAtoms"],
+): EditableEditorDefinition {
   return { ...testEditableEditorDefinition, inlineAtoms };
 }
 
@@ -25,9 +25,7 @@ describe("compiled editor inline atoms", () => {
     const first = compileEditorInlineAtoms(host);
 
     expect(first.definitions.get("mention")?.render).toBe(mention.render);
-    expect(
-      first.definitions.get("mention")?.render,
-    ).toBe(mention.render);
+    expect(first.definitions.get("mention")?.render).toBe(mention.render);
   });
 
   it("rejects duplicate, empty, malformed, and reserved atom types", () => {
@@ -102,10 +100,13 @@ describe("compiled editor inline atoms", () => {
 
   it("rejects the retired top-level attrs representation", () => {
     expect(() =>
-      validateEditorInlineAtomOccurrence(compileCanonicalEditorDefinition(definition([mention])), {
-        type: "mention",
-        attrs: { id: "user-123" },
-      }),
+      validateEditorInlineAtomOccurrence(
+        compileCanonicalEditorDefinition(definition([mention])),
+        {
+          type: "mention",
+          attrs: { id: "user-123" },
+        },
+      ),
     ).toThrow(/unsupported fields: attrs/i);
   });
 });

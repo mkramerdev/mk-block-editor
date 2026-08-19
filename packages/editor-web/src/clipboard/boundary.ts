@@ -17,7 +17,10 @@ import type {
   EditorPlainTextExportHandler,
   EditorPlainTextImportHandler,
 } from "./codec-contracts.ts";
-import { resolveEditorClipboardImportLimits, utf8ByteLength } from "./limits.ts";
+import {
+  resolveEditorClipboardImportLimits,
+  utf8ByteLength,
+} from "./limits.ts";
 import {
   parseCanonicalBlockFragmentWirePayload,
   serializeCanonicalBlockFragmentWirePayload,
@@ -33,8 +36,12 @@ export interface EditorClipboardBoundaryOptions {
     | null
     | { readonly ok: true; readonly fragment: CanonicalBlockFragment }
     | { readonly ok: false };
-  readonly inlineMarks?: Parameters<typeof serializeCanonicalFragmentHtml>[1]["inlineMarks"];
-  readonly inlineAtoms?: Parameters<typeof serializeCanonicalFragmentHtml>[1]["inlineAtoms"];
+  readonly inlineMarks?: Parameters<
+    typeof serializeCanonicalFragmentHtml
+  >[1]["inlineMarks"];
+  readonly inlineAtoms?: Parameters<
+    typeof serializeCanonicalFragmentHtml
+  >[1]["inlineAtoms"];
   readonly parseHtml?: (
     html: string,
     plainText: string,
@@ -69,7 +76,9 @@ export function createEditorClipboardBoundary(
       `Plain-text import type ${options.plainTextImportBlockType} must be a defined text block.`,
     );
   }
-  const htmlImportHandlers = orderedUniqueHandlers(options.htmlImportHandlers ?? []);
+  const htmlImportHandlers = orderedUniqueHandlers(
+    options.htmlImportHandlers ?? [],
+  );
   const htmlExportHandlers = orderedUniqueHandlers(
     options.htmlExportHandlers ?? [],
   );
@@ -191,9 +200,7 @@ export function createEditorClipboardBoundary(
 
     readClipboardBlocks(clipboardData: DataTransfer) {
       const html = readData(clipboardData, "text/html");
-      const canonicalPayload = html
-        ? readCanonicalFragmentPayload(html)
-        : null;
+      const canonicalPayload = html ? readCanonicalFragmentPayload(html) : null;
       if (canonicalPayload) {
         const fragment = parseCanonicalBlockFragmentWirePayload(
           canonicalPayload,
@@ -201,12 +208,8 @@ export function createEditorClipboardBoundary(
         );
         if (fragment) return fragment;
       }
-      return decodeRepresentations(
-        html,
-        readData(clipboardData, "text/plain"),
-      );
+      return decodeRepresentations(html, readData(clipboardData, "text/plain"));
     },
-
   });
 }
 

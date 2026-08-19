@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { BlockDefinition } from "../definitions/block-definition.ts";
 import type { BlockType, VersionedBlock } from "../document/model/block.ts";
-import { asBlockId, type BlockId } from "../kernel/identity/uuid.ts";
+import type { BlockId } from "../kernel/identity/ids.ts";
+import { asBlockId } from "../kernel/identity/uuid.ts";
 import { createVersionedBlockRecord } from "./block-record.ts";
 import { applyBlockMetadataUpdates } from "./block-metadata-update.ts";
 
@@ -195,7 +196,7 @@ function createBlocks(): Readonly<Record<BlockId, VersionedBlock>> {
       id: tombstonedId,
       type: "paragraph",
       metadata: { required: true },
-      tombstone: { deletedAt: 1, reason: "test" },
+      tombstone: { deletedAt: 1, reason: "user-delete" },
       version: { metadataVersion: "1", contentVersion: null },
     }),
   };

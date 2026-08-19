@@ -60,7 +60,10 @@ export function blurFocusedEditorElement(list: HTMLElement): void {
   activeElement.blur();
 }
 
-export function capturePointer(element: HTMLElement, pointerId: number): boolean {
+export function capturePointer(
+  element: HTMLElement,
+  pointerId: number,
+): boolean {
   if (typeof element.setPointerCapture !== "function") return false;
   try {
     element.setPointerCapture(pointerId);
@@ -117,8 +120,8 @@ export function isPointerEventFromEditorInteractiveControl(
         : null;
   return Boolean(
     target &&
-      list.contains(target) &&
-      isEditorInteractiveControlTarget(target, list),
+    list.contains(target) &&
+    isEditorInteractiveControlTarget(target, list),
   );
 }
 

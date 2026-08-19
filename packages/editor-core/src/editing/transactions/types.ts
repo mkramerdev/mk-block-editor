@@ -120,7 +120,10 @@ export type StructuralTransactionOperation =
       readonly kind: "appendTextBlockContent";
       readonly destinationBlockId: BlockId;
       readonly sourceBlockId: BlockId;
-      readonly expectedDestinationContentVersion: ContentVersion | string | null;
+      readonly expectedDestinationContentVersion:
+        | ContentVersion
+        | string
+        | null;
       readonly expectedSourceContentVersion: ContentVersion | string | null;
       readonly operation: Extract<
         EditorLogicalContentOperation,

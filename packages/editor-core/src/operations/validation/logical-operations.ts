@@ -4,9 +4,7 @@ import {
   validateLogicalContentOperation,
 } from "../../content/rich-text/content-operations.ts";
 import { validateUpdateBlockMetadataOperation } from "../../metadata/operation-validation.ts";
-export {
-  validateUpdateBlockMetadataOperation,
-} from "../../metadata/operation-validation.ts";
+export { validateUpdateBlockMetadataOperation } from "../../metadata/operation-validation.ts";
 import type { EditorModelOperationValidationResult } from "../transactions/validation-result.ts";
 export type {
   EditorDeleteInlineRangeOperation,

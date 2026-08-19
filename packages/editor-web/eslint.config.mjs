@@ -12,11 +12,13 @@ export default [
           paths: [
             {
               name: "react-native",
-              message: "editor-web is browser-only and must not import native runtime packages.",
+              message:
+                "editor-web is browser-only and must not import native runtime packages.",
             },
             {
               name: "y-prosemirror",
-              message: "Use @repo/editor-yjs-dom as the DOM collaboration adapter boundary.",
+              message:
+                "Use @repo/editor-yjs-dom as the DOM collaboration adapter boundary.",
             },
             {
               name: "@repo/editor-core",
@@ -26,7 +28,8 @@ export default [
                 "deleteBlockSubtree",
                 "exitWrapperFromEmptyBlock",
               ],
-              message: "Keep mutation orchestration in @repo/editor-react/editor.",
+              message:
+                "Keep mutation orchestration in @repo/editor-react/editor.",
             },
           ],
           patterns: [
@@ -49,11 +52,13 @@ export default [
                 "@repo/editor-yjs-native",
                 "@repo/editor-yjs-native/*",
               ],
-              message: "Server and native editor packages must stay out of the browser web package.",
+              message:
+                "Server and native editor packages must stay out of the browser web package.",
             },
             {
               group: ["prosemirror-*"],
-              message: "Import ProseMirror symbols through @repo/editor-dom/prosemirror.",
+              message:
+                "Import ProseMirror symbols through @repo/editor-dom/prosemirror.",
             },
           ],
         },

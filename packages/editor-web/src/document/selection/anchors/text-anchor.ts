@@ -13,8 +13,8 @@ import {
 } from "@repo/editor-react/selection";
 import type {
   EditorBlockContentLease,
-  EditorWebContentRuntime,
-} from "../../../runtime/content/content-runtime.ts";
+  EditorContentRuntime,
+} from "@repo/editor-core/content";
 
 export type CreateWebSelectionTextAnchorResult =
   | {
@@ -30,7 +30,7 @@ export type CreateWebSelectionTextAnchorResult =
     };
 
 export interface CreateWebSelectionTextAnchorOptions {
-  contentRuntime: EditorWebContentRuntime;
+  contentRuntime: EditorContentRuntime;
   contentLease?: EditorBlockContentLease;
   blockId: BlockId;
   blockType: BlockType;
@@ -94,7 +94,7 @@ export function createWebSelectionTextAnchorAtOffset({
 export function resolveWebSelectionTextAnchorPoint(
   point: EditorLogicalSelectionPoint,
   graph: EditorSelectionGraphReader,
-  contentRuntime: EditorWebContentRuntime,
+  contentRuntime: EditorContentRuntime,
   contentLease?: EditorBlockContentLease,
 ): EditorSelectionTextAnchorResolutionResult {
   return resolveEditorSelectionTextAnchorPoint(point, graph, {

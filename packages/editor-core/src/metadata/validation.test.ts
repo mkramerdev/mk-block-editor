@@ -140,10 +140,7 @@ describe("author-owned block data validation", () => {
       [],
     );
     expect(
-      validateBlockMetadataFieldValueForDefinition(
-        1.5,
-        "count",
-      ),
+      validateBlockMetadataFieldValueForDefinition(1.5, "count"),
     ).toStrictEqual([]);
   });
 
@@ -152,10 +149,7 @@ describe("author-owned block data validation", () => {
     circular.self = circular;
 
     expect(
-      validateBlockMetadataFieldValueForDefinition(
-        circular,
-        "payload",
-      ),
+      validateBlockMetadataFieldValueForDefinition(circular, "payload"),
     ).toContain("payload.self must not contain circular references");
     expect(
       validateBlockMetadataFieldValueForDefinition(
@@ -166,8 +160,6 @@ describe("author-owned block data validation", () => {
   });
 
   it("does not attach ownership semantics to field deletion", () => {
-    expect(
-      validateBlockMetadataFieldDeletionForDefinition(),
-    ).toStrictEqual([]);
+    expect(validateBlockMetadataFieldDeletionForDefinition()).toStrictEqual([]);
   });
 });

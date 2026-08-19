@@ -55,9 +55,7 @@ export class DevSharedRoomAuthenticator implements EditorRealtimeAuthenticator {
   }
 }
 
-export class JwtJwksAuthenticatorBoundary
-  implements EditorRealtimeAuthenticator
-{
+export class JwtJwksAuthenticatorBoundary implements EditorRealtimeAuthenticator {
   authenticateAndAuthorizeSession(): EditorRealtimeAuthenticationResult {
     return {
       ok: false,

@@ -21,7 +21,9 @@
   "scripts": {
     "build": "pnpm run clean && tsc -p tsconfig.build.json",
     "dev": "tsc -p tsconfig.build.json --watch",
-    "check-types": "tsc --noEmit",
+    "check-types:source": "tsc --noEmit -p tsconfig.json",
+    "check-types:tests": "tsc --noEmit -p tsconfig.test.json",
+    "check-types": "pnpm run check-types:source && pnpm run check-types:tests",
     "typecheck": "pnpm run check-types",
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "lint": "eslint . --max-warnings 0",

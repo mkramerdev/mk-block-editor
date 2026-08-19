@@ -12,22 +12,30 @@ import type {
 } from "../../document/model/block.ts";
 import type { BlockId } from "../../kernel/identity/ids.ts";
 import { asBlockId } from "../../kernel/identity/uuid.ts";
+import { asContentVersion } from "../../kernel/versioning/versions.ts";
 import { applyStructuralTransaction } from "../transactions/apply.ts";
 import type { TransactionReadableContent } from "../transactions/types.ts";
 import { planBlockBoundaryBackspace } from "./plan-backspace.ts";
 
 const renderer = () => null;
 const blockDefinitions: Readonly<Record<BlockType, BlockDefinition>> = {
-  textLeaf: { kind: "text", type: "textLeaf", renderer },
-  otherText: { kind: "text", type: "otherText", renderer },
+  textLeaf: { kind: "text", rootLayout: "normal", type: "textLeaf", renderer },
+  otherText: {
+    kind: "text",
+    rootLayout: "normal",
+    type: "otherText",
+    renderer,
+  },
   atomLeaf: {
     kind: "atomic",
+    rootLayout: "normal",
     type: "atomLeaf",
     renderer,
     replaceWith: "textLeaf",
   },
   oneShell: {
     kind: "wrapper",
+    rootLayout: "normal",
     type: "oneShell",
     renderer,
     content: { required: ["textLeaf"] },
@@ -35,6 +43,7 @@ const blockDefinitions: Readonly<Record<BlockType, BlockDefinition>> = {
   },
   flowShell: {
     kind: "wrapper",
+    rootLayout: "normal",
     type: "flowShell",
     renderer,
     content: { required: ["block"], additional: "block" },
@@ -43,6 +52,7 @@ const blockDefinitions: Readonly<Record<BlockType, BlockDefinition>> = {
   },
   bodyShell: {
     kind: "wrapper",
+    rootLayout: "normal",
     type: "bodyShell",
     renderer,
     content: { required: ["block"], additional: "block" },
@@ -51,6 +61,7 @@ const blockDefinitions: Readonly<Record<BlockType, BlockDefinition>> = {
   },
   compoundShell: {
     kind: "wrapper",
+    rootLayout: "normal",
     type: "compoundShell",
     renderer,
     content: { required: ["textLeaf", "bodyShell"] },
@@ -64,6 +75,7 @@ const blockDefinitions: Readonly<Record<BlockType, BlockDefinition>> = {
   },
   lane: {
     kind: "wrapper",
+    rootLayout: "normal",
     type: "lane",
     renderer,
     content: { required: ["block"], additional: "block" },
@@ -72,6 +84,7 @@ const blockDefinitions: Readonly<Record<BlockType, BlockDefinition>> = {
   },
   laneGroup: {
     kind: "wrapper",
+    rootLayout: "normal",
     type: "laneGroup",
     renderer,
     content: { required: ["lane", "lane"], additional: "lane" },
@@ -81,6 +94,7 @@ const blockDefinitions: Readonly<Record<BlockType, BlockDefinition>> = {
   },
   ordinaryLaneGroup: {
     kind: "wrapper",
+    rootLayout: "normal",
     type: "ordinaryLaneGroup",
     renderer,
     content: { required: ["lane", "lane"], additional: "lane" },
@@ -89,6 +103,7 @@ const blockDefinitions: Readonly<Record<BlockType, BlockDefinition>> = {
   },
   laneGroupHost: {
     kind: "wrapper",
+    rootLayout: "normal",
     type: "laneGroupHost",
     renderer,
     content: { required: ["laneGroup"] },
@@ -649,7 +664,10 @@ describe("block-boundary Backspace planning", () => {
     );
     expect(planned.ok && planned.handled).toBe(true);
     if (!planned.ok || !planned.handled) return;
-    const changedSource = { ...source, contentVersion: "2" };
+    const changedSource = {
+      ...source,
+      contentVersion: asContentVersion("2"),
+    };
     const context = contextFor(
       [previous, changedSource],
       changedSource,

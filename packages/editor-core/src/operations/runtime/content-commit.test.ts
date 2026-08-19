@@ -16,8 +16,8 @@ const blockDefinitions: Readonly<Record<string, BlockDefinition>> = {
   paragraph: {
     type: "paragraph",
     kind: "text",
+    rootLayout: "normal",
     selection: contentSelection(),
-    root: false,
   },
 };
 const options = {

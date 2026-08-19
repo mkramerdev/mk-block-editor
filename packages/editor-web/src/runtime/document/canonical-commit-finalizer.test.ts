@@ -7,7 +7,7 @@ import type {
 import { describe, expect, it, vi } from "vitest";
 import { createTestEditorSnapshot } from "../../tests/editor-snapshot-fixtures.ts";
 import { testEditableEditorDefinition } from "../../tests/test-editor-definition.ts";
-import type { EditorContentRuntime } from "../content/content-runtime.ts";
+import type { EditorContentRuntime } from "@repo/editor-core/content";
 import type { EditorTypingTriggerSessionController } from "../typing-triggers/session-controller.ts";
 import { finalizeCanonicalEditorCommit } from "./canonical-commit-finalizer.ts";
 
@@ -47,9 +47,7 @@ describe("finalizeCanonicalEditorCommit", () => {
       yjsUpdate: update,
     };
     const order: string[] = [];
-    const readBlockProjection = vi.fn(
-      () => snapshot.content[blockId]!,
-    );
+    const readBlockProjection = vi.fn(() => snapshot.content[blockId]!);
     const editor = {
       getEditorInfo: () => ({ blockGraphVersion: 1 }),
       getManifestData: () => ({

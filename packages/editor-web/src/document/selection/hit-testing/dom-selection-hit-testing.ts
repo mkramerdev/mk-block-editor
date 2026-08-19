@@ -5,7 +5,10 @@ import type {
 } from "@repo/editor-react/selection";
 import { readEditorBlockSelectionTarget } from "@repo/editor-react/selection";
 import type { EditorSelectionTextAffinity } from "@repo/editor-react/selection-model";
-import { clampTextOffset, type EditorTextPointHit } from "./text-hit-testing.ts";
+import {
+  clampTextOffset,
+  type EditorTextPointHit,
+} from "./text-hit-testing.ts";
 import {
   editorBlockShellSelector,
   editorTextRootSelector,
@@ -328,9 +331,7 @@ function resolveTextSelectionOffset({
   clientY: number;
 }): EditorTextPointHit {
   const textMount = resolveTextMount(shell);
-  const textLayout = textMount
-    ? createSemanticDomTextLayout(textMount)
-    : null;
+  const textLayout = textMount ? createSemanticDomTextLayout(textMount) : null;
   const contentSize = textLayout?.length ?? 0;
   const verticalEdgePoint = textMount
     ? textMountVerticalEdgeOffset(textMount, clientY, contentSize)
@@ -383,8 +384,7 @@ function textMountVerticalEdgeOffset(
   const rect = textMount.getBoundingClientRect();
   if (!Number.isFinite(rect.height) || rect.height <= 0) return null;
   if (clientY < rect.top) return { offset: 0, affinity: null };
-  if (clientY > rect.bottom)
-    return { offset: textLength, affinity: null };
+  if (clientY > rect.bottom) return { offset: textLength, affinity: null };
   return null;
 }
 

@@ -2,8 +2,16 @@
 
 import { useMemo, useSyncExternalStore, type CSSProperties } from "react";
 import type { EditableEditor } from "@repo/editor-web/editor";
-import { toCollaborationSubjectKey, type EditorDocumentGeometryReader, type EditorDocumentRect, type ResolvedSelectionFocusTarget } from "@repo/editor-web/document-runtime";
-import { type CollaborationSubjectKey, type ResolvedEditorSelection } from "@repo/editor-web/editor";
+import {
+  toCollaborationSubjectKey,
+  type EditorDocumentGeometryReader,
+  type EditorDocumentRect,
+  type ResolvedSelectionFocusTarget,
+} from "@repo/editor-web/document-runtime";
+import {
+  type CollaborationSubjectKey,
+  type ResolvedEditorSelection,
+} from "@repo/editor-web/editor";
 import type {
   FirstDraftCollaborationSubject,
   FirstDraftParticipantPresence,

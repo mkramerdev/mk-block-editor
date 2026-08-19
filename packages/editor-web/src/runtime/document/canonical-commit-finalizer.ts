@@ -4,7 +4,7 @@ import type {
   CanonicalEditorCommit,
   EditorImplementation,
 } from "@repo/editor-react/editor";
-import type { EditorContentRuntime } from "../content/content-runtime.ts";
+import type { EditorContentRuntime } from "@repo/editor-core/content";
 import type { EditorTypingTriggerSessionController } from "../typing-triggers/session-controller.ts";
 import type {
   EditorBlockGraphSemanticChange,
@@ -65,62 +65,69 @@ export function finalizeCanonicalEditorCommit(
       ),
     ]);
     semanticChange = {
-            kind: "block-metadata",
-            transactionId: receipt.transactionId,
-            baseDocumentRevision: receipt.baseDocumentRevision,
-            documentRevision: receipt.documentRevision,
-            selectionBefore: receipt.selectionBefore,
-            selectionAfter: receipt.selectionAfter,
-            changedBlockIds,
-            deletedBlockIds: [],
-            historyAction: receipt.historyAction,
-            change: {
-              kind: "block-metadata",
-              blockId:
-                canonicalOperation.updates[0]?.blockId ??
-                canonicalOperation.deletions?.[0]?.blockId ??
-                changedBlockIds[0]!,
-              update: canonicalOperation,
-            },
-            canonicalOperation,
-          } satisfies EditorBlockMetadataSemanticChange;
+      kind: "block-metadata",
+      transactionId: receipt.transactionId,
+      baseDocumentRevision: receipt.baseDocumentRevision,
+      documentRevision: receipt.documentRevision,
+      selectionBefore: receipt.selectionBefore,
+      selectionAfter: receipt.selectionAfter,
+      changedBlockIds,
+      deletedBlockIds: [],
+      historyAction: receipt.historyAction,
+      change: {
+        kind: "block-metadata",
+        blockId:
+          canonicalOperation.updates[0]?.blockId ??
+          canonicalOperation.deletions?.[0]?.blockId ??
+          changedBlockIds[0]!,
+        update: canonicalOperation,
+      },
+      canonicalOperation,
+    } satisfies EditorBlockMetadataSemanticChange;
   } else {
-    const changedBlockIds = uniqueBlockIds(
-      receipt.graphChanges.map((change) => change.blockId),
-    );
+    const changedBlockIds = uniqueBlockIds([
+      ...receipt.graphChanges.map((change) => change.blockId),
+      ...(receipt.metadataOperation?.updates ?? []).map(
+        (update) => update.blockId,
+      ),
+      ...(receipt.metadataOperation?.deletions ?? []).map(
+        (deletion) => deletion.blockId,
+      ),
+    ]);
     const deletedBlockIds = receipt.graphChanges.flatMap((change) =>
       change.kind === "delete" ? [change.blockId] : [],
     );
     semanticChange = {
-            kind: "block-graph",
-            transactionId: receipt.transactionId,
-            baseDocumentRevision: receipt.baseDocumentRevision,
-            documentRevision: receipt.documentRevision,
-            selectionBefore: receipt.selectionBefore,
-            selectionAfter: receipt.selectionAfter,
-            changedBlockIds,
-            deletedBlockIds,
-            historyAction: receipt.historyAction,
-            change: {
-              kind: "block-graph",
-              blockId: changedBlockIds[0] ?? null,
-              changes: receipt.graphChanges,
-            },
-            graphChanges: receipt.graphChanges,
-            contentChanges: (receipt.contentCommit?.blocks ?? []).map(
-              (block) => ({
-                kind: "block-content",
-                blockId: block.blockId,
-                blockType: block.blockType,
-                operations: block.contentOperations,
-                update: block.operationUpdate,
-                readProjection: options.contentRuntime.readBlockProjection(
-                  block.blockId,
-                  block.blockType,
-                ),
-              }),
-            ),
-          } satisfies EditorBlockGraphSemanticChange;
+      kind: "block-graph",
+      transactionId: receipt.transactionId,
+      baseDocumentRevision: receipt.baseDocumentRevision,
+      documentRevision: receipt.documentRevision,
+      selectionBefore: receipt.selectionBefore,
+      selectionAfter: receipt.selectionAfter,
+      changedBlockIds,
+      deletedBlockIds,
+      historyAction: receipt.historyAction,
+      change: {
+        kind: "block-graph",
+        blockId: changedBlockIds[0] ?? null,
+        changes: receipt.graphChanges,
+      },
+      graphChanges: receipt.graphChanges,
+      ...(receipt.metadataOperation === undefined
+        ? {}
+        : { metadataOperation: receipt.metadataOperation }),
+      contentChanges: (receipt.contentCommit?.blocks ?? []).map((block) => ({
+        kind: "block-content",
+        blockId: block.blockId,
+        blockType: block.blockType,
+        operations: block.contentOperations,
+        update: block.operationUpdate,
+        readProjection: options.contentRuntime.readBlockProjection(
+          block.blockId,
+          block.blockType,
+        ),
+      })),
+    } satisfies EditorBlockGraphSemanticChange;
   }
 
   publishEditorSemanticChange(

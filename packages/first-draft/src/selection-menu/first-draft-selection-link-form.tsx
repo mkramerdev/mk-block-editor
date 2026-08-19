@@ -1,9 +1,4 @@
-import {
-  useLayoutEffect,
-  useRef,
-  useState,
-  type FormEvent,
-} from "react";
+import { useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import type { CommittedSelectionSnapshot } from "@repo/editor-react/selection";
 import type { EditableEditor } from "@repo/editor-web/editor";
 

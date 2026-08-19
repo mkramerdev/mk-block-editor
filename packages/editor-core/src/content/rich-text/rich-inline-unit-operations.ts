@@ -15,7 +15,9 @@ export function richInlineNodeSize(node: RichTextInlineNodeJson): number {
   return isTextNode(node) ? richInlineTextUnitCount(node.text) : 1;
 }
 
-export function richInlineContentSize(content: readonly RichTextInlineNodeJson[]): number {
+export function richInlineContentSize(
+  content: readonly RichTextInlineNodeJson[],
+): number {
   return content.reduce((size, node) => size + richInlineNodeSize(node), 0);
 }
 
@@ -24,7 +26,11 @@ export function clampRichInlineOffset(offset: number, length: number): number {
   return Math.min(Math.max(0, Math.trunc(offset)), length);
 }
 
-export function sliceRichInlineTextUnits(text: string, from: number, to: number): string {
+export function sliceRichInlineTextUnits(
+  text: string,
+  from: number,
+  to: number,
+): string {
   if (from === to) return "";
   if (!hasHighSurrogate(text)) return text.slice(from, to);
   let unit = 0;
@@ -82,7 +88,9 @@ export function sliceRichInlineContentUnits(
   return result;
 }
 
-export function richInlineNodesToUnits(nodes: readonly RichTextInlineNodeJson[]): RichTextInlineNodeJson[] {
+export function richInlineNodesToUnits(
+  nodes: readonly RichTextInlineNodeJson[],
+): RichTextInlineNodeJson[] {
   const units: RichTextInlineNodeJson[] = [];
   for (const node of nodes) {
     const size = richInlineNodeSize(node);

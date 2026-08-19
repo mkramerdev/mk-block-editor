@@ -6,6 +6,7 @@ import { testEditableEditorDefinition } from "../../tests/test-editor-definition
 import type { EditorSemanticChange } from "../document/contracts.ts";
 import { initializeTestEditableEditor as initializeEditableEditor } from "../../tests/test-editor-initializers.ts";
 import type { EditorRuntimePort } from "../document/render-port.ts";
+import type { EditableEditorDefinition } from "../definition/contracts.ts";
 
 const textBlockId = asBlockId("selection-color-text");
 const atomicBlockId = asBlockId("selection-color-divider");
@@ -79,9 +80,7 @@ describe("additional selection color state", () => {
     expect(
       donor.insertText({ blockId: textBlockId, offset: 1, text: "X" }),
     ).toBe(true);
-    if (!donorChange || donorChange.kind !== "block-content") {
-      throw new Error("Expected donor content change");
-    }
+    const contentChange = requireContentChange(donorChange);
     const result = receiver.applyRemoteTransaction({
       transaction: {
         transactionId: "selection-color-reresolve",
@@ -92,8 +91,8 @@ describe("additional selection color state", () => {
           {
             blockId: textBlockId,
             blockType: "paragraph",
-            update: donorChange.yjsUpdate,
-            readProjection: donorChange.readProjection,
+            update: contentChange.yjsUpdate,
+            readProjection: contentChange.readProjection,
           },
         ],
       },
@@ -165,6 +164,58 @@ describe("additional selection color state", () => {
     }
     receiver.dispose();
   });
+
+  it("does not notify for reordered block-internal JSON payloads", () => {
+    const definition: EditableEditorDefinition = {
+      ...testEditableEditorDefinition,
+      blockInternalSelectionSubsystems: [
+        {
+          id: "test.semantic-selection",
+          validate: ({ payload }) => ({
+            ok: true,
+            payload,
+            resolution: "resolved",
+          }),
+        },
+      ],
+    };
+    const editor = initializeEditableEditor({
+      definition,
+      snapshot: createSnapshot(),
+    });
+    const notify = vi.fn();
+    editor.additionalSelections.subscribe(notify);
+    const entry = (payload: unknown) => ({
+      subject,
+      selectionRevision: 1,
+      selection: {
+        kind: "selection",
+        selection: {
+          kind: "block-internal",
+          blockId: atomicBlockId,
+          subsystem: "test.semantic-selection",
+          payload,
+        },
+      },
+    });
+
+    editor.setSelections({
+      entries: [entry({ a: 1, nested: { x: true, y: false }, order: [1, 2] })],
+    });
+    expect(notify).toHaveBeenCalledOnce();
+
+    notify.mockClear();
+    editor.setSelections({
+      entries: [entry({ order: [1, 2], nested: { y: false, x: true }, a: 1 })],
+    });
+    expect(notify).not.toHaveBeenCalled();
+
+    editor.setSelections({
+      entries: [entry({ order: [2, 1], nested: { y: false, x: true }, a: 1 })],
+    });
+    expect(notify).toHaveBeenCalledOnce();
+    editor.dispose();
+  });
 });
 
 function createEditor() {
@@ -179,4 +230,14 @@ function createSnapshot() {
     { id: textBlockId, type: "paragraph", text: "A" },
     { id: atomicBlockId, type: "divider" },
   ]);
+}
+
+function requireContentChange(
+  change: EditorSemanticChange | null,
+): Extract<EditorSemanticChange, { readonly kind: "block-content" }> {
+  expect(change).not.toBeNull();
+  if (!change || change.kind !== "block-content") {
+    throw new Error("Expected donor content change");
+  }
+  return change;
 }

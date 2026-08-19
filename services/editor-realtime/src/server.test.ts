@@ -1279,16 +1279,12 @@ describe("the sole editor realtime WebSocket service", () => {
         }),
         createTransactionId: ids(`concurrent-b-${receiveOrder.join("")}`),
       });
-      const editingLeaseA = runtimeA.read().acquireBlockContent(
-        textBlockId,
-        "paragraph",
-        "active-editing",
-      );
-      const editingLeaseB = runtimeB.read().acquireBlockContent(
-        textBlockId,
-        "paragraph",
-        "active-editing",
-      );
+      const editingLeaseA = runtimeA
+        .read()
+        .acquireBlockContent(textBlockId, "paragraph", "active-editing");
+      const editingLeaseB = runtimeB
+        .read()
+        .acquireBlockContent(textBlockId, "paragraph", "active-editing");
       let appliedByA = 0;
       let appliedByB = 0;
       const errors = vi.fn();

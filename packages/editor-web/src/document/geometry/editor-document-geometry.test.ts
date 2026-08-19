@@ -194,10 +194,13 @@ describe("editor document geometry owner", () => {
       { left: 10, top: 60, width: 15, height: 16 },
     ]);
     expect(hostRect).toHaveBeenCalledTimes(1);
-    (measured as { left: number }[])[0]!.left = 999;
-    expect(
-      owner.reader.readTextRangeRects(blockId, { from: 0, to: 10 })[0]?.left,
-    ).toBe(20);
+    const measuredAgain = owner.reader.readTextRangeRects(blockId, {
+      from: 0,
+      to: 10,
+    });
+    expect(measuredAgain).not.toBe(measured);
+    expect(measuredAgain[0]).not.toBe(measured[0]);
+    expect(measuredAgain[0]?.left).toBe(20);
     expect(hostRect).toHaveBeenCalledTimes(2);
   });
 
@@ -633,9 +636,14 @@ describe("editor document geometry owner", () => {
         {
           type: "attributes",
           target: presentationChild,
-          addedNodes: [] as unknown as NodeList,
-          removedNodes: [] as unknown as NodeList,
-        } as MutationRecord,
+          addedNodes: document.querySelectorAll("[data-never-added]"),
+          removedNodes: document.querySelectorAll("[data-never-removed]"),
+          attributeName: "class",
+          attributeNamespace: null,
+          nextSibling: null,
+          oldValue: null,
+          previousSibling: null,
+        } satisfies MutationRecord,
       ],
       mutationObserver as unknown as MutationObserver,
     );
@@ -660,7 +668,7 @@ describe("editor document geometry owner", () => {
     owner.registration.attachDocumentHost(host);
     flushFrames(frames);
     const second = vi.fn();
-    let removeFirst = () => undefined;
+    let removeFirst: () => void = () => undefined;
     removeFirst = owner.reader.subscribe(() => {
       removeFirst();
       throw new Error("subscriber failure");

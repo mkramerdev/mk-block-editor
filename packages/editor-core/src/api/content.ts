@@ -69,6 +69,21 @@ export {
 export { validateAndCloneInlineAtomMetadata } from "./content/inline-atoms.ts";
 export { sanitizeEditorLinkUrl } from "./content/urls.ts";
 export type {
+  EditorBlockContentLease,
+  EditorBlockContentLeaseReason,
+  EditorContentDataReconciliation,
+  EditorContentRuntime,
+  EditorContentRuntimeSource,
+  EditorContentStoreRuntimeOptions,
+  EditorContentStoreSlot,
+  EditorContentTextAffinity,
+  EditorContentTextAnchorCreateResult,
+  EditorContentTextAnchorResolveResult,
+  EditorExternalContentApplication,
+  EditorLiveTextAnchorResolveResult,
+  EditorRawBlockContent,
+} from "../content/runtime/content-runtime.ts";
+export type {
   ApplyLogicalContentOperationOptions,
   InlineAttributeContract,
   InlineAttributeJson,

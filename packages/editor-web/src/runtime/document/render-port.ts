@@ -8,7 +8,7 @@ import type { EditorExternalStore } from "@repo/editor-react/store";
 import type { BlockSelectionModel } from "@repo/editor-core/selection";
 import type { BlockType } from "@repo/editor-core/document";
 import type { BlockId } from "@repo/editor-core/kernel";
-import type { EditorContentRuntime } from "../content/content-runtime.ts";
+import type { EditorContentRuntime } from "@repo/editor-core/content";
 import type { EditorContentRuntimeResources } from "../content/runtime-resources.ts";
 import type { CanonicalContentResources } from "../content/canonical-resources.ts";
 import type { EditorDefinition } from "../definition/contracts.ts";
@@ -88,7 +88,10 @@ interface EditableEditorInfrastructure {
     },
   ): boolean;
   isTextProjectionActive(blockId: BlockId): boolean;
-  subscribeToTextBlockActivity(blockId: BlockId, listener: () => void): () => void;
+  subscribeToTextBlockActivity(
+    blockId: BlockId,
+    listener: () => void,
+  ): () => void;
   registerTextEditingHost(input: {
     readonly blockId: BlockId;
     readonly shell: HTMLElement;

@@ -4,6 +4,23 @@ export const TABLE_COLUMN_IDS_FIELD = "columnIds" as const;
 export const TABLE_COLUMN_WIDTHS_FIELD = "columnWidths" as const;
 export const FIRST_DRAFT_TABLE_DEFAULT_WIDTH = 0;
 export const FIRST_DRAFT_TABLE_DEFAULT_VIEW_ID = "";
+const MAX_TABLE_ID_ALLOCATION_ATTEMPTS = 100;
+
+export function createFirstDraftTableColumnId(
+  existingColumnIds: readonly string[],
+  createId: () => string = createBlockId,
+): string {
+  const existing = new Set(existingColumnIds);
+  for (
+    let attempt = 0;
+    attempt < MAX_TABLE_ID_ALLOCATION_ATTEMPTS;
+    attempt += 1
+  ) {
+    const candidate = createId();
+    if (candidate.length > 0 && !existing.has(candidate)) return candidate;
+  }
+  throw new Error("unable to allocate a unique table column id");
+}
 
 export function createFirstDraftTableColumnIds(
   count: number,
@@ -12,9 +29,9 @@ export function createFirstDraftTableColumnIds(
   if (!Number.isInteger(count) || count < 1) {
     throw new Error("table column count must be a positive integer");
   }
-  const ids = Array.from({ length: count }, () => createId());
-  if (new Set(ids).size !== ids.length || ids.some((id) => !id)) {
-    throw new Error("table column ids must be unique non-empty strings");
+  const ids: string[] = [];
+  for (let index = 0; index < count; index += 1) {
+    ids.push(createFirstDraftTableColumnId(ids, createId));
   }
   return ids;
 }

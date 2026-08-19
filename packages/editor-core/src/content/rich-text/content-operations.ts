@@ -264,9 +264,7 @@ const validOperationResult = Object.freeze({
   errors: Object.freeze([]),
 });
 
-export function isValidPlainTextOperation(
-  operation: unknown,
-): boolean {
+export function isValidPlainTextOperation(operation: unknown): boolean {
   if (!isRecord(operation) || !validContentOperationBaseFast(operation)) {
     return false;
   }
@@ -384,12 +382,7 @@ function prepareInlineRangeEdit(
   readonly after: RichTextDocumentNodeJson;
   readonly removed: readonly RichTextInlineNodeJson[];
 } | null {
-  if (
-    !Number.isInteger(from) ||
-    !Number.isInteger(to) ||
-    from < 0 ||
-    to < from
-  )
+  if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to < from)
     return null;
   const block = base.content[0] ?? { type: "paragraph" as const };
   const inline = block.content ?? [];

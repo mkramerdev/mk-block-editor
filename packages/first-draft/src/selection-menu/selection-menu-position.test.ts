@@ -25,9 +25,9 @@ describe("deriveFirstDraftSelectionMenuPreferredPlacement", () => {
 
   it("prefers above for identical caret rectangles", () => {
     const caret = { left: 20, top: 40, width: 1, height: 18 };
-    expect(
-      deriveFirstDraftSelectionMenuPreferredPlacement(caret, caret),
-    ).toBe("above");
+    expect(deriveFirstDraftSelectionMenuPreferredPlacement(caret, caret)).toBe(
+      "above",
+    );
   });
 
   it("prefers above when vertical caret bands overlap", () => {

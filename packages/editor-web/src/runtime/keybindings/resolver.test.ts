@@ -1,6 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
-import type { EditorImplementation } from "@repo/editor-react/editor";
-import type { EditorExternalStore } from "@repo/editor-react/store";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  createEditorExternalStore,
+  createInitialEditorSessionState,
+} from "@repo/editor-react/store";
+import { asBlockId } from "@repo/editor-core/kernel";
 import type { EditorView } from "@repo/editor-dom/prosemirror";
 import { createBlockLocalProseMirrorState } from "@repo/editor-dom/block-editor";
 import type {
@@ -8,10 +11,22 @@ import type {
   EditorKeyBinding,
 } from "../definition/contracts.ts";
 import { testEditableEditorDefinition } from "../../tests/test-editor-definition.ts";
-import { compileRegisteredEditorCommands } from "../definition/commands.ts";
-import { compileEditorKeybindings } from "./compiled-keybindings.ts";
 import { normalizeKeyboardEventChord } from "./chord.ts";
-import { resolveBlockKeybinding, resolveDocumentKeybinding } from "./resolver.ts";
+import {
+  resolveBlockKeybinding,
+  resolveDocumentKeybinding,
+} from "./resolver.ts";
+import type { EditorKeybindingRuntimeContext } from "./document-resolver.ts";
+import { initializeTestEditableEditor } from "../../tests/test-editor-initializers.ts";
+import { createTestEditorSnapshot } from "../../tests/editor-snapshot-fixtures.ts";
+import { resolveEditorRuntimePort } from "../document/runtime-port-registry.ts";
+
+const blockId = asBlockId("01890f07-1c00-7000-8000-000000000903");
+const liveEditors: ReturnType<typeof initializeTestEditableEditor>[] = [];
+
+afterEach(() => {
+  for (const editor of liveEditors.splice(0)) editor.dispose();
+});
 
 describe("editor keybinding resolver", () => {
   it.each([
@@ -125,7 +140,7 @@ describe("editor keybinding resolver", () => {
       keyboardEvent("b", { ctrlKey: true }),
       {
         ...documentRuntime([command], keybindings),
-        blockId: "resolver-block" as never,
+        blockId,
         blockType: "paragraph",
         view,
       },
@@ -156,7 +171,7 @@ describe("editor keybinding resolver", () => {
         keyboardEvent("Tab"),
         {
           ...documentRuntime([command], keybindings),
-          blockId: "resolver-block" as never,
+          blockId,
           blockType: "paragraph",
           view: blockView(),
         },
@@ -175,31 +190,38 @@ function documentBehavior(execute: () => void) {
   return {
     commands: [command],
     keybindings: [{ key: "Mod-s", commandId: command.id, scope: "document" }],
+  } satisfies {
+    readonly commands: readonly EditorCommandDefinition[];
+    readonly keybindings: readonly EditorKeyBinding[];
   };
 }
 
 function documentRuntime(
   commandDefinitions: readonly EditorCommandDefinition[],
   bindingDefinitions: readonly EditorKeyBinding[],
-) {
-  const commands = compileRegisteredEditorCommands(commandDefinitions);
-  return {
-    definition: testEditableEditorDefinition,
-    store: {} as EditorExternalStore,
-    editor: {
-      commands,
-      keybindings: compileEditorKeybindings(bindingDefinitions, commands),
-    } as unknown as EditorImplementation & {
-      readonly commands: typeof commands;
-      readonly keybindings: ReturnType<typeof compileEditorKeybindings>;
+): EditorKeybindingRuntimeContext {
+  const editor = initializeTestEditableEditor({
+    definition: {
+      ...testEditableEditorDefinition,
+      commands: commandDefinitions,
+      keybindings: bindingDefinitions,
     },
+    snapshot: createTestEditorSnapshot([
+      { id: blockId, type: "paragraph", text: "text" },
+    ]),
+  });
+  liveEditors.push(editor);
+  return {
+    definition: editor.definition,
+    store: createEditorExternalStore(createInitialEditorSessionState({})),
+    editor: resolveEditorRuntimePort(editor),
   };
 }
 
 function blockView(): EditorView {
   return {
     state: createBlockLocalProseMirrorState({
-      blockId: "resolver-block" as never,
+      blockId,
       blockType: "paragraph",
       doc: "text",
     }),

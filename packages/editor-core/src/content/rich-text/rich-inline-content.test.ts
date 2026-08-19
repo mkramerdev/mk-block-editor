@@ -37,7 +37,7 @@ describe("rich inline content contract", () => {
   });
 
   it("validates a document with block and text nodes", () => {
-    const content = {
+    const content: RichTextDocumentNodeJson = {
       type: "doc",
       content: [
         {
@@ -45,7 +45,7 @@ describe("rich inline content contract", () => {
           content: [{ type: "text", text: "Hello" }],
         },
       ],
-    } satisfies RichTextDocumentNodeJson;
+    };
 
     const result = validateRichTextDocumentNodeJson(content);
 
@@ -55,7 +55,7 @@ describe("rich inline content contract", () => {
   });
 
   it("validates known marks with attrs", () => {
-    const content = {
+    const content: RichTextDocumentNodeJson = {
       type: "doc",
       content: [
         {
@@ -74,7 +74,7 @@ describe("rich inline content contract", () => {
           ],
         },
       ],
-    } satisfies RichTextDocumentNodeJson;
+    };
 
     expect(validateRichTextDocumentNodeJson(content).valid).toBe(true);
     expect(normalizeRichTextDocument("paragraph", content)).toStrictEqual(
@@ -83,7 +83,7 @@ describe("rich inline content contract", () => {
   });
 
   it("validates generic inline atom nodes without deriving display text", () => {
-    const content = {
+    const content: RichTextDocumentNodeJson = {
       type: "doc",
       content: [
         {
@@ -97,7 +97,7 @@ describe("rich inline content contract", () => {
           ],
         },
       ],
-    } satisfies RichTextDocumentNodeJson;
+    };
 
     expect(validateRichTextDocumentNodeJson(content).valid).toBe(true);
     expect(extractPlainTextFromRichTextDocument(content)).toBe("Hi ");
@@ -271,7 +271,7 @@ describe("rich inline content contract", () => {
   });
 
   it("slices, concatenates, appends, and sizes hard breaks and inline atoms exactly", () => {
-    const content = {
+    const content: RichTextDocumentNodeJson = {
       type: "doc",
       content: [
         {
@@ -287,7 +287,7 @@ describe("rich inline content contract", () => {
           ],
         },
       ],
-    } satisfies RichTextDocumentNodeJson;
+    };
 
     expect(richTextBlockInlineContent(content)).toStrictEqual([
       { type: "text", text: "A" },

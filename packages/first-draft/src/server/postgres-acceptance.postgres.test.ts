@@ -13,8 +13,20 @@ import {
   writeCanonicalYjsBlockContent,
   YDoc,
 } from "@repo/editor-yjs";
+import {
+  createYjsBlockContentRuntime,
+  type YjsBlockContentRuntime,
+} from "@repo/editor-yjs-dom";
 import { Pool } from "pg";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { initializeTestEditableEditor as initializeEditableEditor } from "../test-editor.ts";
 import { createFirstDraftViewStateStore } from "../blocks/view-state.tsx";
 import { createFirstDraftEditorDefinition } from "../first-draft-definition.tsx";
@@ -92,8 +104,6 @@ describe.skipIf(postgresUrl === null)(
         "40000000-0000-4000-8000-000000000001",
         blockA,
         { owner: "Ada" },
-        90,
-        91,
       );
 
       const result = await accept(persistence, documentA, transaction);
@@ -548,9 +558,9 @@ describe.skipIf(postgresUrl === null)(
       });
       const loaded = await persistence.loadBootstrap(documentA);
       if (!loaded.ok) throw new Error(loaded.message);
-      expect(firstDraftBootstrapSnapshot(loaded.bootstrap).content[blockA]).toEqual(
-        projection,
-      );
+      expect(
+        firstDraftBootstrapSnapshot(loaded.bootstrap).content[blockA],
+      ).toEqual(projection);
 
       const redo = {
         ...graphTransaction("40000000-0000-4000-8000-000000000046", {
@@ -667,8 +677,9 @@ describe.skipIf(postgresUrl === null)(
       const seededSnapshot = firstDraftBootstrapSnapshot(seeded.bootstrap);
       const headingEntry = Object.entries(seededSnapshot.content).find(
         ([, content]) =>
+          content !== undefined &&
           extractPlainTextFromRichTextDocument(content) ===
-          "Northstar Editor: private beta brief",
+            "Northstar Editor: private beta brief",
       );
       if (!headingEntry) throw new Error("Seeded heading is unavailable");
       const headingBlockId = asBlockId(headingEntry[0]);
@@ -754,11 +765,13 @@ describe.skipIf(postgresUrl === null)(
       ).toBe("TPASTEDNorthstar Editor: private beta brief");
       expect(
         extractPlainTextFromRichTextDocument(
-          readYjsProjection(
-            headingBlockId,
-            Buffer.from(
-              stored.rows[0]?.content_checkpoint_base64 as string,
-              "base64",
+          requireRichTextDocument(
+            readYjsProjection(
+              headingBlockId,
+              Buffer.from(
+                stored.rows[0]?.content_checkpoint_base64 as string,
+                "base64",
+              ),
             ),
           ),
         ),
@@ -788,45 +801,61 @@ describe.skipIf(postgresUrl === null)(
         const seededSnapshot = firstDraftBootstrapSnapshot(seeded.bootstrap);
         const headingEntry = Object.entries(seededSnapshot.content).find(
           ([, content]) =>
+            content !== undefined &&
             extractPlainTextFromRichTextDocument(content) ===
-            "Northstar Editor: private beta brief",
+              "Northstar Editor: private beta brief",
         );
         if (!headingEntry) throw new Error("Seeded heading is unavailable");
         const headingBlockId = asBlockId(headingEntry[0]);
         const framesA: ArrayBuffer[] = [];
         const framesB: ArrayBuffer[] = [];
-        const definition = () =>
-          createFirstDraftEditorDefinition(createFirstDraftViewStateStore());
+        let runtimeA: YjsBlockContentRuntime | null = null;
+        let runtimeB: YjsBlockContentRuntime | null = null;
+        const definition = (
+          capture: (runtime: YjsBlockContentRuntime) => void,
+        ) => {
+          const base = createFirstDraftEditorDefinition(
+            createFirstDraftViewStateStore(),
+          );
+          return {
+            ...base,
+            content: {
+              createRuntime(source) {
+                const runtime = createYjsBlockContentRuntime(source);
+                capture(runtime);
+                return runtime;
+              },
+            },
+          } satisfies typeof base;
+        };
         const editorA = initializeEditableEditor({
-          definition: definition(),
+          definition: definition((runtime) => {
+            runtimeA = runtime;
+          }),
           snapshot: seededSnapshot,
           onChange: handleTransaction({
             readyState: 1,
             send: (frame) => framesA.push(frame.slice(0)),
           }),
-          createTransactionId: () =>
-            "40000000-0000-4000-8000-000000000062",
+          createTransactionId: () => "40000000-0000-4000-8000-000000000062",
         });
         const editorB = initializeEditableEditor({
-          definition: definition(),
+          definition: definition((runtime) => {
+            runtimeB = runtime;
+          }),
           snapshot: seededSnapshot,
           onChange: handleTransaction({
             readyState: 1,
             send: (frame) => framesB.push(frame.slice(0)),
           }),
-          createTransactionId: () =>
-            "40000000-0000-4000-8000-000000000063",
+          createTransactionId: () => "40000000-0000-4000-8000-000000000063",
         });
-        const editingLeaseA = editorA.contentRuntime.acquireBlockContent(
-          headingBlockId,
-          "heading",
-          "active-editing",
-        );
-        const editingLeaseB = editorB.contentRuntime.acquireBlockContent(
-          headingBlockId,
-          "heading",
-          "active-editing",
-        );
+        const editingLeaseA = requireContentRuntime(
+          runtimeA,
+        ).acquireBlockContent(headingBlockId, "heading", "active-editing");
+        const editingLeaseB = requireContentRuntime(
+          runtimeB,
+        ).acquireBlockContent(headingBlockId, "heading", "active-editing");
         expect(
           editorA.insertText({ blockId: headingBlockId, offset: 0, text: "A" }),
         ).toBe(true);
@@ -851,13 +880,10 @@ describe.skipIf(postgresUrl === null)(
         if (appliedToB.status === "rejected") {
           throw new Error(`${appliedToB.reason}: ${appliedToB.message}`);
         }
-        const converged = editorA.readBlockPlainText(
-          headingBlockId,
-          "heading",
+        const converged = editorA.readBlockPlainText(headingBlockId, "heading");
+        expect(editorB.readBlockPlainText(headingBlockId, "heading")).toBe(
+          converged,
         );
-        expect(
-          editorB.readBlockPlainText(headingBlockId, "heading"),
-        ).toBe(converged);
         expect(framesA).toHaveLength(1);
         expect(framesB).toHaveLength(1);
         editingLeaseA.release();
@@ -869,14 +895,18 @@ describe.skipIf(postgresUrl === null)(
           receiveOrder === "A-then-B"
             ? [transactionA, transactionB]
             : [transactionB, transactionA];
-        expect(await accept(persistence, documentA, ordered[0]!)).toMatchObject({
-          ok: true,
-          accepted: { baseRevision: 0, revision: 1 },
-        });
-        expect(await accept(persistence, documentA, ordered[1]!)).toMatchObject({
-          ok: true,
-          accepted: { baseRevision: 1, revision: 2 },
-        });
+        expect(await accept(persistence, documentA, ordered[0]!)).toMatchObject(
+          {
+            ok: true,
+            accepted: { baseRevision: 0, revision: 1 },
+          },
+        );
+        expect(await accept(persistence, documentA, ordered[1]!)).toMatchObject(
+          {
+            ok: true,
+            accepted: { baseRevision: 1, revision: 2 },
+          },
+        );
 
         const stored = await pool.query(
           `SELECT read_projection_json, content_checkpoint_base64
@@ -900,7 +930,9 @@ describe.skipIf(postgresUrl === null)(
         );
         const reloaded = await persistence.loadBootstrap(documentA);
         if (!reloaded.ok) throw new Error(reloaded.message);
-        const reloadedSnapshot = firstDraftBootstrapSnapshot(reloaded.bootstrap);
+        const reloadedSnapshot = firstDraftBootstrapSnapshot(
+          reloaded.bootstrap,
+        );
         expect(
           extractPlainTextFromRichTextDocument(
             reloadedSnapshot.content[headingBlockId]!,
@@ -930,12 +962,12 @@ describe.skipIf(postgresUrl === null)(
       expect(snapshot.content[blockA]).toEqual(projection);
       const checkpoint = snapshot.opaqueContentCheckpoints[blockA];
       expect(checkpoint).toBeDefined();
-      expect(readYjsProjection(
-        blockA,
-        Buffer.from(checkpoint!.payloadBase64, "base64"),
-      )).toEqual(
-        projection,
-      );
+      expect(
+        readYjsProjection(
+          blockA,
+          Buffer.from(checkpoint!.payloadBase64, "base64"),
+        ),
+      ).toEqual(projection);
     });
 
     it("diagnoses an incomplete public schema without repairing it", async () => {
@@ -1077,6 +1109,20 @@ function richText(text: string): RichTextDocumentNodeJson {
     type: "doc",
     content: [{ type: "paragraph", content: [{ type: "text", text }] }],
   };
+}
+
+function requireRichTextDocument(
+  value: RichTextDocumentNodeJson | null | undefined,
+): RichTextDocumentNodeJson {
+  if (!value) throw new Error("Expected a rich-text document");
+  return value;
+}
+
+function requireContentRuntime(
+  value: YjsBlockContentRuntime | null,
+): YjsBlockContentRuntime {
+  if (!value) throw new Error("Expected a Yjs content runtime");
+  return value;
 }
 
 function createYjsChange(

@@ -1,6 +1,4 @@
-export {
-  blockTextCoordinateCodec,
-} from "../caret/coordinates/block-text-coordinate-codec.ts";
+export { blockTextCoordinateCodec } from "../caret/coordinates/block-text-coordinate-codec.ts";
 export {
   canonicalOffsetToProseMirrorDocumentPosition,
   proseMirrorDocumentPositionToCanonicalOffset,

@@ -5,8 +5,8 @@ import { createBlockRichTextContentFromPlainText } from "@repo/editor-core/conte
 import type { EditorInstanceSnapshot } from "@repo/editor-core/codecs";
 import { createBlockRecord } from "@repo/editor-core/metadata";
 import { useTestEditor as useEditor } from "../tests/test-editor-initializers.ts";
-import type { Editor } from "../runtime/document/contracts.ts";
-import type { EditableEditorDefinition } from "../runtime/document/contracts.ts";
+import type { EditableEditor, Editor } from "../runtime/document/contracts.ts";
+import type { EditableEditorDefinition } from "../runtime/definition/contracts.ts";
 import {
   addEditorBlockOperations,
   type EditorBlockOperations,
@@ -30,7 +30,7 @@ function createEditor(onChange?: (transaction: unknown) => void) {
   });
 }
 
-function extend(editor: Editor): EditorWithBlockOperations {
+function extend(editor: EditableEditor): EditorWithBlockOperations {
   return addEditorBlockOperations(editor);
 }
 
@@ -381,7 +381,10 @@ describe("block-operation editor extension", () => {
     expect(
       editor.replaceBlock({ blockId: itemId, blockType: "targetItem" }),
     ).toMatchObject({ ok: true });
-    expect(editor.getBlock(listId)).toMatchObject({ id: listId, type: "targetList" });
+    expect(editor.getBlock(listId)).toMatchObject({
+      id: listId,
+      type: "targetList",
+    });
     expect(editor.getBlock(itemId)).toMatchObject({
       id: itemId,
       type: "targetItem",

@@ -7,5 +7,7 @@ export function validateAllowedKeys(
   return Object.keys(value)
     .filter((key) => !allowed.has(key))
     .sort()
-    .map((key) => label ? `${label}.${key} is not supported` : `${key} is not supported`);
+    .map((key) =>
+      label ? `${label}.${key} is not supported` : `${key} is not supported`,
+    );
 }

@@ -11,7 +11,7 @@ import {
   type CanonicalBlockFragment,
   type StructuralEditRange,
 } from "@repo/editor-core/editing";
-import type { BlockId } from "@repo/editor-core/kernel";
+import { asContentVersion, type BlockId } from "@repo/editor-core/kernel";
 import type { VersionedBlock } from "@repo/editor-core/document";
 import { resolveCanonicalEditComposition } from "./canonical-edit-composition.ts";
 import { executeCanonicalBlockFragmentInsertion } from "./canonical-insertion.ts";
@@ -407,7 +407,7 @@ describe("canonical structural edit composition", () => {
 
   it("uses rich-text content size for a pasted endpoint containing an inline atom", () => {
     const graph = graphWithText("LR");
-    const richContent = {
+    const richContent: RichTextDocumentNodeJson = {
       type: "doc",
       content: [
         {
@@ -419,7 +419,7 @@ describe("canonical structural edit composition", () => {
           ],
         },
       ],
-    } satisfies RichTextDocumentNodeJson;
+    };
     const fragment = twoTextBlockFragment("one", richContent);
     const trailingId = fragment.end.blockId;
     const trailing = fragment.blocks.find((block) => block.id === trailingId);
@@ -465,7 +465,10 @@ describe("canonical structural edit composition", () => {
       blockId: endpointId,
       offset: 6,
     });
-    expect(result?.finalSelection?.blockId).not.toBe(wrapperId);
+    if (result?.finalSelection?.kind !== "text") {
+      throw new Error("expected a text selection effect");
+    }
+    expect(result.finalSelection.blockId).not.toBe(wrapperId);
     expect(
       result?.insertions?.[0]?.fragment.blocks.some(
         (block) => block.id === endpointId && block.type === "collectionText",
@@ -534,32 +537,36 @@ describe("canonical structural edit composition", () => {
     };
     const graph = graphWithText("LR");
     const fragment = textFragment("I", "text");
-    executeStructuralEditComposition(editor, {
-      deletion: {
-        graphRevision: 7,
-        selectionRevision: 1,
-        blocks: [],
-        start: { kind: "block", blockId: graph.block.id },
-        end: { kind: "block", blockId: graph.block.id },
-      },
-      insertions: [
-        {
-          placement: { parentId: null, childIndex: 1 },
-          fragment,
+    executeStructuralEditComposition(
+      editor,
+      {
+        deletion: {
+          graphRevision: 7,
+          selectionRevision: 1,
+          blocks: [],
+          start: { kind: "block", blockId: graph.block.id },
+          end: { kind: "block", blockId: graph.block.id },
         },
-      ],
-      joins: [
-        {
-          leftBlockId: graph.block.id,
-          rightBlockId: fragment.start.blockId,
+        insertions: [
+          {
+            placement: { parentId: null, childIndex: 1 },
+            fragment,
+          },
+        ],
+        joins: [
+          {
+            leftBlockId: graph.block.id,
+            rightBlockId: fragment.start.blockId,
+          },
+        ],
+        finalSelection: {
+          kind: "text",
+          blockId: graph.block.id,
+          offset: 1,
         },
-      ],
-      finalSelection: {
-        kind: "text",
-        blockId: graph.block.id,
-        offset: 1,
       },
-    }, { provenance: null });
+      { provenance: null },
+    );
     expect(order).toEqual([
       "transaction",
       "deleteRange",
@@ -603,8 +610,8 @@ function graphWithText(text: string) {
   const block: VersionedBlock = {
     ...record,
     metadataVersion: "1",
-    contentVersion: "1",
-    tombstone: false,
+    contentVersion: asContentVersion("1"),
+    tombstone: null,
   };
   const graph = {
     blockDefinitions: definitions,
@@ -641,19 +648,19 @@ function graphWithCollectionText(text: string) {
     ...collectionRecord,
     metadataVersion: "1",
     contentVersion: null,
-    tombstone: false,
+    tombstone: null,
   };
   const group: VersionedBlock = {
     ...groupRecord,
     metadataVersion: "1",
     contentVersion: null,
-    tombstone: false,
+    tombstone: null,
   };
   const block: VersionedBlock = {
     ...textRecord,
     metadataVersion: "1",
-    contentVersion: "1",
-    tombstone: false,
+    contentVersion: asContentVersion("1"),
+    tombstone: null,
   };
   const blocks = new Map([
     [collection.id, collection],
@@ -690,8 +697,8 @@ function graphWithTexts(texts: readonly string[]) {
       plainText: text,
     }),
     metadataVersion: "1",
-    contentVersion: "1",
-    tombstone: false,
+    contentVersion: asContentVersion("1"),
+    tombstone: null,
   }));
   const blockById = new Map(blocks.map((block) => [block.id, block]));
   const contentById = new Map(

@@ -8,6 +8,7 @@ import {
 import {
   executeStructuralEditComposition,
   resolveCanonicalEditComposition,
+  type CanonicalEditCompositionGraph,
 } from "@repo/editor-react/editor";
 import type { EditorSemanticChange } from "@repo/editor-web/editor";
 import { addEditorBlockOperations } from "@repo/editor-web/block-operations";
@@ -26,6 +27,7 @@ import {
   decodeFirstDraftMessage,
   encodeFirstDraftMessage,
   MAX_FIRST_DRAFT_FRAME_BYTES,
+  type FirstDraftMessage,
 } from "./message-protocol.ts";
 import {
   hasSeenLiveTransaction,
@@ -37,7 +39,10 @@ import {
   attachFirstDraftRemoteTransactions,
   type FirstDraftRemoteTransactionSocket,
 } from "./remote-transaction-client.ts";
-import { attachFirstDraftPresence } from "./presence-client.ts";
+import {
+  attachFirstDraftPresence,
+  type FirstDraftPresenceEditor,
+} from "./presence-client.ts";
 import { createFirstDraftMessageDispatcher } from "./collaboration-connection.ts";
 import { createFirstDraftFinalizedCommitObserver } from "./finalized-commit-observer.ts";
 
@@ -328,8 +333,16 @@ describe("First Draft transaction conversion", () => {
       end: { kind: "text", blockId: second.id },
       blockDefinitions: createDefinition().blocks,
     });
+    const compositionGraph: CanonicalEditCompositionGraph = {
+      blockDefinitions: editor.definition.blocks,
+      getBlock: (blockId) => editor.getBlock(blockId),
+      getRootBlockIds: () => editor.getRootBlockIds(),
+      getChildBlockIds: (blockId) => editor.getChildBlockIds(blockId),
+      readBlockContent: (blockId, blockType) =>
+        editor.readBlockContent(blockId, blockType),
+    };
     const composition = resolveCanonicalEditComposition({
-      graph: editor,
+      graph: compositionGraph,
       target: {
         kind: "caret",
         blockId: enterBlockId!,
@@ -557,19 +570,18 @@ describe("First Draft binary message protocol", () => {
     const decoded = decodeFirstDraftMessage(frame);
     expect(decoded.ok).toBe(true);
     if (!decoded.ok) throw new Error(decoded.error);
-    expect(decoded.message.transaction).toEqual(transaction);
+    const decodedTransaction = requireProposedMessage(
+      decoded.message,
+    ).transaction;
+    expect(decodedTransaction).toEqual(transaction);
     expect(
-      decoded.message.transaction.content[0]!.update.payload.equals(
+      decodedTransaction.content[0]!.update.payload.equals(
         transaction.content[0]!.update.payload,
       ),
     ).toBe(true);
-    Reflect.set(
-      decoded.message.transaction.content[0]!.update.payload,
-      "0",
-      255,
-    );
+    Reflect.set(decodedTransaction.content[0]!.update.payload, "0", 255);
     expect(
-      decoded.message.transaction.content[0]!.update.payload.equals(
+      decodedTransaction.content[0]!.update.payload.equals(
         transaction.content[0]!.update.payload,
       ),
     ).toBe(true);
@@ -602,9 +614,11 @@ describe("First Draft binary message protocol", () => {
   it("rejects bad magic, bad version, malformed metadata, and oversized frames", () => {
     const frame = createContentFrame();
     const badMagic = frame.slice(0);
-    new Uint8Array(badMagic)[0] ^= 0xff;
+    const badMagicBytes = new Uint8Array(badMagic);
+    badMagicBytes[0] = badMagicBytes[0]! ^ 0xff;
     const badVersion = frame.slice(0);
-    new Uint8Array(badVersion)[3] ^= 0xff;
+    const badVersionBytes = new Uint8Array(badVersion);
+    badVersionBytes[3] = badVersionBytes[3]! ^ 0xff;
 
     expect(decodeFirstDraftMessage(badMagic).ok).toBe(false);
     expect(decodeFirstDraftMessage(badVersion).ok).toBe(false);
@@ -830,7 +844,7 @@ describe("handleTransaction", () => {
     const messages = frames.map((frame) => {
       const decoded = decodeFirstDraftMessage(frame);
       if (!decoded.ok) throw new Error(decoded.error);
-      return decoded.message.transaction;
+      return requireProposedMessage(decoded.message).transaction;
     });
     expect(messages.map(({ historyAction }) => historyAction)).toEqual([
       "command",
@@ -1141,7 +1155,7 @@ describe("First Draft ephemeral presence", () => {
         revision: 0,
       }),
     );
-    const setSelections = vi.fn();
+    const setSelections = vi.fn<FirstDraftPresenceEditor["setSelections"]>();
     const dispose = attachFirstDraftPresence(
       connection,
       presenceEditor(setSelections),
@@ -1203,13 +1217,13 @@ describe("First Draft ephemeral presence", () => {
     const socket = new TestSocket();
     const connection = createFirstDraftMessageDispatcher(socket);
     let localListener: (() => void) | null = null;
-    const setSelections = vi.fn();
+    const setSelections = vi.fn<FirstDraftPresenceEditor["setSelections"]>();
     const onParticipants = vi.fn();
     const dispose = attachFirstDraftPresence(
       connection,
       {
         selection: {
-          getSnapshot: () => ({ kind: "none" as const }),
+          getSnapshot: () => ({ kind: "none" as const, revision: 0 }),
         },
         subscribeStandaloneSelectionSettlements(listener) {
           localListener = () => listener({ kind: "none" });
@@ -1226,18 +1240,12 @@ describe("First Draft ephemeral presence", () => {
       },
       { onParticipants },
     );
-    expect(
-      socket.frames.map(
-        (frame) =>
-          decodeFirstDraftMessage(frame).ok &&
-          decodeFirstDraftMessage(frame).message.type,
-      ),
-    ).toEqual([
+    expect(socket.frames.map((frame) => decodedMessageType(frame))).toEqual([
       "first-draft-participant-update",
       "first-draft-selection-update",
     ]);
     const framesBeforeSettlement = socket.frames.length;
-    localListener?.();
+    invokeListener(localListener);
     expect(socket.frames).toHaveLength(framesBeforeSettlement + 1);
     expect(decodeFirstDraftMessage(socket.frames.at(-1)!)).toMatchObject({
       ok: true,
@@ -1460,7 +1468,9 @@ function createTestEditor() {
   const editor = initializeEditableEditor({
     definition: createDefinition(),
     snapshot: createFirstDraftSnapshot(),
-    onChange: (change) => changes.push(change),
+    onChange: (change) => {
+      changes.push(change);
+    },
     createTransactionId: sequentialIds("converter"),
   });
   return { editor, changes };
@@ -1505,6 +1515,29 @@ function replaceAscii(
   if (index < 0) throw new Error(`Missing frame text ${before}`);
   bytes.set(replacement, index);
   return copy;
+}
+
+function requireProposedMessage(
+  message: FirstDraftMessage,
+): Extract<
+  FirstDraftMessage,
+  { readonly type: "proposed-editor-transaction" }
+> {
+  if (message.type !== "proposed-editor-transaction") {
+    throw new Error("Expected a proposed editor transaction message");
+  }
+  return message;
+}
+
+function decodedMessageType(frame: ArrayBuffer): FirstDraftMessage["type"] {
+  const decoded = decodeFirstDraftMessage(frame);
+  if (!decoded.ok) throw new Error(decoded.error);
+  return decoded.message.type;
+}
+
+function invokeListener(listener: (() => void) | null): void {
+  if (!listener) throw new Error("Expected a registered listener");
+  listener();
 }
 
 function addMetadataProperty(
@@ -1592,10 +1625,12 @@ class TestSocket
   }
 }
 
-function presenceEditor(setSelections: ReturnType<typeof vi.fn>) {
+function presenceEditor(
+  setSelections: FirstDraftPresenceEditor["setSelections"],
+): FirstDraftPresenceEditor {
   return {
     selection: {
-      getSnapshot: () => ({ kind: "none" as const }),
+      getSnapshot: () => ({ kind: "none" as const, revision: 0 }),
     },
     subscribeStandaloneSelectionSettlements: () => () => undefined,
     setSelections,

@@ -1,0 +1,36 @@
+# Dependencies and package-manager state
+**/node_modules
+.pnpm-store
+pnpm-lock.yaml
+
+# Generated build and framework output
+**/dist
+**/build
+**/out
+**/.next
+**/.turbo
+**/.vercel
+**/.output
+**/*.tsbuildinfo
+**/next-env.d.ts
+
+# Test, coverage, and tool artifacts
+**/coverage
+**/test-results
+**/playwright-report
+**/blob-report
+**/.nyc_output
+**/artifacts
+**/.cache
+
+# Local runtime state
+**/logs
+**/*.log
+**/.env
+**/.env.*
+**/postgres-data
+**/pgdata
+**/*.db
+**/*.db-*
+**/*.sqlite
+**/*.sqlite-*

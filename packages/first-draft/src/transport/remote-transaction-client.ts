@@ -1,4 +1,7 @@
-import type { RemoteEditorTransaction, RemoteTransactionResult } from "@repo/editor-web/editor";
+import type {
+  RemoteEditorTransaction,
+  RemoteTransactionResult,
+} from "@repo/editor-web/editor";
 import {
   forgetLiveTransaction,
   hasSeenLiveTransaction,
@@ -64,7 +67,8 @@ export function attachFirstDraftRemoteTransactions(
     }
     if (message.type === "editor-transaction-accepted") {
       if (
-        (options.documentId !== undefined && message.documentId !== options.documentId) ||
+        (options.documentId !== undefined &&
+          message.documentId !== options.documentId) ||
         message.baseRevision !== revision ||
         message.revision !== revision + 1
       ) {
@@ -88,11 +92,14 @@ export function attachFirstDraftRemoteTransactions(
         return;
       }
       if (
-        (options.documentId !== undefined && message.documentId !== options.documentId) ||
+        (options.documentId !== undefined &&
+          message.documentId !== options.documentId) ||
         message.baseRevision !== revision ||
         message.revision !== revision + 1
       ) {
-        report("Accepted First Draft transaction replay is missing or non-contiguous");
+        report(
+          "Accepted First Draft transaction replay is missing or non-contiguous",
+        );
         return;
       }
       const transaction = message.transaction;
@@ -104,7 +111,9 @@ export function attachFirstDraftRemoteTransactions(
         });
         if (result.status === "rejected") {
           forgetLiveTransaction(socket, transaction.transactionId);
-          report(`Accepted remote editor transaction was rejected: ${result.message}`);
+          report(
+            `Accepted remote editor transaction was rejected: ${result.message}`,
+          );
           return;
         }
         options.onApplied?.(result);

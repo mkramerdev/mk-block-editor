@@ -1,6 +1,7 @@
 "use client";
 
-import { Component, type ReactNode } from "react";import type { BlockId } from "@repo/editor-core/kernel";
+import { Component, type ReactNode } from "react";
+import type { BlockId } from "@repo/editor-core/kernel";
 
 export interface BlockErrorBoundaryProps {
   blockId: BlockId;
@@ -11,7 +12,10 @@ interface BlockErrorBoundaryState {
   failed: boolean;
 }
 
-export class BlockErrorBoundary extends Component<BlockErrorBoundaryProps, BlockErrorBoundaryState> {
+export class BlockErrorBoundary extends Component<
+  BlockErrorBoundaryProps,
+  BlockErrorBoundaryState
+> {
   state: BlockErrorBoundaryState = { failed: false };
 
   static getDerivedStateFromError(): BlockErrorBoundaryState {
@@ -25,7 +29,11 @@ export class BlockErrorBoundary extends Component<BlockErrorBoundaryProps, Block
   render() {
     if (this.state.failed) {
       return (
-        <div className="editor-web-error" role="alert" data-editor-error-block={this.props.blockId}>
+        <div
+          className="editor-web-error"
+          role="alert"
+          data-editor-error-block={this.props.blockId}
+        >
           Block unavailable
         </div>
       );

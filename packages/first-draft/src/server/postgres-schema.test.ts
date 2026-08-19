@@ -30,9 +30,7 @@ describe("the canonical First Draft PostgreSQL schema", () => {
   });
 
   it("is the schema source used by development, acceptance, and browser setup", () => {
-    const firstDraftPackage = source(
-      "packages/first-draft/package.json",
-    );
+    const firstDraftPackage = source("packages/first-draft/package.json");
     const realtimePackage = source("services/editor-realtime/package.json");
     const seed = source(
       "packages/first-draft/scripts/seed-postgres-example.ts",

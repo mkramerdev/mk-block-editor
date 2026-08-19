@@ -20,8 +20,7 @@ const versionedBlockFieldNames = new Set([
   "metadata",
 ]);
 
-export interface BlockGraphMutationResult
-  extends OrderedBlockGraph<VersionedBlock> {
+export interface BlockGraphMutationResult extends OrderedBlockGraph<VersionedBlock> {
   readonly patch: BlockGraphPatch;
   readonly contentOperations: readonly EditorBlockContentOperationBatch[];
 }

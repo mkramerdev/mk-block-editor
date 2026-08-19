@@ -28,7 +28,10 @@ export function createEditorContentRuntimeResources(input: {
       inlineMarks: definition.inlineMarks,
       inlineAtoms: definitions,
     }),
-    inlineNodeViews: createInlineAtomNodeViews(definitions, input.inlineAtomPortals),
+    inlineNodeViews: createInlineAtomNodeViews(
+      definitions,
+      input.inlineAtomPortals,
+    ),
     inlineAtomPortals: input.inlineAtomPortals,
   });
 }

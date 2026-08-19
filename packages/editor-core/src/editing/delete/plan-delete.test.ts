@@ -8,23 +8,31 @@ import type { BlockDefinition } from "../../definitions/block-definition.ts";
 import type { BlockType, VersionedBlock } from "../../document/model/block.ts";
 import type { BlockId } from "../../kernel/identity/ids.ts";
 import { asBlockId } from "../../kernel/identity/uuid.ts";
+import { asContentVersion } from "../../kernel/versioning/versions.ts";
 import { applyStructuralTransaction } from "../transactions/apply.ts";
 import type { TransactionReadableContent } from "../transactions/types.ts";
 import { planBlockBoundaryDelete } from "./plan-delete.ts";
 
 const renderer = () => null;
 const definitions: Readonly<Record<BlockType, BlockDefinition>> = {
-  text: { kind: "text", type: "text", renderer },
-  otherText: { kind: "text", type: "otherText", renderer },
-  atom: { kind: "atomic", type: "atom", renderer },
+  text: { kind: "text", rootLayout: "normal", type: "text", renderer },
+  otherText: {
+    kind: "text",
+    rootLayout: "normal",
+    type: "otherText",
+    renderer,
+  },
+  atom: { kind: "atomic", rootLayout: "normal", type: "atom", renderer },
   placeholder: {
     kind: "atomic",
+    rootLayout: "normal",
     type: "placeholder",
     renderer,
     replaceWith: "text",
   },
   shell: {
     kind: "wrapper",
+    rootLayout: "normal",
     type: "shell",
     renderer,
     content: { required: ["text"] },
@@ -32,6 +40,7 @@ const definitions: Readonly<Record<BlockType, BlockDefinition>> = {
   },
   body: {
     kind: "wrapper",
+    rootLayout: "normal",
     type: "body",
     renderer,
     content: { required: ["block"], additional: "block" },
@@ -40,6 +49,7 @@ const definitions: Readonly<Record<BlockType, BlockDefinition>> = {
   },
   compound: {
     kind: "wrapper",
+    rootLayout: "normal",
     type: "compound",
     renderer,
     content: { required: ["text", "body"] },
@@ -75,7 +85,10 @@ describe("block-boundary forward Delete planning", () => {
           operations: [
             {
               kind: "insertInlineContent",
-              position: { blockId: left.id, offset: Array.from(leftText).length },
+              position: {
+                blockId: left.id,
+                offset: Array.from(leftText).length,
+              },
               content:
                 rightText.length === 0
                   ? []
@@ -113,7 +126,9 @@ describe("block-boundary forward Delete planning", () => {
     expect(result.transaction.stagedContent[left.id]).toBeUndefined();
     expect(result.transaction.contentOperations[0]).toMatchObject({
       blockId: left.id,
-      operations: [{ kind: "insertInlineContent", content: [{ text: "right" }] }],
+      operations: [
+        { kind: "insertInlineContent", content: [{ text: "right" }] },
+      ],
     });
   });
 
@@ -159,7 +174,9 @@ describe("block-boundary forward Delete planning", () => {
     expect(result.transaction.stagedContent[left.id]).toBeUndefined();
     expect(result.transaction.contentOperations[0]).toMatchObject({
       blockId: left.id,
-      operations: [{ kind: "insertInlineContent", content: [{ text: "title" }] }],
+      operations: [
+        { kind: "insertInlineContent", content: [{ text: "title" }] },
+      ],
     });
   });
 
@@ -183,7 +200,10 @@ describe("block-boundary forward Delete planning", () => {
     });
     expect(planned.ok && planned.handled).toBe(true);
     if (!planned.ok || !planned.handled) return;
-    const changedRight = { ...right, contentVersion: "2" };
+    const changedRight = {
+      ...right,
+      contentVersion: asContentVersion("2"),
+    };
     expect(
       applyStructuralTransaction(
         planned.plan,

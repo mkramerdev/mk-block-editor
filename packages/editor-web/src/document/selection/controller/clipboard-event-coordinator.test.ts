@@ -1,17 +1,35 @@
-import { describe, expect, it, vi } from "vitest";
-import type { CanonicalBlockFragment } from "@repo/editor-core/editing";
+import { describe, expect, it, vi, type Mock } from "vitest";
+import type {
+  CanonicalBlockFragment,
+  StructuralEditRange,
+} from "@repo/editor-core/editing";
+import { asBlockId } from "@repo/editor-core/kernel";
 import type {
   CommittedSelectionSnapshot,
   EditorSelectionSnapshot,
 } from "@repo/editor-react/selection";
-import { createEditorClipboardEventHandlers } from "./clipboard-event-coordinator.ts";
-import type {
-  CapturedStructuralSelection,
-} from "./browser-selection-types.ts";
+import {
+  createEditorClipboardEventHandlers,
+  type EditorClipboardEventContext,
+} from "./clipboard-event-coordinator.ts";
+import type { CapturedStructuralSelection } from "./browser-selection-types.ts";
 
 const selection = {} as CommittedSelectionSnapshot;
 const snapshot = {} as EditorSelectionSnapshot;
 const fragment = {} as CanonicalBlockFragment;
+const range: StructuralEditRange = {
+  graphRevision: 1,
+  selectionRevision: 1,
+  blocks: [],
+  start: {
+    kind: "block",
+    blockId: asBlockId("01890f07-1c00-7000-8000-000000000902"),
+  },
+  end: {
+    kind: "block",
+    blockId: asBlockId("01890f07-1c00-7000-8000-000000000902"),
+  },
+};
 
 describe("browser clipboard event coordination", () => {
   it("copies read-only and claims the event only after writing succeeds", () => {
@@ -127,7 +145,7 @@ describe("browser clipboard event coordination", () => {
         return {
           captured: selection,
           snapshot,
-          range: "range" as CapturedStructuralSelection["range"],
+          range,
           graphRevision: 1,
           isCurrent: () => true,
         };
@@ -191,7 +209,6 @@ describe("browser clipboard event coordination", () => {
     expect(unreadable.options.executePaste).not.toHaveBeenCalled();
     expect(unowned.options.boundary.readClipboardBlocks).not.toHaveBeenCalled();
   });
-
 });
 
 function coordinator(
@@ -203,13 +220,25 @@ function coordinator(
           readonly selection: CommittedSelectionSnapshot;
         };
     readonly selectionIsCurrent?: boolean;
-    readonly writeSelection?: ReturnType<typeof vi.fn>;
-    readonly readClipboardBlocks?: ReturnType<typeof vi.fn>;
-    readonly captureSelectionSnapshot?: ReturnType<typeof vi.fn>;
-    readonly captureSelection?: ReturnType<typeof vi.fn>;
-    readonly captureCutSelection?: ReturnType<typeof vi.fn>;
-    readonly executeCut?: ReturnType<typeof vi.fn>;
-    readonly executePaste?: ReturnType<typeof vi.fn>;
+    readonly writeSelection?: Mock<
+      EditorClipboardEventContext["boundary"]["writeSelection"]
+    >;
+    readonly readClipboardBlocks?: Mock<
+      EditorClipboardEventContext["boundary"]["readClipboardBlocks"]
+    >;
+    readonly captureSelectionSnapshot?: Mock<
+      EditorClipboardEventContext["ownership"]["captureSelectionSnapshot"]
+    >;
+    readonly captureSelection?: Mock<
+      EditorClipboardEventContext["ownership"]["captureSelection"]
+    >;
+    readonly captureCutSelection?: Mock<
+      EditorClipboardEventContext["ownership"]["captureCutSelection"]
+    >;
+    readonly executeCut?: Mock<EditorClipboardEventContext["commands"]["cut"]>;
+    readonly executePaste?: Mock<
+      EditorClipboardEventContext["commands"]["paste"]
+    >;
   } = {},
 ) {
   const boundary = {
@@ -231,7 +260,7 @@ function coordinator(
       (): CapturedStructuralSelection => ({
         captured: selection,
         snapshot,
-        range: "range" as CapturedStructuralSelection["range"],
+        range,
         graphRevision: 1,
         isCurrent: () => overrides.selectionIsCurrent ?? true,
       }),
@@ -239,7 +268,7 @@ function coordinator(
   const captureCutSelection =
     overrides.captureCutSelection ??
     vi.fn(() => {
-      const captured = captureSelection();
+      const captured = captureSelection({ kind: "selection", selection });
       return captured ? { kind: "structural" as const, ...captured } : null;
     });
   const executeCut =

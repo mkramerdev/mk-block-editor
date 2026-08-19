@@ -39,9 +39,7 @@ export function compileEditorInlineAtoms(
       const field = atom.metadata[name]!;
       metadata[name] = Object.freeze({
         type: field.type,
-        ...(field.required === undefined
-          ? {}
-          : { required: field.required }),
+        ...(field.required === undefined ? {} : { required: field.required }),
       });
     }
     definitions.set(

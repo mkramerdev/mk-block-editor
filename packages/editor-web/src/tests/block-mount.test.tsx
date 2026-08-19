@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { StrictMode } from "react";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import type { BlockId } from "@repo/editor-core/kernel";
+import { asBlockId, type BlockId } from "@repo/editor-core/kernel";
 import { createBlockRecord } from "@repo/editor-core/metadata";
 import { EditorView } from "@repo/editor-dom/prosemirror";
 import { EditorDocument } from "../runtime/document/editor-document-component.tsx";
@@ -19,6 +19,7 @@ import {
   initializeTestEditableEditor,
   initializeTestReadEditor,
 } from "./test-editor-initializers.ts";
+import { createTestContentOperationUpdate } from "./editor-web-test-helpers.ts";
 
 const firstId = "shared-view-first" as BlockId;
 const secondId = "shared-view-second" as BlockId;
@@ -50,7 +51,9 @@ describe("shared document text editing runtime", () => {
       expect(textProjection(host).hidden).toBe(false);
       expect(textSlot(host).childNodes).toHaveLength(0);
     }
-    expect((editor as EditableEditorRuntimePort).readActiveTextView()).toBeNull();
+    expect(
+      (editor as EditableEditorRuntimePort).readActiveTextView(),
+    ).toBeNull();
     editor.dispose();
   });
 
@@ -83,14 +86,20 @@ describe("shared document text editing runtime", () => {
       sharedView ??= runtime.readActiveTextView();
       expect(runtime.readActiveTextView()).toBe(sharedView);
       expect(sharedView?.dom.parentElement).toBe(slots[index]);
-      expect(rendered.container.querySelectorAll(".ProseMirror")).toHaveLength(1);
+      expect(rendered.container.querySelectorAll(".ProseMirror")).toHaveLength(
+        1,
+      );
       expect(
         rendered.container.querySelectorAll('[contenteditable="true"]'),
       ).toHaveLength(1);
     }
 
-    expect(blockIds.map((id) => blockShell(rendered.container, id))).toEqual(shells);
-    expect(blockIds.map((id) => textHost(rendered.container, id))).toEqual(hosts);
+    expect(blockIds.map((id) => blockShell(rendered.container, id))).toEqual(
+      shells,
+    );
+    expect(blockIds.map((id) => textHost(rendered.container, id))).toEqual(
+      hosts,
+    );
     expect(hosts.map(textProjection)).toEqual(projections);
     expect(hosts.map(textSlot)).toEqual(slots);
     editor.dispose();
@@ -274,25 +283,29 @@ describe("shared document text editing runtime", () => {
       );
       expect(
         sharedView?.dom.querySelector("p[data-block-node='paragraph']"),
-      ).toBe(entry.type === "heading" ? null : sharedView?.dom.firstElementChild);
-      expect(textProjection(textHost(rendered.container, entry.id)).hidden).toBe(
-        true,
+      ).toBe(
+        entry.type === "heading" ? null : sharedView?.dom.firstElementChild,
       );
+      expect(
+        textProjection(textHost(rendered.container, entry.id)).hidden,
+      ).toBe(true);
       if (previousId) {
         expect(
           textProjection(textHost(rendered.container, previousId)).hidden,
         ).toBe(false);
       }
-      expect(rendered.container.querySelectorAll(".ProseMirror")).toHaveLength(1);
+      expect(rendered.container.querySelectorAll(".ProseMirror")).toHaveLength(
+        1,
+      );
       expect(
         rendered.container.querySelectorAll('[contenteditable="true"]'),
       ).toHaveLength(1);
       expect(
         rendered.container.querySelectorAll('[data-editor-input-owner="true"]'),
       ).toHaveLength(1);
-      expect(visibleTextRepresentations(textHost(rendered.container, entry.id))).toEqual([
-        sharedView?.dom,
-      ]);
+      expect(
+        visibleTextRepresentations(textHost(rendered.container, entry.id)),
+      ).toEqual([sharedView?.dom]);
       expect(sharedView?.state.doc.textContent).toBe(entry.text);
       previousId = entry.id;
     }
@@ -307,10 +320,13 @@ describe("shared document text editing runtime", () => {
       ).toBe(true);
     });
     expect(runtime.readActiveTextView()).toBe(sharedView);
-    expect(sharedView?.dom.querySelector("h3[data-block-node='heading']")?.textContent).toBe(
-      "Heading one",
-    );
-    expect(sharedView?.dom.querySelector("h1[data-block-node='heading']")).toBeNull();
+    expect(
+      sharedView?.dom.querySelector("h3[data-block-node='heading']")
+        ?.textContent,
+    ).toBe("Heading one");
+    expect(
+      sharedView?.dom.querySelector("h1[data-block-node='heading']"),
+    ).toBeNull();
     expect(rendered.container.querySelectorAll(".ProseMirror")).toHaveLength(1);
 
     editor.dispose();
@@ -318,10 +334,41 @@ describe("shared document text editing runtime", () => {
 
   it("inherits product typography identically in read and active semantic nodes", () => {
     const entries = [
-      { id: "visual-paragraph" as BlockId, type: "paragraph", text: "Body", tag: "p", size: "16px", weight: "400" },
-      { id: "visual-h1" as BlockId, type: "heading", text: "One", metadata: { level: 1 }, tag: "h1", size: "32px", weight: "750" },
-      { id: "visual-h2" as BlockId, type: "heading", text: "Two", metadata: { level: 2 }, tag: "h2", size: "24px", weight: "720" },
-      { id: "visual-h3" as BlockId, type: "heading", text: "Three", metadata: { level: 3 }, tag: "h3", size: "20px", weight: "680" },
+      {
+        id: asBlockId("visual-paragraph"),
+        type: "paragraph",
+        text: "Body",
+        tag: "p",
+        size: "16px",
+        weight: "400",
+      },
+      {
+        id: asBlockId("visual-h1"),
+        type: "heading",
+        text: "One",
+        metadata: { level: 1 },
+        tag: "h1",
+        size: "32px",
+        weight: "750",
+      },
+      {
+        id: asBlockId("visual-h2"),
+        type: "heading",
+        text: "Two",
+        metadata: { level: 2 },
+        tag: "h2",
+        size: "24px",
+        weight: "720",
+      },
+      {
+        id: asBlockId("visual-h3"),
+        type: "heading",
+        text: "Three",
+        metadata: { level: 3 },
+        tag: "h3",
+        size: "20px",
+        weight: "680",
+      },
     ] as const;
     const productStyles = document.createElement("style");
     productStyles.textContent = `${entries
@@ -345,7 +392,9 @@ describe("shared document text editing runtime", () => {
     try {
       for (const entry of entries) {
         const host = textHost(rendered.container, entry.id);
-        const readNode = textProjection(host).querySelector<HTMLElement>(entry.tag)!;
+        const readNode = textProjection(host).querySelector<HTMLElement>(
+          entry.tag,
+        )!;
         const readStyle = typographySnapshot(readNode);
         expect(readStyle).toMatchObject({
           marginTop: "0px",
@@ -355,9 +404,9 @@ describe("shared document text editing runtime", () => {
         });
 
         activateText(editor, entry.id, 0);
-        const activeNode = (
-          editor as EditableEditorRuntimePort
-        ).readActiveTextView()!.dom.querySelector<HTMLElement>(entry.tag)!;
+        const activeNode = (editor as EditableEditorRuntimePort)
+          .readActiveTextView()!
+          .dom.querySelector<HTMLElement>(entry.tag)!;
         expect(typographySnapshot(activeNode)).toEqual(readStyle);
       }
     } finally {
@@ -385,19 +434,25 @@ describe("shared document text editing runtime", () => {
     const view = runtime.readActiveTextView()!;
 
     act(() => view.dispatch(view.state.tr.insertText("!")));
-    await waitFor(() => expect(editor.readBlockPlainText(headingId, "heading")).toBe("Title!"));
+    await waitFor(() =>
+      expect(editor.readBlockPlainText(headingId, "heading")).toBe("Title!"),
+    );
     expect(editor.getBlock(headingId)).toMatchObject({
       type: "heading",
       metadata: { level: 2 },
     });
-    expect(editor.readBlockContent(headingId, "heading")?.content[0]?.type).toBe(
-      "paragraph",
-    );
+    expect(
+      editor.readBlockContent(headingId, "heading")?.content[0]?.type,
+    ).toBe("paragraph");
 
     act(() => expect(editor.undo()).toEqual({ status: "applied" }));
-    await waitFor(() => expect(editor.readBlockPlainText(headingId, "heading")).toBe("Title"));
+    await waitFor(() =>
+      expect(editor.readBlockPlainText(headingId, "heading")).toBe("Title"),
+    );
     act(() => expect(editor.redo()).toEqual({ status: "applied" }));
-    await waitFor(() => expect(editor.readBlockPlainText(headingId, "heading")).toBe("Title!"));
+    await waitFor(() =>
+      expect(editor.readBlockPlainText(headingId, "heading")).toBe("Title!"),
+    );
     expect(editor.getBlock(headingId)?.metadata?.level).toBe(2);
 
     act(() => {
@@ -405,6 +460,7 @@ describe("shared document text editing runtime", () => {
         blockGraphVersion: runtime.getSelectionGraphRevision(),
         blockId: headingId,
         blockType: "heading",
+        update: createTestContentOperationUpdate(runtime.contentRuntime),
         readProjection: {
           type: "doc",
           content: [
@@ -415,13 +471,16 @@ describe("shared document text editing runtime", () => {
           ],
         },
         origin: "semantic-heading-test",
+        revision: 1,
       });
     });
-    await waitFor(() => expect(view.state.doc.textContent).toBe("Remote title"));
-    expect(view.state.doc.firstChild?.type.name).toBe("heading");
-    expect(editor.readBlockContent(headingId, "heading")?.content[0]?.type).toBe(
-      "paragraph",
+    await waitFor(() =>
+      expect(view.state.doc.textContent).toBe("Remote title"),
     );
+    expect(view.state.doc.firstChild?.type.name).toBe("heading");
+    expect(
+      editor.readBlockContent(headingId, "heading")?.content[0]?.type,
+    ).toBe("paragraph");
 
     const reloaded = initializeTestReadEditor({
       definition: testReadEditorDefinition,
@@ -442,7 +501,8 @@ describe("shared document text editing runtime", () => {
     const editor = createEditor();
     const runtime = editor as EditableEditorRuntimePort;
     render(<EditorDocument editor={editor} />);
-    const revision = runtime.selectionController.getCanonicalSnapshot().revision;
+    const revision =
+      runtime.selectionController.getCanonicalSnapshot().revision;
     expect(
       runtime.requestTextPresentation(firstId, {
         offset: 0,
@@ -491,9 +551,7 @@ describe("shared document text editing runtime", () => {
     await waitFor(() =>
       expect(activeView.dom.parentElement).toBe(textSlot(generatedHost)),
     );
-    expect(activeView.dom.parentElement).toBe(
-      textSlot(generatedHost),
-    );
+    expect(activeView.dom.parentElement).toBe(textSlot(generatedHost));
     expect(projection.hidden).toBe(true);
     expect(updateMountedTextRoot).toHaveBeenCalledWith(
       generatedId,
@@ -831,7 +889,7 @@ describe("shared document text editing runtime", () => {
     const rendered = render(<EditorDocument editor={editor} />);
     const restoreGeometry = installDeterministicTextGeometry(() => {
       const roots = editor.getRootBlockIds();
-      return roots.length === 3 ? roots[1] ?? null : null;
+      return roots.length === 3 ? (roots[1] ?? null) : null;
     });
 
     try {
@@ -863,9 +921,7 @@ describe("shared document text editing runtime", () => {
         rendered.container.querySelectorAll('[contenteditable="true"]'),
       ).toHaveLength(1);
       expect(
-        rendered.container.querySelectorAll(
-          '[data-editor-input-owner="true"]',
-        ),
+        rendered.container.querySelectorAll('[data-editor-input-owner="true"]'),
       ).toHaveLength(1);
 
       const generatedProjectionHtml = generatedProjection.innerHTML;
@@ -925,7 +981,9 @@ describe("shared document text editing runtime", () => {
 
   it("survives the Strict Mode host registration probe without duplicating the view", async () => {
     const editor = createEditor();
-    expect(editor.focusText(firstId, { offset: 2 }).status).not.toBe("rejected");
+    expect(editor.focusText(firstId, { offset: 2 }).status).not.toBe(
+      "rejected",
+    );
     const rendered = render(
       <StrictMode>
         <EditorDocument editor={editor} />
@@ -970,7 +1028,11 @@ function snapshot() {
   ]);
 }
 
-function activateText(editor: EditableEditor, blockId: BlockId, offset: number): void {
+function activateText(
+  editor: EditableEditor,
+  blockId: BlockId,
+  offset: number,
+): void {
   act(() => {
     expect(editor.focusText(blockId, { offset }).status).not.toBe("rejected");
   });
@@ -1133,7 +1195,12 @@ function installDeterministicTextGeometry(
     Range.prototype,
     "getBoundingClientRect",
   );
-  const geometryRect = (left: number, top: number, width: number, height: number) =>
+  const geometryRect = (
+    left: number,
+    top: number,
+    width: number,
+    height: number,
+  ) =>
     ({
       x: left,
       y: top,
@@ -1146,8 +1213,7 @@ function installDeterministicTextGeometry(
       toJSON: () => ({}),
     }) as DOMRect;
   const blockTop = (element: Element | null): number => {
-    const blockId = element
-      ?.closest<HTMLElement>('[data-editor-block-id]')
+    const blockId = element?.closest<HTMLElement>("[data-editor-block-id]")
       ?.dataset.editorBlockId;
     if (blockId === firstId) return 100;
     if (blockId === readGeneratedId()) return 200;
@@ -1156,8 +1222,7 @@ function installDeterministicTextGeometry(
   };
   const rangeRoot = (range: Range): HTMLElement | null => {
     const node = range.commonAncestorContainer;
-    const element =
-      node instanceof HTMLElement ? node : node.parentElement;
+    const element = node instanceof HTMLElement ? node : node.parentElement;
     return (
       element?.closest<HTMLElement>(
         '.ProseMirror, [data-editor-text-projection="true"]',
@@ -1187,12 +1252,7 @@ function installDeterministicTextGeometry(
       const root = rangeRoot(this);
       return !root || root.hidden
         ? geometryRect(0, 0, 0, 0)
-        : geometryRect(
-            120 + this.startOffset * 8,
-            blockTop(root),
-            1,
-            18,
-          );
+        : geometryRect(120 + this.startOffset * 8, blockTop(root), 1, 18);
     },
   });
   return () => {

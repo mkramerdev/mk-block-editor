@@ -6,7 +6,7 @@ import {
   type EditorSelectionTextAnchorResolver,
   type SelectionController,
 } from "@repo/editor-react/selection";
-import type { EditorWebContentRuntime } from "../../../runtime/content/content-runtime.ts";
+import type { EditorContentRuntime } from "@repo/editor-core/content";
 import type { EditorDefinition } from "../../../runtime/definition/contracts.ts";
 import type { AnyEditorRuntimePort } from "../../../runtime/document/render-port.ts";
 import { createEditorClipboardBoundary } from "../../../clipboard/boundary.ts";
@@ -18,73 +18,75 @@ export function useCanonicalCopyEvents(options: {
   readonly listElement: HTMLElement | null;
   readonly definition: EditorDefinition;
   readonly editor: AnyEditorRuntimePort;
-  readonly contentRuntime: EditorWebContentRuntime;
+  readonly contentRuntime: EditorContentRuntime;
   readonly selectionController: SelectionController;
   readonly textAnchorResolver: EditorSelectionTextAnchorResolver;
   readonly captureStructuralSelection: CaptureStructuralSelection;
 }): void {
-  const writer = useMemo(
-    () => {
-      const codecs = options.editor.compiledDefinition.contentCodecs;
-      return options.definition.contentImport
-        ? createEditorClipboardBoundary({
-        blockDefinitions: options.definition.blocks,
-        plainTextImportBlockType:
-          options.definition.contentImport.plainTextBlockType,
-        inlineMarks: options.definition.inlineMarks,
-        htmlExportHandlers: codecs.htmlExportHandlers,
-        plainTextImportHandlers: codecs.plainTextImportHandlers,
-        plainTextExportHandlers: codecs.plainTextExportHandlers,
-        materializeSelection: (snapshot) => {
-          const committed = options.selectionController.getCommittedSnapshot();
-          if (
-            committed?.kind === "block-internal" &&
-            committed.internal &&
-            committed.owner.kind === "block-internal"
-          ) {
-            const handler = codecs.internalSelectionFragmentMaterializers.find(
-              (candidate) =>
-                candidate.subsystemId === committed.internal!.subsystem.id,
-            );
-            const fragment = handler?.materialize({
-              hostBlockId: committed.internal.blockId,
-              selection: committed.internal.snapshot,
-              getBlock: (blockId) => options.editor.getBlock(blockId),
-              getChildBlockIds: (parentId) =>
-                options.editor.getChildBlockIds(parentId),
-              getParentId: (blockId) => options.editor.getParentId(blockId),
+  const writer = useMemo(() => {
+    const codecs = options.editor.compiledDefinition.contentCodecs;
+    return options.definition.contentImport
+      ? createEditorClipboardBoundary({
+          blockDefinitions: options.definition.blocks,
+          plainTextImportBlockType:
+            options.definition.contentImport.plainTextBlockType,
+          inlineMarks: options.definition.inlineMarks,
+          htmlExportHandlers: codecs.htmlExportHandlers,
+          plainTextImportHandlers: codecs.plainTextImportHandlers,
+          plainTextExportHandlers: codecs.plainTextExportHandlers,
+          materializeSelection: (snapshot) => {
+            const committed =
+              options.selectionController.getCommittedSnapshot();
+            if (
+              committed?.kind === "block-internal" &&
+              committed.internal &&
+              committed.owner.kind === "block-internal"
+            ) {
+              const handler =
+                codecs.internalSelectionFragmentMaterializers.find(
+                  (candidate) =>
+                    candidate.subsystemId === committed.internal!.subsystem.id,
+                );
+              const fragment = handler?.materialize({
+                hostBlockId: committed.internal.blockId,
+                selection: committed.internal.snapshot,
+                getBlock: (blockId) => options.editor.getBlock(blockId),
+                getChildBlockIds: (parentId) =>
+                  options.editor.getChildBlockIds(parentId),
+                getParentId: (blockId) => options.editor.getParentId(blockId),
+                readBlockContent: (blockId, blockType) =>
+                  options.contentRuntime.readBlockProjection(
+                    blockId,
+                    blockType,
+                  ),
+                blockDefinitions: options.definition.blocks,
+              });
+              if (fragment) return { ok: true as const, fragment };
+            }
+            return materializeEditorSelectionFragment({
+              snapshot,
+              graph: options.editor,
+              graphRevision: options.editor.getSelectionGraphRevision(),
               readBlockContent: (blockId, blockType) =>
                 options.contentRuntime.readBlockProjection(blockId, blockType),
+              readBlockPlainText: (blockId, blockType) =>
+                options.contentRuntime.readBlockPlainText(blockId, blockType),
+              textAnchorResolver: options.textAnchorResolver,
               blockDefinitions: options.definition.blocks,
+              resolveVisibleChildBlockIds:
+                options.definition.selectionFragment
+                  ?.resolveVisibleChildBlockIds,
             });
-            if (fragment) return { ok: true as const, fragment };
-          }
-          return materializeEditorSelectionFragment({
-            snapshot,
-            graph: options.editor,
-            graphRevision: options.editor.getSelectionGraphRevision(),
-            readBlockContent: (blockId, blockType) =>
-              options.contentRuntime.readBlockProjection(blockId, blockType),
-            readBlockPlainText: (blockId, blockType) =>
-              options.contentRuntime.readBlockPlainText(blockId, blockType),
-            textAnchorResolver: options.textAnchorResolver,
-            blockDefinitions: options.definition.blocks,
-            resolveVisibleChildBlockIds:
-              options.definition.selectionFragment
-                ?.resolveVisibleChildBlockIds,
-          });
-        },
-      })
-        : null;
-    },
-    [
-      options.contentRuntime,
-      options.definition,
-      options.editor,
-      options.selectionController,
-      options.textAnchorResolver,
-    ],
-  );
+          },
+        })
+      : null;
+  }, [
+    options.contentRuntime,
+    options.definition,
+    options.editor,
+    options.selectionController,
+    options.textAnchorResolver,
+  ]);
 
   useEffect(() => {
     const listElement = options.listElement;
@@ -95,8 +97,7 @@ export function useCanonicalCopyEvents(options: {
         event,
         editorIdentity: options.editor,
         list: listElement,
-        committedSelection:
-          options.selectionController.getCommittedSnapshot(),
+        committedSelection: options.selectionController.getCommittedSnapshot(),
         isCommittedSelectionCurrent: (snapshot) =>
           options.selectionController.isCommittedSnapshotCurrent(snapshot),
         ownsNativeTarget: (target) =>
@@ -118,7 +119,10 @@ export function useCanonicalCopyEvents(options: {
         ) {
           return committed.documentSelection;
         }
-        return options.captureStructuralSelection(ownership.selection)?.snapshot ?? null;
+        return (
+          options.captureStructuralSelection(ownership.selection)?.snapshot ??
+          null
+        );
       },
     });
     doc.addEventListener("copy", copy, true);
@@ -126,10 +130,7 @@ export function useCanonicalCopyEvents(options: {
   }, [options, writer]);
 }
 
-function isNodeWithin(
-  list: HTMLElement,
-  target: EventTarget | null,
-): boolean {
+function isNodeWithin(list: HTMLElement, target: EventTarget | null): boolean {
   if (!target || typeof target !== "object" || !("ownerDocument" in target)) {
     return false;
   }
@@ -137,7 +138,7 @@ function isNodeWithin(
   const NodeConstructor = candidate.ownerDocument?.defaultView?.Node;
   return Boolean(
     NodeConstructor &&
-      candidate instanceof NodeConstructor &&
-      list.contains(candidate),
+    candidate instanceof NodeConstructor &&
+    list.contains(candidate),
   );
 }

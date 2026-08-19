@@ -66,7 +66,9 @@
   "scripts": {
     "build": "pnpm run clean && tsc -p tsconfig.build.json && node -e \"require('node:fs').copyFileSync('src/styles/editor.css', 'dist/index.css')\"",
     "dev": "tsc -p tsconfig.build.json --watch",
-    "check-types": "tsc --noEmit && tsc -p tsconfig.contracts.json",
+    "check-types:source": "tsc --noEmit -p tsconfig.json",
+    "check-types:tests": "tsc --noEmit -p tsconfig.test.json",
+    "check-types": "pnpm run check-types:source && pnpm run check-types:tests && pnpm run typecheck:contracts",
     "typecheck": "pnpm run check-types",
     "typecheck:contracts": "tsc -p tsconfig.contracts.json",
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",

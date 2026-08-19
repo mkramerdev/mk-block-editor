@@ -5,7 +5,10 @@ import type { EditorKeyboardSelectionDirection } from "./keyboard.ts";
 export interface MoveEditorKeyboardSelectionVisualLineOptions {
   point: EditorLogicalSelectionPoint;
   target: EditorBlockSelectionTarget;
-  direction: Extract<EditorKeyboardSelectionDirection, "up" | "down"> | "start" | "end";
+  direction:
+    | Extract<EditorKeyboardSelectionDirection, "up" | "down">
+    | "start"
+    | "end";
   text: string;
   preferredX: number | null;
 }

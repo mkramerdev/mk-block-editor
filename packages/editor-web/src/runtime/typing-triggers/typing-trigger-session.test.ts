@@ -5,10 +5,13 @@ import {
   type CanonicalBlockFragment,
 } from "@repo/editor-core/editing";
 import { createBlockRichTextContentFromPlainText } from "@repo/editor-core/content/rich-text";
-import type { CanonicalEditorCommit } from "@repo/editor-react/editor";
 import { createEditorLogicalSelectionPoint } from "@repo/editor-react/selection";
 import { describe, expect, it, vi } from "vitest";
-import type { EditorDefinition } from "../definition/contracts.ts";
+import type { EditableEditorDefinition } from "../definition/contracts.ts";
+import type {
+  EditorChangeCallback,
+  EditorSemanticChange,
+} from "../document/contracts.ts";
 import type { EditorRuntimePort } from "../document/render-port.ts";
 import { createTestEditorSnapshot } from "../../tests/editor-snapshot-fixtures.ts";
 import { testEditableEditorDefinition } from "../../tests/test-editor-definition.ts";
@@ -488,7 +491,7 @@ describe("typing trigger sessions", () => {
 
   it("selects a deliberately chosen later text record", () => {
     const blockId = "typing-trigger-later-text-intent" as BlockId;
-    const changes = vi.fn<(commit: CanonicalEditorCommit) => void>();
+    const changes = vi.fn<(commit: EditorSemanticChange) => void>();
     const editor = createEditor(
       blockId,
       "prefix ",
@@ -564,7 +567,7 @@ describe("typing trigger sessions", () => {
 
   it("rejects an invalid selection offset without creating a transaction", () => {
     const blockId = "typing-trigger-invalid-selection-offset" as BlockId;
-    const changes = vi.fn<(commit: CanonicalEditorCommit) => void>();
+    const changes = vi.fn<(commit: EditorSemanticChange) => void>();
     const editor = createEditor(
       blockId,
       "",
@@ -652,9 +655,9 @@ describe("typing trigger sessions", () => {
 function createEditor(
   blockId: BlockId,
   text: string,
-  typingTriggers: NonNullable<EditorDefinition["typingTriggers"]>,
-  extra: Partial<EditorDefinition> = {},
-  onChange?: (transaction: CanonicalEditorCommit) => void,
+  typingTriggers: NonNullable<EditableEditorDefinition["typingTriggers"]>,
+  extra: Partial<EditableEditorDefinition> = {},
+  onChange?: EditorChangeCallback,
 ): EditorRuntimePort {
   return initializeTestEditableEditor({
     definition: { ...testEditableEditorDefinition, ...extra, typingTriggers },
@@ -790,7 +793,7 @@ function createTwoTextFragment(
   });
 }
 
-function publishedSelectionFocus(change: CanonicalEditorCommit) {
+function publishedSelectionFocus(change: EditorSemanticChange) {
   return change.selectionAfter.kind === "selection" &&
     change.selectionAfter.selection.kind === "document"
     ? change.selectionAfter.selection.focus

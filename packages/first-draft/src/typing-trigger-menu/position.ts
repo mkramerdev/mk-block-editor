@@ -44,11 +44,12 @@ export function placeFirstDraftTypingTriggerMenu(
   }
   const minimumTop = viewport.top + FIRST_DRAFT_TYPING_TRIGGER_VIEWPORT_MARGIN;
   const maximumBottom =
-    viewport.top +
-    viewport.height -
-    FIRST_DRAFT_TYPING_TRIGGER_VIEWPORT_MARGIN;
+    viewport.top + viewport.height - FIRST_DRAFT_TYPING_TRIGGER_VIEWPORT_MARGIN;
   const caretBottom = caret.top + caret.height;
-  if (caretBottom < viewport.top || caret.top > viewport.top + viewport.height) {
+  if (
+    caretBottom < viewport.top ||
+    caret.top > viewport.top + viewport.height
+  ) {
     return null;
   }
   const availableTop = Math.max(
@@ -66,7 +67,8 @@ export function placeFirstDraftTypingTriggerMenu(
     placement === "top"
       ? caret.top - FIRST_DRAFT_TYPING_TRIGGER_ANCHOR_GAP - renderedHeight
       : caretBottom + FIRST_DRAFT_TYPING_TRIGGER_ANCHOR_GAP;
-  const minimumLeft = viewport.left + FIRST_DRAFT_TYPING_TRIGGER_VIEWPORT_MARGIN;
+  const minimumLeft =
+    viewport.left + FIRST_DRAFT_TYPING_TRIGGER_VIEWPORT_MARGIN;
   const maximumLeft = Math.max(
     minimumLeft,
     viewport.left +
@@ -109,7 +111,11 @@ export function useFirstDraftTypingTriggerMenuPosition(
       setMeasurement(null);
       return;
     }
-    const caret = geometry.readViewportTextCaretRect(blockId, offset, "forward");
+    const caret = geometry.readViewportTextCaretRect(
+      blockId,
+      offset,
+      "forward",
+    );
     if (!caret) {
       setMeasurement(null);
       return;
@@ -133,9 +139,7 @@ export function useFirstDraftTypingTriggerMenuPosition(
             height: window.innerHeight,
           },
     );
-    setMeasurement(
-      position ? { blockId, offset, position } : null,
-    );
+    setMeasurement(position ? { blockId, offset, position } : null);
   }, [blockId, geometry, offset]);
   const schedule = useCallback(() => {
     if (frame.current !== null) return;
@@ -148,7 +152,9 @@ export function useFirstDraftTypingTriggerMenuPosition(
 
   useEffect(() => {
     const observer =
-      typeof ResizeObserver === "function" ? new ResizeObserver(schedule) : null;
+      typeof ResizeObserver === "function"
+        ? new ResizeObserver(schedule)
+        : null;
     const visual = window.visualViewport;
     const element = menuRef.current;
     if (element) observer?.observe(element);

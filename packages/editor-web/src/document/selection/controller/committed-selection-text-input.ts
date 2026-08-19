@@ -320,9 +320,9 @@ function isMountedEditorTextInput(
   const focusNode = selection?.focusNode ?? null;
   return Boolean(
     anchorNode &&
-      focusNode &&
-      textRoot.contains(anchorNode) &&
-      textRoot.contains(focusNode),
+    focusNode &&
+    textRoot.contains(anchorNode) &&
+    textRoot.contains(focusNode),
   );
 }
 

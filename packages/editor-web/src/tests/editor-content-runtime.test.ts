@@ -1,13 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   createBlockRichTextContentFromPlainText,
+  type EditorContentCheckpoint,
+  type EditorContentOperationUpdate,
   type RichTextDocumentNodeJson,
 } from "@repo/editor-core/content/rich-text";
-import type {
-  EditorContentBaseToken,
-  EditorContentCheckpoint,
-  EditorContentOperationUpdate,
-} from "@repo/editor-react/editor";
+import type { EditorContentRuntime as CoreEditorContentRuntime } from "@repo/editor-core/content";
+import type { EditorContentBaseToken } from "@repo/editor-core/operations";
 import {
   asBlockId,
   type BlockId,
@@ -16,6 +15,7 @@ import {
 import {
   createEditorContentRuntime,
   type EditorContentRuntime,
+  type EditorWebContentRuntime,
 } from "../runtime/content/content-runtime.ts";
 import {
   decodeLocalContentCheckpoint,
@@ -23,11 +23,46 @@ import {
   encodeLocalContentCheckpoint,
 } from "../content/local/runtime.ts";
 import { testEditableEditorDefinition } from "./test-editor-definition.ts";
+import { createTestContentOperationUpdate } from "./editor-web-test-helpers.ts";
 
 const firstBlockId = asBlockId("01890f07-1c00-7000-8000-000000008001");
 const secondBlockId = asBlockId("01890f07-1c00-7000-8000-000000008002");
 
 describe("local content prepare/apply/release protocol", () => {
+  it("implements the core runtime contract through the web compatibility aliases", () => {
+    const runtime = createRuntime({ [firstBlockId]: "contract" });
+    const canonical: CoreEditorContentRuntime = runtime;
+    const compatibility: EditorWebContentRuntime = canonical;
+
+    expect(compatibility).toBe(runtime);
+    runtime.destroy();
+  });
+
+  it("rejects a content lease owned by another runtime", () => {
+    const owner = createRuntime({ [firstBlockId]: "owner" });
+    const other = createRuntime({ [firstBlockId]: "other" });
+    const foreignLease = owner.acquireBlockContent(
+      firstBlockId,
+      "paragraph",
+      "active-editing",
+    );
+
+    expect(
+      other.createTextAnchorInContext(foreignLease, {
+        textOffset: 0,
+        affinity: null,
+      }),
+    ).toMatchObject({
+      ok: false,
+      reason: "missing-text",
+      message: "Block content lease is not owned by this runtime",
+    });
+
+    foreignLease.release();
+    owner.destroy();
+    other.destroy();
+  });
+
   it("installs the exact deeply immutable prepared projection", () => {
     const runtime = createRuntime({
       [firstBlockId]: {
@@ -124,7 +159,9 @@ describe("local content prepare/apply/release protocol", () => {
       blockGraphVersion: 1,
       blockId: firstBlockId,
       blockType: "paragraph",
+      update: createTestContentOperationUpdate(runtime),
       readProjection: richText("external"),
+      revision: 1,
     });
     expect(
       runtime.validateContentCommit({
@@ -295,7 +332,9 @@ describe("local content prepare/apply/release protocol", () => {
       blockGraphVersion: 1,
       blockId: firstBlockId,
       blockType: "paragraph",
+      update: createTestContentOperationUpdate(runtime),
       readProjection: richText("external"),
+      revision: 1,
     });
 
     expect(() => runtime.commitContent(prepared)).toThrow(
@@ -585,7 +624,9 @@ describe("local content stable text anchors", () => {
       blockGraphVersion: 1,
       blockId: firstBlockId,
       blockType: "paragraph",
+      update: createTestContentOperationUpdate(runtime),
       readProjection: richText("replacement"),
+      revision: 1,
     });
 
     expect(resolveAnchor(runtime, transported)).toEqual({
@@ -663,8 +704,9 @@ describe("local content envelopes", () => {
     expect(() =>
       decodeLocalContentCheckpoint({
         ...checkpoint,
+        // @ts-expect-error Operation envelopes are deliberately invalid checkpoint input.
         kind: "operation",
-      } as EditorContentOperationUpdate),
+      }),
     ).toThrow(/Expected local checkpoint/);
   });
 
@@ -810,7 +852,9 @@ function requireAnchor(
   ReturnType<EditorContentRuntime["tryCreateTextAnchorInLiveContext"]>,
   { ok: true }
 > {
-  if (!result.ok) throw new Error(result.message ?? result.reason);
+  if (!result.ok) {
+    throw new Error("message" in result ? result.message : result.reason);
+  }
   return result;
 }
 

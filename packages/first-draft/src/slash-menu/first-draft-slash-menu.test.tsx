@@ -16,6 +16,7 @@ import type {
 } from "@repo/editor-web/document-runtime";
 import type { EditableEditor } from "@repo/editor-web/editor";
 import type { EditorTypingTriggerSession } from "@repo/editor-web/typing-triggers";
+import { firstDraftBlockDefinitions } from "../first-draft-definition.tsx";
 import { FirstDraftSlashMenu } from "./first-draft-slash-menu.tsx";
 
 describe("FirstDraftSlashMenu", () => {
@@ -74,6 +75,7 @@ describe("FirstDraftSlashMenu", () => {
     expect(interaction.dispatch("Enter")).toBe("handled");
     expect(replace).toHaveBeenCalledOnce();
     const replacement = replace.mock.calls[0]?.[0];
+    if (!replacement) throw new Error("Expected slash-menu replacement");
     expect(
       replacement.fragment.blocks.some(
         ({ id }: { readonly id: BlockId }) =>
@@ -166,8 +168,6 @@ describe("FirstDraftSlashMenu", () => {
     vi.mocked(editor.geometry.readViewportTextCaretRect).mockReturnValue({
       left: 100,
       top: 400,
-      right: 101,
-      bottom: 418,
       width: 1,
       height: 18,
     });
@@ -214,8 +214,6 @@ describe("FirstDraftSlashMenu", () => {
     vi.mocked(editor.geometry.readViewportTextCaretRect).mockReturnValue({
       left: 100,
       top: 80,
-      right: 101,
-      bottom: 98,
       width: 1,
       height: 18,
     });
@@ -303,6 +301,12 @@ function editorFixture(query = "") {
   const selectionSnapshot = { kind: "none" as const, revision: 0 };
   const editor = {
     editable: true,
+    definition: {
+      blocks: firstDraftBlockDefinitions,
+      defaultRoot: "paragraph",
+      inlineMarks: [],
+      inlineAtoms: [],
+    },
     getTypingTriggerSession: vi.fn(() => session),
     subscribeTypingTriggerSession: vi.fn(() => () => undefined),
     dismissTypingTriggerSession: dismiss,

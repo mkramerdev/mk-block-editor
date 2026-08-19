@@ -247,19 +247,26 @@ export function FirstDraftMentionMenu({
               accept(person, mentionSession);
             }}
           >
-            <span className="first-draft-mention-menu__avatar" aria-hidden="true">
+            <span
+              className="first-draft-mention-menu__avatar"
+              aria-hidden="true"
+            >
               {person.avatarLabel}
             </span>
             <span className="first-draft-mention-menu__copy">
               <span className="first-draft-mention-menu__name">
                 {person.displayName}
               </span>
-              <span className="first-draft-mention-menu__role">{person.role}</span>
+              <span className="first-draft-mention-menu__role">
+                {person.role}
+              </span>
             </span>
           </button>
         ))
       ) : (
-        <div className="first-draft-mention-menu__empty">No matching people</div>
+        <div className="first-draft-mention-menu__empty">
+          No matching people
+        </div>
       )}
     </div>
   );

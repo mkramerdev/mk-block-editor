@@ -11,7 +11,7 @@ import {
   type SelectionController,
 } from "@repo/editor-react/selection";
 import type { EditorContentRuntimeResources } from "../../../runtime/content/runtime-resources.ts";
-import type { EditorWebContentRuntime } from "../../../runtime/content/content-runtime.ts";
+import type { EditorContentRuntime } from "@repo/editor-core/content";
 import type { EditorDefinition } from "../../../runtime/definition/contracts.ts";
 import type { EditableEditorRuntimePort } from "../../../runtime/document/render-port.ts";
 import { createDefinitionClipboardBoundary } from "../../../clipboard/editor-boundary.ts";
@@ -26,7 +26,7 @@ export interface UseEditableClipboardEventsOptions {
   readonly definition: EditorDefinition;
   readonly contentResources: EditorContentRuntimeResources;
   readonly editor: EditableEditorRuntimePort;
-  readonly contentRuntime: EditorWebContentRuntime;
+  readonly contentRuntime: EditorContentRuntime;
   readonly selectionController: SelectionController;
   readonly textAnchorResolver: EditorSelectionTextAnchorResolver;
   readonly captureStructuralSelection: CaptureStructuralSelection;
@@ -57,8 +57,8 @@ export function useEditableClipboardEvents({
             committed.owner.kind === "block-internal"
           ) {
             const subsystemId = committed.internal.subsystem.id;
-            const handler = editor.compiledDefinition.contentCodecs
-              .internalSelectionFragmentMaterializers.find(
+            const handler =
+              editor.compiledDefinition.contentCodecs.internalSelectionFragmentMaterializers.find(
                 (candidate) => candidate.subsystemId === subsystemId,
               );
             const fragment = handler?.materialize({
@@ -146,11 +146,11 @@ export function useEditableClipboardEvents({
         committed.owner.kind === "block-internal" &&
         selectionController.isCommittedSnapshotCurrent(committed)
       ) {
-        const handler = editor.compiledDefinition.contentCodecs
-          .internalSelectionCutHandlers.find(
-          (candidate) =>
-            candidate.subsystemId === committed.internal!.subsystem.id,
-        );
+        const handler =
+          editor.compiledDefinition.contentCodecs.internalSelectionCutHandlers.find(
+            (candidate) =>
+              candidate.subsystemId === committed.internal!.subsystem.id,
+          );
         if (!handler) return null;
         return {
           kind: "internal" as const,

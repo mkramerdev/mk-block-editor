@@ -1,11 +1,14 @@
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EditorInstanceSnapshot } from "@repo/editor-core/codecs";
-import type { BlockId } from "@repo/editor-core/kernel";
+import { asBlockId, type BlockId } from "@repo/editor-core/kernel";
 import { addEditorBlockOperations } from "@repo/editor-web/block-operations";
 import { readEditorBlockSelectionTarget } from "@repo/editor-web/block-renderer";
 import { EditorDocument } from "@repo/editor-web/document-runtime";
-import { initializeTestEditableEditor as initializeEditableEditor } from "../../test-editor.ts";
+import {
+  initializeTestEditableEditor as initializeEditableEditor,
+  type FirstDraftTestEditor,
+} from "../../test-editor.ts";
 import {
   createFirstDraftViewStateStore,
   FirstDraftViewStateProvider,
@@ -17,9 +20,10 @@ import {
   createTableRangeCoverage,
   tableInternalSelectionSubsystem,
 } from "./selection.ts";
+import { readFirstDraftTableColumnIds } from "./model.ts";
 import { FirstDraftBlockHoverProvider } from "../../block-controls/index.ts";
 
-const id = (value: string) => value as BlockId;
+const id = asBlockId;
 const disposables: Array<{ dispose(): void }> = [];
 
 afterEach(() => {
@@ -41,15 +45,17 @@ describe("First Draft table-cell boundary commands", () => {
     );
     disposables.push(editor);
     const cellId = id("fd-table-cell-2-2");
-    editor.transaction(() => {
-      editor.replaceText(cellId, { from: 0, to: 3, text: "" });
-      editor.setTransactionSelection({ kind: "preserve" });
-    });
     const priorEditBlockId = id("fd-paragraph-outro");
     const priorText = editor.readBlockPlainText(priorEditBlockId, "paragraph");
-    expect(
-      editor.insertText({ blockId: priorEditBlockId, offset: 0, text: "X" }),
-    ).toBe(true);
+    editor.transaction(() => {
+      expect(
+        editor.deleteText({ blockId: cellId, range: { from: 0, to: 3 } }),
+      ).toBe(true);
+      expect(
+        editor.insertText({ blockId: priorEditBlockId, offset: 0, text: "X" }),
+      ).toBe(true);
+      editor.setTransactionSelection({ kind: "preserve" });
+    });
     onChange.mockClear();
     const structural = vi.spyOn(editor, "executeStructuralTransaction");
     const rendered = render(
@@ -96,7 +102,7 @@ describe("First Draft table-cell boundary commands", () => {
     );
     expect(editor.undo()).toEqual({ status: "history-empty" });
     expect(editor.redo()).toEqual({ status: "applied" });
-    expect(editor.readBlockPlainText(cellId, "tableCell")).toBe("Ada");
+    expect(editor.readBlockPlainText(cellId, "tableCell")).toBe("");
     expect(editor.readBlockPlainText(priorEditBlockId, "paragraph")).toBe(
       `X${priorText}`,
     );
@@ -317,6 +323,9 @@ describe("First Draft table-cell boundary commands", () => {
   it("keeps row append, column append, and resize behavior operational", () => {
     const fixture = renderFixture();
     const tableId = id("fd-table");
+    const initialIds = new Set(
+      Object.keys(fixture.editor.readSnapshot().blocks),
+    );
     const addRow = fixture.container.querySelector<HTMLButtonElement>(
       `[data-editor-block-id='${tableId}'] button[aria-label='Add table row']`,
     );
@@ -326,11 +335,43 @@ describe("First Draft table-cell boundary commands", () => {
     if (!addRow || !addColumn) throw new Error("Missing table append controls");
 
     fireEvent.pointerDown(addRow, { button: 0 });
-    expect(fixture.editor.getChildBlockIds(tableId)).toHaveLength(4);
+    const rowIds = fixture.editor.getChildBlockIds(tableId);
+    expect(rowIds).toHaveLength(4);
+    const appendedRowId = rowIds.at(-1)!;
+    const appendedRowCellIds = fixture.editor.getChildBlockIds(appendedRowId);
+    expect(appendedRowId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+    );
+    expect(appendedRowId).not.toMatch(/^first-draft-row-/u);
+    expect(initialIds.has(appendedRowId)).toBe(false);
+    expect(new Set(appendedRowCellIds).size).toBe(3);
+    expect(
+      appendedRowCellIds.every(
+        (cellId) =>
+          !initialIds.has(cellId) &&
+          !cellId.startsWith("first-draft-cell-") &&
+          fixture.editor.readBlockPlainText(cellId, "tableCell") === "",
+      ),
+    ).toBe(true);
     fireEvent.pointerDown(addColumn, { button: 0 });
+    const appendedColumnCellIds: BlockId[] = [];
     for (const rowId of fixture.editor.getChildBlockIds(tableId)) {
-      expect(fixture.editor.getChildBlockIds(rowId)).toHaveLength(4);
+      const cellIds = fixture.editor.getChildBlockIds(rowId);
+      expect(cellIds).toHaveLength(4);
+      appendedColumnCellIds.push(cellIds.at(-1)!);
     }
+    expect(new Set(appendedColumnCellIds).size).toBe(4);
+    const table = fixture.editor.getBlock(tableId);
+    if (!table) throw new Error("Missing table after append");
+    const columnIds = readFirstDraftTableColumnIds(table.metadata, 4);
+    expect(columnIds).toHaveLength(4);
+    expect(new Set(columnIds).size).toBe(4);
+    expect(
+      Object.values(fixture.editor.readSnapshot().blocks).some(
+        (block) => block.id === columnIds.at(-1),
+      ),
+    ).toBe(false);
+    expect(fixture.onChange).toHaveBeenCalledTimes(2);
 
     const resize = fixture.container.querySelector<HTMLElement>(
       `[data-editor-block-id='${tableId}'] [aria-label='Resize column 1']`,
@@ -414,8 +455,10 @@ function nativeCaretOffset(root: HTMLElement): number | null {
   return range.toString().length;
 }
 
-function activeEditorView(editor: unknown): unknown {
-  return (
-    editor as { readonly readActiveTextView: () => unknown }
-  ).readActiveTextView();
+function activeEditorView(editor: FirstDraftTestEditor): unknown {
+  const readActiveTextView = Reflect.get(editor, "readActiveTextView");
+  if (typeof readActiveTextView !== "function") {
+    throw new Error("Test editor does not expose an active text view reader");
+  }
+  return Reflect.apply(readActiveTextView, editor, []);
 }

@@ -3,9 +3,7 @@ import type {
   ProseMirrorProposalAdapter,
   ProseMirrorStateProposal,
 } from "./transactions/proposal.ts";
-import {
-  createBlockLocalProseMirrorView,
-} from "./view/create-block-local-view.ts";
+import { createBlockLocalProseMirrorView } from "./view/create-block-local-view.ts";
 import { createBlockLocalProseMirrorState } from "./state/create-block-local-state.ts";
 import { proseMirrorPositionToCanonicalOffset } from "../caret/coordinates/offset-codec.ts";
 import { createBlockLocalProseMirrorSchema } from "../schema/block-local/schema.ts";
@@ -147,7 +145,8 @@ describe("block editor view lifecycle", () => {
       expect(rangeRects).not.toHaveBeenCalled();
     } finally {
       rangeRects.mockRestore();
-      if (!hadRangeRects) Reflect.deleteProperty(Range.prototype, "getClientRects");
+      if (!hadRangeRects)
+        Reflect.deleteProperty(Range.prototype, "getClientRects");
       view.destroy();
       host.remove();
     }
@@ -160,7 +159,7 @@ describe("block editor view lifecycle", () => {
     const originalSetAttribute = Element.prototype.setAttribute;
     const setAttribute = vi
       .spyOn(Element.prototype, "setAttribute")
-      .mockImplementation(function (name, value) {
+      .mockImplementation(function (this: Element, name, value) {
         if (name === "contenteditable" && this.isConnected) {
           connectedContentEditableWrites.push(this);
         }
@@ -213,7 +212,9 @@ describe("block editor view lifecycle", () => {
 
     try {
       expect(firstView.dom).toBe(firstRoot);
-      expect(document.querySelectorAll('[contenteditable="true"]')).toHaveLength(1);
+      expect(
+        document.querySelectorAll('[contenteditable="true"]'),
+      ).toHaveLength(1);
       firstView.dispatch(
         firstView.state.tr.insertText("!", textEnd(firstView.state)),
       );
@@ -245,7 +246,9 @@ describe("block editor view lifecycle", () => {
       expect(secondView).not.toBe(firstView);
       expect(secondView.dom).toBe(secondRoot);
       expect(secondView.isDestroyed).toBe(false);
-      expect(document.querySelectorAll('[contenteditable="true"]')).toHaveLength(1);
+      expect(
+        document.querySelectorAll('[contenteditable="true"]'),
+      ).toHaveLength(1);
       firstRoot.dispatchEvent(
         new InputEvent("beforeinput", {
           bubbles: true,

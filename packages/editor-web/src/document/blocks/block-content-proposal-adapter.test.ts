@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { asBlockId } from "@repo/editor-core/kernel";
+import type { RichTextDocumentNodeJson } from "@repo/editor-core/content/rich-text";
 import { removeBlocks } from "@repo/editor-core/editing";
 import {
   createBlockLocalProseMirrorState,
@@ -12,8 +13,9 @@ import type { EditorRuntimePort } from "../../runtime/document/render-port.ts";
 import { createTestEditorSnapshot } from "../../tests/editor-snapshot-fixtures.ts";
 import { testEditableEditorDefinition } from "../../tests/test-editor-definition.ts";
 import { initializeTestEditableEditor } from "../../tests/test-editor-initializers.ts";
+import { createTestContentOperationUpdate } from "../../tests/editor-web-test-helpers.ts";
 import { ActiveProseMirrorProposalAdapter } from "./block-content-proposal-adapter.ts";
-import type { EditorDefinition } from "../../runtime/definition/contracts.ts";
+import type { EditableEditorDefinition } from "../../runtime/definition/contracts.ts";
 import type { EditorLocalMutationProvenance } from "@repo/editor-react/editor";
 import { createEditorLogicalSelectionPoint } from "@repo/editor-react/selection";
 import {
@@ -50,7 +52,7 @@ afterEach(() => {
 
 describe("ActiveProseMirrorProposalAdapter", () => {
   it("opens a headless session only when an accepted proposal carries a typing edge", () => {
-    const definition: EditorDefinition = {
+    const definition: EditableEditorDefinition = {
       ...testEditableEditorDefinition,
       typingTriggers: [{ id: "mention", trigger: "@" }],
     };
@@ -74,7 +76,7 @@ describe("ActiveProseMirrorProposalAdapter", () => {
   });
 
   it("retains beforeinput provenance until a native DOM proposal microtask", async () => {
-    const definition: EditorDefinition = {
+    const definition: EditableEditorDefinition = {
       ...testEditableEditorDefinition,
       typingTriggers: [{ id: "mention", trigger: "@" }],
     };
@@ -96,7 +98,7 @@ describe("ActiveProseMirrorProposalAdapter", () => {
   it("commits typing, settles selection before publication, and installs the exact proposal", () => {
     const order: string[] = [];
     const changes: EditorSemanticChange[] = [];
-    const standalone = vi.fn((settle: () => unknown) => settle());
+    const standalone = vi.fn();
     const { editor, view, adapter } = createMountedEditor(
       "abc",
       testEditableEditorDefinition,
@@ -104,8 +106,9 @@ describe("ActiveProseMirrorProposalAdapter", () => {
         changes.push(transaction as EditorSemanticChange);
         order.push("semantic");
       },
-      standalone,
     );
+    const unsubscribeStandalone =
+      editor.subscribeStandaloneSelectionSettlements(standalone);
     editor.selectionController.canonical.subscribe(() =>
       order.push("selection"),
     );
@@ -142,6 +145,7 @@ describe("ActiveProseMirrorProposalAdapter", () => {
       },
     });
     expect(standalone).not.toHaveBeenCalled();
+    unsubscribeStandalone();
     expect(view.state).toBe(proposedState);
     expect(updateState).toHaveBeenCalledOnce();
     expect(updateState).toHaveBeenCalledWith(proposedState);
@@ -150,12 +154,15 @@ describe("ActiveProseMirrorProposalAdapter", () => {
       order.indexOf("selection"),
     );
     expect(order.indexOf("content")).toBeGreaterThan(order.indexOf("semantic"));
-    expect(acceptProposal).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({
-      origin: "prosemirror-proposal",
-      selectionPresentation: "native-already-established",
-      provenance: null,
-      releaseAfterProposedStateInstalled: true,
-    }));
+    expect(acceptProposal).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        origin: "prosemirror-proposal",
+        selectionPresentation: "native-already-established",
+        provenance: null,
+        releaseAfterProposedStateInstalled: true,
+      }),
+    );
     expect(focusText).not.toHaveBeenCalled();
     expect(nativeFocus).not.toHaveBeenCalled();
     expectCollapsedCanonicalOffset(editor, 2);
@@ -195,12 +202,12 @@ describe("ActiveProseMirrorProposalAdapter", () => {
     });
     Object.defineProperty(event, "getTargetRanges", {
       value: () => [
-        {
+        new StaticRange({
           startContainer: text,
           startOffset: 2,
           endContainer: text,
           endOffset: 3,
-        } as StaticRange,
+        }),
       ],
     });
 
@@ -233,12 +240,15 @@ describe("ActiveProseMirrorProposalAdapter", () => {
     transaction.setSelection(TextSelection.create(transaction.doc, 3));
     view.dispatch(transaction);
 
-    expect(acceptProposal).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({
-      origin: "prosemirror-proposal",
-      selectionPresentation: "restore-native",
-      provenance: null,
-      releaseAfterProposedStateInstalled: true,
-    }));
+    expect(acceptProposal).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        origin: "prosemirror-proposal",
+        selectionPresentation: "restore-native",
+        provenance: null,
+        releaseAfterProposedStateInstalled: true,
+      }),
+    );
     expect(focusText).not.toHaveBeenCalled();
     expectCollapsedCanonicalOffset(editor, 2);
   });
@@ -333,8 +343,7 @@ describe("ActiveProseMirrorProposalAdapter", () => {
   it("does not let the block-internal range exception affect an ordinary text root", () => {
     const { editor, view, adapter } = createMountedEditor("abc");
     commitCanonicalTextSelection(editor, 1, 3);
-    const authoritative =
-      editor.selectionController.getCanonicalSnapshot();
+    const authoritative = editor.selectionController.getCanonicalSnapshot();
 
     adapter.projectFinalizedContent(view);
 
@@ -355,9 +364,7 @@ describe("ActiveProseMirrorProposalAdapter", () => {
     const publication = vi.fn();
     editor.selectionController.canonical.subscribe(publication);
 
-    view.dispatch(
-      view.state.tr.setSelection(view.state.selection),
-    );
+    view.dispatch(view.state.tr.setSelection(view.state.selection));
 
     expect(editor.selectionController.getCanonicalSnapshot()).toBe(
       authoritative,
@@ -404,7 +411,9 @@ describe("ActiveProseMirrorProposalAdapter", () => {
       blockGraphVersion: editor.getSelectionGraphRevision(),
       blockId,
       blockType: "paragraph",
+      update: createTestContentOperationUpdate(editor.contentRuntime),
       readProjection: documentWithText("remote"),
+      revision: 1,
     });
 
     const disposition = adapter.evaluateProposal(proposal, view);
@@ -435,7 +444,7 @@ describe("ActiveProseMirrorProposalAdapter", () => {
   });
 
   it("consumes a typing edge once even when canonical acceptance rejects", () => {
-    const definition: EditorDefinition = {
+    const definition: EditableEditorDefinition = {
       ...testEditableEditorDefinition,
       typingTriggers: [{ id: "mention", trigger: "@" }],
     };
@@ -496,7 +505,9 @@ describe("ActiveProseMirrorProposalAdapter", () => {
       blockGraphVersion: editor.getSelectionGraphRevision(),
       blockId,
       blockType: "paragraph",
+      update: createTestContentOperationUpdate(editor.contentRuntime),
       readProjection: documentWithText("external"),
+      revision: 1,
     });
 
     expect(view.state.doc.textContent).toBe("external");
@@ -516,7 +527,8 @@ describe("ActiveProseMirrorProposalAdapter", () => {
     const { editor, view, adapter } = createMountedEditor("abcdef");
     commitCanonicalTextSelection(editor, 1, 5);
     const canonical = editor.selectionController.getCanonicalSnapshot();
-    const revision = editor.selectionController.canonical.getSnapshot().revision;
+    const revision =
+      editor.selectionController.canonical.getSnapshot().revision;
     const publication = vi.fn();
     editor.selectionController.canonical.subscribe(publication);
 
@@ -528,7 +540,9 @@ describe("ActiveProseMirrorProposalAdapter", () => {
       blockGraphVersion: editor.getSelectionGraphRevision(),
       blockId,
       blockType: "paragraph",
+      update: createTestContentOperationUpdate(editor.contentRuntime),
       readProjection: documentWithText("Xabcdef"),
+      revision: 1,
     });
     adapter.projectFinalizedContent(view);
     expect(view.state.doc.textContent).toBe("Xabcdef");
@@ -561,7 +575,9 @@ describe("ActiveProseMirrorProposalAdapter", () => {
 
     const result = editor.executeStructuralTransaction({
       origin: "test:block-deletion",
-      operations: [removeBlocks({ blockIds: [blockId] })],
+      operations: [
+        removeBlocks({ blockIds: [blockId], includeDescendants: true }),
+      ],
     });
 
     expect(result).toMatchObject({ ok: true, operationResult: { ok: true } });
@@ -608,7 +624,7 @@ describe("ActiveProseMirrorProposalAdapter", () => {
 
 function createMountedEditor(
   text: string,
-  definition: EditorDefinition = testEditableEditorDefinition,
+  definition: EditableEditorDefinition = testEditableEditorDefinition,
   onChange?: (transaction: unknown) => void,
 ): {
   readonly editor: EditorRuntimePort;
@@ -633,16 +649,16 @@ function createMountedEditor(
       "active-editing",
     ),
   );
-  const content = editor.contentRuntime.readBlockProjection(blockId, "paragraph");
+  const content = editor.contentRuntime.readBlockProjection(
+    blockId,
+    "paragraph",
+  );
   if (!content) throw new Error("The mounted test block has no content.");
   const state = createBlockLocalProseMirrorState({
     doc: content,
     blockId,
     blockType: "paragraph",
     schema: editor.contentResources.proseMirrorSchema,
-    pluginOptions: {
-      inlineMarks: definition.inlineMarks,
-    },
   });
   let pendingProvenance: EditorLocalMutationProvenance | null = null;
   const triggerEnabled = (definition.typingTriggers?.length ?? 0) > 0;
@@ -737,13 +753,13 @@ function commitCanonicalTextSelection(
   if (result.kind === "rejected") throw new Error("Selection was rejected");
 }
 
-function documentWithText(text: string) {
+function documentWithText(text: string): RichTextDocumentNodeJson {
   return {
     type: "doc",
     content: [
       {
         type: "paragraph",
-        content: text ? [{ type: "text", text }] : undefined,
+        ...(text ? { content: [{ type: "text", text }] } : {}),
       },
     ],
   };

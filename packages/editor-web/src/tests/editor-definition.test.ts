@@ -4,9 +4,11 @@ import type {
   EditorCommandDefinition,
   EditorDefinition,
   EditorTypingTriggerDefinition,
+  EditableEditorDefinition,
 } from "../runtime/definition/contracts.ts";
 import { compileRegisteredEditorCommands } from "../runtime/definition/commands.ts";
 import { compileEditorKeybindings } from "../runtime/keybindings/compiled-keybindings.ts";
+import { normalizeEditorKeyChord } from "../runtime/keybindings/chord.ts";
 import { testEditableEditorDefinition } from "./test-editor-definition.ts";
 
 describe("EditorDefinition direct composition", () => {
@@ -18,7 +20,7 @@ describe("EditorDefinition direct composition", () => {
     const oldDefinition = {
       ...testDefinition(),
       capabilities: [],
-    } as unknown as EditorDefinition;
+    };
     expect(() => compileCanonicalEditorDefinition(oldDefinition)).toThrow(
       /unsupported fields: capabilities/u,
     );
@@ -31,8 +33,11 @@ describe("EditorDefinition direct composition", () => {
     expect(() =>
       compileCanonicalEditorDefinition({
         ...testEditableEditorDefinition,
-        blocks: { paragraph: withoutRenderer },
-      } as unknown as EditorDefinition),
+        blocks: {
+          // @ts-expect-error A missing renderer is deliberately invalid definition input.
+          paragraph: withoutRenderer,
+        },
+      }),
     ).toThrow(/Block definition paragraph must provide a renderer/u);
   });
 
@@ -43,10 +48,11 @@ describe("EditorDefinition direct composition", () => {
         blocks: {
           paragraph: {
             ...testEditableEditorDefinition.blocks.paragraph!,
+            // @ts-expect-error A non-function renderer is deliberately invalid definition input.
             renderer: "paragraph",
           },
         },
-      } as unknown as EditorDefinition),
+      }),
     ).toThrow(/Block definition paragraph renderer must be a function/u);
   });
 
@@ -73,7 +79,9 @@ describe("EditorDefinition direct composition", () => {
       [{ key: "Mod-k", commandId: command.id, scope: "document" }],
       commands,
     );
-    expect(compiled.document.get("Mod-k")).toMatchObject({
+    expect(
+      compiled.document.get(normalizeEditorKeyChord("Mod-k")),
+    ).toMatchObject({
       commandId: command.id,
     });
   });
@@ -141,7 +149,11 @@ describe("EditorDefinition direct composition", () => {
   });
 
   it("owns compiled definitions and every mutable registry input", () => {
-    const command = documentCommand("product.open");
+    const command = {
+      id: "product.open",
+      scope: "document" as const,
+      execute: () => true,
+    };
     const binding = {
       key: "Mod-k",
       commandId: command.id,
@@ -192,7 +204,9 @@ describe("EditorDefinition direct composition", () => {
     subsystems.length = 0;
 
     expect(compiled.commands.has("product.open")).toBe(true);
-    expect(compiled.keybindings.document.has("Mod-k")).toBe(true);
+    expect(
+      compiled.keybindings.document.has(normalizeEditorKeyChord("Mod-k")),
+    ).toBe(true);
     expect(compiled.typingTriggers.byId.has("mention")).toBe(true);
     expect(
       compiled.inlineAtomRegistry.definitions.get("mention")?.metadata.id,
@@ -294,7 +308,7 @@ function documentCommand(id: string): EditorCommandDefinition {
 }
 
 function testDefinition(
-  extra: Partial<EditorDefinition> = {},
-): EditorDefinition {
+  extra: Partial<EditableEditorDefinition> = {},
+): EditableEditorDefinition {
   return { ...testEditableEditorDefinition, ...extra };
 }

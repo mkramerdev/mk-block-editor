@@ -9,11 +9,7 @@ import {
   useSyncExternalStore,
   type CSSProperties,
 } from "react";
-import { createCanonicalBlockFragment } from "@repo/editor-core/editing";
-import {
-  createBlockRichTextContentFromPlainText,
-  richTextDocumentContentSize,
-} from "@repo/editor-core/content/rich-text";
+import { richTextDocumentContentSize } from "@repo/editor-core/content/rich-text";
 import type { BlockId } from "@repo/editor-core/kernel";
 import { EditableTextBlockPrimitive } from "@repo/editor-web/editable-block-renderer";
 import {
@@ -24,7 +20,6 @@ import {
 } from "@repo/editor-web/block-renderer";
 import type { EditableEditor } from "@repo/editor-web/editor";
 import type { AdditionalSelectionRecord } from "@repo/editor-web/editor";
-import { firstDraftBlockDefinitions } from "../../first-draft-definition.tsx";
 import type { FirstDraftBlockRendererProps } from "../../first-draft-editor-contracts.ts";
 import {
   FIRST_DRAFT_BLOCK_CONTROL_OFFSETS,
@@ -48,14 +43,16 @@ import {
 } from "./selection.ts";
 import {
   readFirstDraftTableColumnIds,
-  TABLE_COLUMN_IDS_FIELD,
   TABLE_COLUMN_WIDTHS_FIELD,
 } from "./model.ts";
+import {
+  appendFirstDraftTableColumn,
+  appendFirstDraftTableRow,
+} from "./mutations.ts";
 
 type Props = FirstDraftBlockRendererProps;
 
 const MIN_WIDTH = 176;
-let nextGeneratedId = 1;
 
 export function TableRenderer({
   block,
@@ -295,7 +292,7 @@ export function TableRenderer({
           "keyboard",
         );
       } else if (!event.shiftKey) {
-        insertRow(editor, block.id, rows.length, columnCount);
+        appendFirstDraftTableRow(editor, block.id, rows.length, columnCount);
       }
       return;
     }
@@ -622,13 +619,20 @@ export function TableRenderer({
           <TableAppendButton
             axis="column"
             label="Add table column"
-            onAppend={() => insertColumn(editor, block.id, columnIds)}
+            onAppend={() =>
+              appendFirstDraftTableColumn(editor, block.id, columnIds)
+            }
           />
           <TableAppendButton
             axis="row"
             label="Add table row"
             onAppend={() =>
-              insertRow(editor, block.id, rows.length, columnCount)
+              appendFirstDraftTableRow(
+                editor,
+                block.id,
+                rows.length,
+                columnCount,
+              )
             }
           />
         </div>
@@ -912,94 +916,4 @@ function resizeColumn(
         : (widths[current] ?? MIN_WIDTH),
     ]),
   );
-}
-
-function generatedId(kind: string): BlockId {
-  nextGeneratedId += 1;
-  return `first-draft-${kind}-${nextGeneratedId}` as BlockId;
-}
-
-function insertRow(
-  editor: EditableEditor,
-  tableId: BlockId,
-  index: number,
-  columnCount: number,
-) {
-  if (columnCount < 1) return;
-  const rowId = generatedId("row");
-  const cells = Array.from({ length: columnCount }, () => generatedId("cell"));
-  const fragment = createCanonicalBlockFragment({
-    blocks: [
-      { id: rowId, type: "tableRow", parentId: null },
-      ...cells.map((id) => ({
-        id,
-        type: "tableCell",
-        parentId: rowId,
-        content: createBlockRichTextContentFromPlainText("tableCell", ""),
-        plainText: "",
-      })),
-    ],
-    rootBlockIds: [rowId],
-    start: { kind: "text", blockId: cells[0]! },
-    end: { kind: "text", blockId: cells[0]! },
-    blockDefinitions: firstDraftBlockDefinitions,
-  });
-  editor.transaction(() => {
-    editor.insertBlocks({ parentId: tableId, childIndex: index }, fragment);
-    editor.setTransactionSelection({
-      kind: "text",
-      blockId: cells[0]!,
-      offset: 0,
-    });
-  });
-}
-
-function insertColumn(
-  editor: EditableEditor,
-  tableId: BlockId,
-  columnIds: readonly string[],
-) {
-  const rowIds = editor.getChildBlockIds(tableId);
-  const newColumnId = generatedId("column");
-  const cellIds = rowIds.map(() => generatedId("cell"));
-  editor.transaction(() => {
-    rowIds.forEach((rowId, index) => {
-      const cellId = cellIds[index]!;
-      const fragment = createCanonicalBlockFragment({
-        blocks: [
-          {
-            id: cellId,
-            type: "tableCell",
-            parentId: null,
-            content: createBlockRichTextContentFromPlainText("tableCell", ""),
-            plainText: "",
-          },
-        ],
-        rootBlockIds: [cellId],
-        start: { kind: "text", blockId: cellId },
-        end: { kind: "text", blockId: cellId },
-        blockDefinitions: firstDraftBlockDefinitions,
-      });
-      editor.insertBlocks(
-        { parentId: rowId, childIndex: columnIds.length },
-        fragment,
-      );
-    });
-    editor.updateBlockMetadata(
-      [
-        {
-          blockId: tableId,
-          values: {
-            [TABLE_COLUMN_IDS_FIELD]: [...columnIds, newColumnId],
-          },
-        },
-      ],
-      { editorSuggestion: null },
-    );
-    editor.setTransactionSelection({
-      kind: "text",
-      blockId: cellIds[0]!,
-      offset: 0,
-    });
-  });
 }

@@ -5,6 +5,7 @@ export {
 } from "../kernel/identity/uuid.ts";
 export type { BlockId, Brand } from "../kernel/identity/ids.ts";
 export {
+  canonicalJsonValueKey,
   cloneJsonValue,
   isJsonObject,
   jsonValuesEqual,
@@ -19,7 +20,10 @@ export type {
   MutableJsonValue,
 } from "../kernel/json/json-value.ts";
 export { validateAllowedKeys } from "../kernel/json/allowed-keys.ts";
-export type { ContentVersion } from "../kernel/versioning/versions.ts";
+export {
+  asContentVersion,
+  type ContentVersion,
+} from "../kernel/versioning/versions.ts";
 export {
   EditorImmutableBinary,
   type EditorContentCheckpoint,

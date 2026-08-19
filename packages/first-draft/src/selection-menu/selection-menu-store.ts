@@ -50,7 +50,13 @@ export interface FirstDraftSelectionMenuStore {
 }
 
 export function createFirstDraftSelectionMenuStore(
-  editor: EditableEditor,
+  editor: Pick<
+    EditableEditor,
+    | "editable"
+    | "selection"
+    | "readCurrentSelectionInlineMarkFormatStates"
+    | "subscribeBlock"
+  >,
 ): FirstDraftSelectionMenuStore {
   const listeners = new Set<() => void>();
   const blockReleases = new Map<BlockId, () => void>();
@@ -94,7 +100,10 @@ export function createFirstDraftSelectionMenuStore(
           states: Object.freeze({}),
           blockIds: Object.freeze([]),
           applicable: false,
-          linkSession: retainLinkSession(snapshot.linkSession, canonical.snapshot),
+          linkSession: retainLinkSession(
+            snapshot.linkSession,
+            canonical.snapshot,
+          ),
         }),
       );
       return;
@@ -111,7 +120,10 @@ export function createFirstDraftSelectionMenuStore(
         states: result.states,
         blockIds: result.blockIds,
         applicable,
-        linkSession: retainLinkSession(snapshot.linkSession, canonical.snapshot),
+        linkSession: retainLinkSession(
+          snapshot.linkSession,
+          canonical.snapshot,
+        ),
       }),
     );
   }
@@ -141,7 +153,9 @@ export function createFirstDraftSelectionMenuStore(
       if (!sameSelectionAuthority(session.selection, snapshot.selection)) {
         return;
       }
-      publish(Object.freeze({ ...snapshot, linkSession: Object.freeze(session) }));
+      publish(
+        Object.freeze({ ...snapshot, linkSession: Object.freeze(session) }),
+      );
     },
     closeLinkSession() {
       if (!snapshot.linkSession) return;
@@ -220,16 +234,16 @@ function sameFormatRange(
 ): boolean {
   return Boolean(
     right &&
-      left.blockId === right.blockId &&
-      left.blockType === right.blockType &&
-      left.from === right.from &&
-      left.to === right.to &&
-      left.coverage === right.coverage &&
-      left.hasMark === right.hasMark &&
-      left.hasUnmarkedText === right.hasUnmarkedText &&
-      inlineMarkValuesEqual(left.value, right.value) &&
-      sameTextAnchor(left.startTextAnchor, right.startTextAnchor) &&
-      sameTextAnchor(left.endTextAnchor, right.endTextAnchor)
+    left.blockId === right.blockId &&
+    left.blockType === right.blockType &&
+    left.from === right.from &&
+    left.to === right.to &&
+    left.coverage === right.coverage &&
+    left.hasMark === right.hasMark &&
+    left.hasUnmarkedText === right.hasUnmarkedText &&
+    inlineMarkValuesEqual(left.value, right.value) &&
+    sameTextAnchor(left.startTextAnchor, right.startTextAnchor) &&
+    sameTextAnchor(left.endTextAnchor, right.endTextAnchor),
   );
 }
 
@@ -241,12 +255,12 @@ function sameTextAnchor(
     left === right ||
     Boolean(
       left &&
-        right &&
-        left.kind === right.kind &&
-        left.codec === right.codec &&
-        left.version === right.version &&
-        left.payload.encoded === right.payload.encoded &&
-        (left.payload.assoc ?? 0) === (right.payload.assoc ?? 0),
+      right &&
+      left.kind === right.kind &&
+      left.codec === right.codec &&
+      left.version === right.version &&
+      left.payload.encoded === right.payload.encoded &&
+      (left.payload.assoc ?? 0) === (right.payload.assoc ?? 0),
     )
   );
 }

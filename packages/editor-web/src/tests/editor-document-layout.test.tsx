@@ -342,6 +342,7 @@ function createSelectionGraph(): EditorSelectionGraphReader {
     id: blockId,
     type: "callout",
     parentId: null,
+    tombstone: null,
     metadataVersion: "1",
     contentVersion: null,
   };

@@ -106,7 +106,6 @@ function createEditor(
       ]),
       onChange,
     }),
-    { blockDefinitions: testEditableEditorDefinition.blocks },
   );
 }
 
@@ -131,6 +130,8 @@ function executeCommand(
     blockId: secondId,
     blockType: "paragraph",
     view,
+    textSelection: { from: 0, to: 0 },
+    executeStructuralTransaction: () => ({ ok: true }),
     dispatchProseMirrorTransaction: () => undefined,
     request: { commandId },
   });

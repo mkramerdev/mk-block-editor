@@ -12,7 +12,7 @@ import {
   initializeTestEditableEditor as initializeEditableEditor,
   initializeTestReadEditor as initializeReadEditor,
 } from "./test-editor-initializers.ts";
-import type { EditorDefinition } from "../runtime/definition/contracts.ts";
+import type { EditableEditorDefinition } from "../runtime/definition/contracts.ts";
 import { createTestEditorSnapshot } from "./editor-snapshot-fixtures.ts";
 import {
   testEditableEditorDefinition,
@@ -21,9 +21,15 @@ import {
 
 const firstId = "phase-one-selection-first" as BlockId;
 const secondId = "phase-one-selection-second" as BlockId;
-const internalSubsystem = registerInternalSelectionSubsystem(
+const registeredInternalSubsystem = registerInternalSelectionSubsystem(
   "phase-one.block-internal",
 );
+if (!registeredInternalSubsystem) {
+  throw new Error(
+    "Expected the block-internal selection subsystem to register",
+  );
+}
+const internalSubsystem = registeredInternalSubsystem;
 
 describe("editor-owned standalone selection publication", () => {
   it("makes a read-only block pointer-selectable and publishes exactly once", () => {
@@ -292,22 +298,22 @@ function InternalSelectionRenderer({
             focusCellId: "cell-b",
           } as const;
           selectionController.commitBlockSelection(
-              target,
-              {
-                blockId: block.id,
-                blockType: block.type,
-                modelId: target.selection.id,
-                coverage: "partial",
-                internal: payload,
-                stableSelectionPayload: payload,
-              },
-              internalSubsystem,
-              {
-                publication: { kind: "standalone-local" },
-                cause: "pointer",
-              },
-              editor.getSelectionGraphRevision(),
-            );
+            target,
+            {
+              blockId: block.id,
+              blockType: block.type,
+              modelId: target.selection.id,
+              coverage: "partial",
+              internal: payload,
+              stableSelectionPayload: payload,
+            },
+            internalSubsystem,
+            {
+              publication: { kind: "standalone-local" },
+              cause: "pointer",
+            },
+            editor.getSelectionGraphRevision(),
+          );
         }}
       >
         select cells
@@ -315,10 +321,10 @@ function InternalSelectionRenderer({
       <button
         data-testid="clear-local-selection"
         onClick={() =>
-            selectionController.clearSelection({
-              publication: { kind: "standalone-local" },
-              cause: "focus",
-            })
+          selectionController.clearSelection({
+            publication: { kind: "standalone-local" },
+            cause: "focus",
+          })
         }
       >
         clear selection
@@ -327,7 +333,7 @@ function InternalSelectionRenderer({
   );
 }
 
-const internalSelectionDefinition: EditorDefinition = {
+const internalSelectionDefinition: EditableEditorDefinition = {
   ...testEditableEditorDefinition,
   blocks: {
     ...testEditableEditorDefinition.blocks,
@@ -356,7 +362,8 @@ function settleBlockRange(
     blockId: focusBlockId,
     textOffset: 0,
   });
-  if (!anchor || !focus) throw new Error("Expected live block selection points");
+  if (!anchor || !focus)
+    throw new Error("Expected live block selection points");
   const settled = editor.selectionController.extendSelection(
     anchor,
     focus,

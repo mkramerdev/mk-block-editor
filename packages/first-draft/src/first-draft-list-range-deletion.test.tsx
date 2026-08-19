@@ -5,7 +5,7 @@ import type { BlockId } from "@repo/editor-core/kernel";
 import type { EditorImplementation } from "@repo/editor-react/editor";
 import { EditorDocument } from "@repo/editor-web/document-runtime";
 import { compileCanonicalEditorDefinition } from "@repo/editor-web/editor-definition";
-import { initializeEditableEditor } from "@repo/editor-web/editor";
+import { initializeCompiledTestEditableEditor as initializeEditableEditor } from "./test-editor.ts";
 import type { EditableEditorDefinition } from "@repo/editor-web/editor";
 import {
   createYjsBlockContentRuntime,
@@ -333,12 +333,12 @@ function renderListFixture(
   if (activeTextView) {
     throw new Error("Fixture unexpectedly activated text before selection");
   }
-  if (!contentRuntime) throw new Error("Missing block content runtime");
+  const mountedContentRuntime = requireContentRuntime(contentRuntime);
   return {
     ...rendered,
     snapshot,
-    editor: editor as unknown as EditorImplementation,
-    contentRuntime,
+    editor,
+    contentRuntime: mountedContentRuntime,
     documentRoot,
     get activeTextView(): HTMLElement {
       const view =
@@ -351,6 +351,13 @@ function renderListFixture(
       editor.dispose();
     },
   };
+}
+
+function requireContentRuntime(
+  runtime: YjsBlockContentRuntime | null,
+): YjsBlockContentRuntime {
+  if (!runtime) throw new Error("Missing block content runtime");
+  return runtime;
 }
 
 function createFourItemOrderedListSnapshot(): EditorInstanceSnapshot {

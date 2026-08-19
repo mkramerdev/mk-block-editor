@@ -58,9 +58,7 @@ function createRouter(doc: Document): DocumentInteractionRouter {
     if (event.button !== 0) return;
     const owner =
       resolveTargetOwner(router, event.target) ??
-      (pointerEventPreservesEditorSelection(event)
-        ? router.activeOwner
-        : null);
+      (pointerEventPreservesEditorSelection(event) ? router.activeOwner : null);
     if (owner) {
       activateOwner(router, owner);
       router.pointerOwners.set(event.pointerId, owner);

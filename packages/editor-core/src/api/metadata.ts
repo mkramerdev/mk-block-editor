@@ -18,9 +18,7 @@ export {
 } from "../metadata/validation.ts";
 export { validateUpdateBlockMetadataOperation } from "../metadata/operation-validation.ts";
 export type { BlockMetadata } from "../document/model/block.ts";
-export {
-  applyBlockMetadataUpdates,
-} from "../metadata/block-metadata-update.ts";
+export { applyBlockMetadataUpdates } from "../metadata/block-metadata-update.ts";
 export type {
   ApplyBlockMetadataUpdatesInput,
   ApplyBlockMetadataUpdatesResult,

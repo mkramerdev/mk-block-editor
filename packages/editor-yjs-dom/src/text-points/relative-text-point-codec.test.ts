@@ -111,7 +111,9 @@ describe("canonical Yjs relative text anchors", () => {
       point: { offset: 3 },
     });
     write(context, "abcd");
-    expect(codec.decode(backward.point)).toMatchObject({ point: { offset: 2 } });
+    expect(codec.decode(backward.point)).toMatchObject({
+      point: { offset: 2 },
+    });
     expect(codec.decode(forward.point)).toMatchObject({ point: { offset: 2 } });
     context.destroy();
   });

@@ -43,14 +43,17 @@ describe("First Draft editor layer ownership", () => {
     expect(firstDraftCss).not.toMatch(
       /\.editor-web-block\s*>\s*:not\(\.first-draft-block-controls,[\s\S]*?z-index:\s*2/u,
     );
-    expect(
-      declaration(firstDraftCss, ".callout-block__callout"),
-    ).not.toMatch(/z-index/u);
+    expect(declaration(firstDraftCss, ".callout-block__callout")).not.toMatch(
+      /z-index/u,
+    );
     expect(declaration(firstDraftCss, ".quote-block__quote")).not.toMatch(
       /z-index/u,
     );
     expect(
-      declaration(firstDraftCss, ".first-draft-example .code-block__presentation"),
+      declaration(
+        firstDraftCss,
+        ".first-draft-example .code-block__presentation",
+      ),
     ).not.toMatch(/z-index/u);
     expect(
       declaration(firstDraftCss, ".first-draft-example .table-block__grid"),

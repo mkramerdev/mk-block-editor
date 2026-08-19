@@ -71,41 +71,60 @@ export function deserializeFirstDraftTransactionFromDatabase(
 ): EditorTransportTransaction | null {
   try {
     const parsed: unknown = JSON.parse(value);
-    if (!isRecord(parsed) || !hasExactKeys(parsed, [
-      "transactionId",
-      "historyAction",
-      "graph",
-      "metadata",
-      "content",
-    ]) || !Array.isArray(parsed.content)) return null;
-    const content: EditorTransportTransaction["content"] = parsed.content.map((entry) => {
-      if (
-        !isRecord(entry) ||
-        !hasExactKeys(entry, ["blockId", "blockType", "readProjection", "update"]) ||
-        !isRichTextProjection(entry.readProjection) ||
-        typeof entry.blockId !== "string" ||
-        typeof entry.blockType !== "string" ||
-        !isRecord(entry.update) ||
-        !hasExactKeys(entry.update, ["kind", "format", "version", "payloadBase64"]) ||
-        entry.update.kind !== "operation" ||
-        typeof entry.update.format !== "string" ||
-        !Number.isSafeInteger(entry.update.version) ||
-        typeof entry.update.payloadBase64 !== "string"
-      ) throw new Error("Persisted transaction content is malformed");
-      const payload = readDatabaseBinary(entry.update.payloadBase64);
-      if (!payload?.byteLength) throw new Error("Persisted transaction binary is malformed");
-      return {
-        blockId: entry.blockId as BlockId,
-        blockType: entry.blockType as BlockType,
-        readProjection: entry.readProjection,
-        update: {
-          kind: entry.update.kind,
-          format: entry.update.format,
-          version: entry.update.version as number,
-          payload,
-        },
-      };
-    });
+    if (
+      !isRecord(parsed) ||
+      !hasExactKeys(parsed, [
+        "transactionId",
+        "historyAction",
+        "graph",
+        "metadata",
+        "content",
+      ]) ||
+      !Array.isArray(parsed.content)
+    )
+      return null;
+    const content: EditorTransportTransaction["content"] = parsed.content.map(
+      (entry) => {
+        if (
+          !isRecord(entry) ||
+          !hasExactKeys(entry, [
+            "blockId",
+            "blockType",
+            "readProjection",
+            "update",
+          ]) ||
+          !isRichTextProjection(entry.readProjection) ||
+          typeof entry.blockId !== "string" ||
+          typeof entry.blockType !== "string" ||
+          !isRecord(entry.update) ||
+          !hasExactKeys(entry.update, [
+            "kind",
+            "format",
+            "version",
+            "payloadBase64",
+          ]) ||
+          entry.update.kind !== "operation" ||
+          typeof entry.update.format !== "string" ||
+          !Number.isSafeInteger(entry.update.version) ||
+          typeof entry.update.payloadBase64 !== "string"
+        )
+          throw new Error("Persisted transaction content is malformed");
+        const payload = readDatabaseBinary(entry.update.payloadBase64);
+        if (!payload?.byteLength)
+          throw new Error("Persisted transaction binary is malformed");
+        return {
+          blockId: entry.blockId as BlockId,
+          blockType: entry.blockType as BlockType,
+          readProjection: entry.readProjection,
+          update: {
+            kind: entry.update.kind,
+            format: entry.update.format,
+            version: entry.update.version as number,
+            payload,
+          },
+        };
+      },
+    );
     const candidate = {
       transactionId: parsed.transactionId,
       historyAction: parsed.historyAction,
@@ -128,7 +147,9 @@ export function deserializeFirstDraftTransactionFromDatabase(
 }
 
 function isRichTextProjection(value: unknown): value is EditorTextBlockContent {
-  return isRecord(value) && value.type === "doc" && Array.isArray(value.content);
+  return (
+    isRecord(value) && value.type === "doc" && Array.isArray(value.content)
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -137,5 +158,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]) {
   const actual = Object.keys(value);
-  return actual.length === keys.length && actual.every((key) => keys.includes(key));
+  return (
+    actual.length === keys.length && actual.every((key) => keys.includes(key))
+  );
 }

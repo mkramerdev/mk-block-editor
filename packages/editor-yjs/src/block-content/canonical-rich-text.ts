@@ -12,6 +12,7 @@ import {
   sliceRichTextDocument,
 } from "@repo/editor-core/content/rich-text";
 import type { EditorLogicalContentOperation } from "@repo/editor-core/operations";
+import { jsonValuesEqual } from "@repo/editor-core/kernel";
 
 const ROOT_NAME = "canonical-rich-text";
 const FORMAT_VERSION = "1";
@@ -191,7 +192,7 @@ export function readCanonicalYjsBlockContent(
       const previous = inline.at(-1);
       if (
         previous?.type === "text" &&
-        JSON.stringify(previous.marks ?? []) === JSON.stringify(marks)
+        jsonValuesEqual(previous.marks ?? [], marks)
       ) {
         inline[inline.length - 1] = {
           ...previous,
@@ -449,8 +450,34 @@ function insertUnits(
 function unitEqual(left: CanonicalUnit, right: CanonicalUnit): boolean {
   return (
     left.text === right.text &&
-    JSON.stringify(left.attributes) === JSON.stringify(right.attributes)
+    attributesEqual(left.attributes, right.attributes)
   );
+}
+
+function attributesEqual(
+  left: Readonly<Record<string, string>>,
+  right: Readonly<Record<string, string>>,
+): boolean {
+  if (left === right) return true;
+  const leftKeys = Object.keys(left);
+  if (leftKeys.length !== Object.keys(right).length) return false;
+  for (const key of leftKeys) {
+    if (!Object.prototype.hasOwnProperty.call(right, key)) return false;
+    const leftValue = left[key]!;
+    const rightValue = right[key]!;
+    if (leftValue === rightValue) continue;
+    if (key !== "marks" && key !== "atom") return false;
+    if (!encodedJsonValuesEqual(leftValue, rightValue)) return false;
+  }
+  return true;
+}
+
+function encodedJsonValuesEqual(left: string, right: string): boolean {
+  try {
+    return jsonValuesEqual(JSON.parse(left), JSON.parse(right));
+  } catch {
+    return false;
+  }
 }
 
 function parseMarks(value: string | undefined): RichTextMarkJson[] {

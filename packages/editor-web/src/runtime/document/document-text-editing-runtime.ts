@@ -608,14 +608,14 @@ export class DocumentTextEditingRuntime {
     const block = this.options.editor.getBlock(request.blockId);
     return Boolean(
       block &&
-        !block.tombstone &&
-        this.options.editor.definition.blocks[block.type]?.kind === "text" &&
-        this.canonicalMatches(
-          request.blockId,
-          request.canonicalSelectionRevision,
-          request.canonicalTextOffset,
-          request.affinity,
-        ),
+      !block.tombstone &&
+      this.options.editor.definition.blocks[block.type]?.kind === "text" &&
+      this.canonicalMatches(
+        request.blockId,
+        request.canonicalSelectionRevision,
+        request.canonicalTextOffset,
+        request.affinity,
+      ),
     );
   }
 
@@ -632,10 +632,10 @@ export class DocumentTextEditingRuntime {
     const focus = canonical.snapshot.documentSelection.focus;
     return Boolean(
       focus &&
-        focus.blockId === blockId &&
-        focus.textAnchor !== null &&
-        focus.textOffset === offset &&
-        (affinity === undefined || focus.affinity === affinity),
+      focus.blockId === blockId &&
+      focus.textAnchor !== null &&
+      focus.textOffset === offset &&
+      (affinity === undefined || focus.affinity === affinity),
     );
   }
 

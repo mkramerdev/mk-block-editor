@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BlockId } from "../../kernel/identity/ids.ts";
 import type { BlockDefinition } from "../../definitions/block-definition.ts";
+import type { BlockType } from "../../document/model/block.ts";
 import {
   wholeSelection,
   wrapperSelection,
@@ -236,11 +237,22 @@ function createTestBlockDefinitions(): Readonly<
   Record<BlockType, BlockDefinition>
 > {
   return {
-    paragraph: { kind: "text", type: "paragraph", renderer },
-    heading: { kind: "text", type: "heading", renderer },
-    placeholder: { kind: "atomic", type: "placeholder", renderer },
+    paragraph: {
+      kind: "text",
+      rootLayout: "normal",
+      type: "paragraph",
+      renderer,
+    },
+    heading: { kind: "text", rootLayout: "normal", type: "heading", renderer },
+    placeholder: {
+      kind: "atomic",
+      rootLayout: "normal",
+      type: "placeholder",
+      renderer,
+    },
     quote: {
       kind: "wrapper",
+      rootLayout: "normal",
       type: "quote",
       renderer,
       content: { required: ["paragraph"] },
@@ -248,6 +260,7 @@ function createTestBlockDefinitions(): Readonly<
     },
     checklistItem: {
       kind: "wrapper",
+      rootLayout: "normal",
       type: "checklistItem",
       renderer,
       content: { required: ["paragraph"] },
@@ -255,6 +268,7 @@ function createTestBlockDefinitions(): Readonly<
     },
     callout: {
       kind: "wrapper",
+      rootLayout: "normal",
       type: "callout",
       renderer,
       content: { required: ["block"], additional: "block" },
@@ -263,6 +277,7 @@ function createTestBlockDefinitions(): Readonly<
     },
     toggleHeading: {
       kind: "wrapper",
+      rootLayout: "normal",
       type: "toggleHeading",
       renderer,
       content: { required: ["heading", "toggleHeadingBody"] },
@@ -270,6 +285,7 @@ function createTestBlockDefinitions(): Readonly<
     },
     toggleHeadingBody: {
       kind: "wrapper",
+      rootLayout: "normal",
       type: "toggleHeadingBody",
       renderer,
       content: { required: ["block"], additional: "block" },
@@ -278,6 +294,7 @@ function createTestBlockDefinitions(): Readonly<
     },
     toggleListItem: {
       kind: "wrapper",
+      rootLayout: "normal",
       type: "toggleListItem",
       renderer,
       content: { required: ["paragraph", "toggleListItemBody"] },
@@ -285,6 +302,7 @@ function createTestBlockDefinitions(): Readonly<
     },
     toggleListItemBody: {
       kind: "wrapper",
+      rootLayout: "normal",
       type: "toggleListItemBody",
       renderer,
       content: { required: ["block"], additional: "block" },
@@ -293,6 +311,7 @@ function createTestBlockDefinitions(): Readonly<
     },
     columns: {
       kind: "wrapper",
+      rootLayout: "normal",
       type: "columns",
       renderer,
       content: { required: ["column"], additional: "column" },
@@ -301,6 +320,7 @@ function createTestBlockDefinitions(): Readonly<
     },
     column: {
       kind: "wrapper",
+      rootLayout: "normal",
       type: "column",
       renderer,
       content: { required: ["block"], additional: "block" },
@@ -310,6 +330,7 @@ function createTestBlockDefinitions(): Readonly<
     },
     tabs: {
       kind: "wrapper",
+      rootLayout: "normal",
       type: "tabs",
       renderer,
       content: { required: ["tabPane"], additional: "tabPane" },
@@ -318,6 +339,7 @@ function createTestBlockDefinitions(): Readonly<
     },
     tabPane: {
       kind: "wrapper",
+      rootLayout: "normal",
       type: "tabPane",
       renderer,
       content: { required: ["block"], additional: "block" },

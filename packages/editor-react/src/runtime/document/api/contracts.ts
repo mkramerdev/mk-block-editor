@@ -23,9 +23,7 @@ import type {
   EditorSelectionTextAnchor,
   EditorSelectionTextAnchorResolver,
 } from "../../../selection/model/types.ts";
-import type {
-  EditorManifestState,
-} from "../state/command-state.ts";
+import type { EditorManifestState } from "../state/command-state.ts";
 import type { EditorBlockCommandRequest } from "../commands/command-request.ts";
 import type { EditorOperationSuggestion } from "../operations/mutation.ts";
 import type { EditorDocumentUpdate } from "../operations/document-update.ts";
@@ -87,6 +85,8 @@ export type CanonicalEditorCommit =
   | (CanonicalEditorCommitBase & {
       readonly kind: "block-graph";
       readonly graphChanges: readonly CanonicalEditorBlockGraphChange[];
+      /** Metadata staged in the same atomic structural transaction. */
+      readonly metadataOperation?: import("@repo/editor-core/operations").UpdateBlockMetadataOperation;
       readonly contentCommit?: AppliedContentCommit;
     })
   | (CanonicalEditorCommitBase & {

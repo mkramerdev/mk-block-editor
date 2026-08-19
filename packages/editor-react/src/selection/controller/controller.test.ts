@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import type { VersionedBlock } from "@repo/editor-core/document";
-import type { BlockId } from "@repo/editor-core/kernel";
+import {
+  asContentVersion,
+  type BlockId,
+  type JsonValue,
+} from "@repo/editor-core/kernel";
 import {
   contentSelection,
   wholeSelection,
@@ -196,12 +200,7 @@ describe("selection controller settlement ownership", () => {
     });
 
     expect(
-      controller.commitSelectionPoint(
-        transient,
-        graph,
-        1,
-        standalonePointer,
-      ),
+      controller.commitSelectionPoint(transient, graph, 1, standalonePointer),
     ).toMatchObject({ kind: "rejected" });
     expect(
       controller.extendSelection(
@@ -584,6 +583,55 @@ describe("selection controller settlement ownership", () => {
       "hidden-for-global-selection",
     );
   });
+
+  it("treats reordered internal JSON descriptors as the same selection", () => {
+    const controller = createSelectionController();
+    const graph = createGraph(["table"], wholeSelection());
+    const target = readEditorBlockSelectionTarget(graph, id("table"));
+    if (!target) throw new Error("Expected table selection target");
+    const coverage = (internal: JsonValue) =>
+      ({
+        blockId: target.block.id,
+        blockType: target.block.type,
+        modelId: target.selection.id,
+        coverage: "partial",
+        internal,
+        stableSelectionPayload: internal,
+      }) satisfies BlockSelectionCoverageResult;
+
+    expect(
+      controller.commitBlockSelection(
+        target,
+        coverage({ a: 1, nested: { x: true, y: false }, order: [1, 2] }),
+        internalSubsystem,
+        standalonePointer,
+        1,
+      ),
+    ).toMatchObject({ kind: "changed" });
+    const revision = controller.getCanonicalSnapshot().revision;
+
+    expect(
+      controller.commitBlockSelection(
+        target,
+        coverage({ order: [1, 2], nested: { y: false, x: true }, a: 1 }),
+        internalSubsystem,
+        standalonePointer,
+        1,
+      ),
+    ).toMatchObject({ kind: "unchanged" });
+    expect(controller.getCanonicalSnapshot().revision).toBe(revision);
+
+    expect(
+      controller.commitBlockSelection(
+        target,
+        coverage({ order: [2, 1], nested: { y: false, x: true }, a: 1 }),
+        internalSubsystem,
+        standalonePointer,
+        1,
+      ),
+    ).toMatchObject({ kind: "changed" });
+    expect(controller.getCanonicalSnapshot().revision).toBe(revision + 1);
+  });
 });
 
 function blockPoint(
@@ -665,9 +713,12 @@ function createGraph(
             ? "paragraph"
             : "callout",
         parentId: null,
+        tombstone: null,
         metadataVersion: "1",
         contentVersion:
-          model.projection.endpoint.kind === "content" ? "1" : null,
+          model.projection.endpoint.kind === "content"
+            ? asContentVersion("1")
+            : null,
       },
     ]),
   );

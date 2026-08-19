@@ -3,6 +3,7 @@ import type {
   ValidatedEditorInstanceSnapshot,
 } from "@repo/editor-core/codecs";
 import type { BlockId } from "@repo/editor-core/kernel";
+import type { EditorContentRuntime } from "@repo/editor-core/content";
 import type { TextPlaceholder } from "@repo/editor-dom/block-editor";
 import {
   EditorImplementation,
@@ -63,7 +64,7 @@ interface ConcreteEditor extends EditableEditorRuntimePort {
 
 interface EditableEditorCapability {
   readonly editor: ConcreteEditor;
-  readonly contentRuntime: ReturnType<typeof createEditorContentRuntime>;
+  readonly contentRuntime: EditorContentRuntime;
   readonly contentResources: ReturnType<
     typeof createEditorContentRuntimeResources
   >;
@@ -756,7 +757,7 @@ export function initializeEditableEditor({
 }
 
 function createSelectionTextAnchorResolver(
-  contentRuntime: ReturnType<typeof createEditorContentRuntime>,
+  contentRuntime: EditorContentRuntime,
 ): EditorSelectionTextAnchorResolver["resolveTextAnchor"] {
   const resolveTextAnchor = contentRuntime.tryResolveTextAnchorInLiveContext;
   return (point) => {

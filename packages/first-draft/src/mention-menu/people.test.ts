@@ -13,9 +13,9 @@ describe("First Draft people catalog", () => {
     expect(readFirstDraftPerson("person-deleted")).toBeNull();
     expect(Object.isFrozen(firstDraftPeople)).toBe(true);
     expect(firstDraftPeople.every(Object.isFrozen)).toBe(true);
-    expect(firstDraftPeople.every(({ keywords }) => Object.isFrozen(keywords))).toBe(
-      true,
-    );
+    expect(
+      firstDraftPeople.every(({ keywords }) => Object.isFrozen(keywords)),
+    ).toBe(true);
   });
 
   it("normalizes compatibility characters, whitespace, and case", () => {
@@ -34,10 +34,11 @@ describe("First Draft people catalog", () => {
     ]);
     expect(filterFirstDraftPeople("maya c")[0]?.id).toBe("person-001");
     expect(filterFirstDraftPeople("WEB")[0]?.id).toBe("person-002");
-    expect(filterFirstDraftPeople("ma").map(({ id }) => id).slice(0, 2)).toEqual([
-      "person-001",
-      "person-004",
-    ]);
+    expect(
+      filterFirstDraftPeople("ma")
+        .map(({ id }) => id)
+        .slice(0, 2),
+    ).toEqual(["person-001", "person-004"]);
   });
 
   it("supports case-insensitive role, keyword, and contains fallbacks", () => {

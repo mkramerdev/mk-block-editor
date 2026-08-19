@@ -3,10 +3,9 @@ import {
   wholeSelection,
   wrapperSelection,
 } from "@repo/editor-core/selection";
-import type { BlockId } from "@repo/editor-core/kernel";
+import { asContentVersion, type BlockId } from "@repo/editor-core/kernel";
 import type { EditorSelectionGraphReader } from "@repo/editor-react/selection";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { EditorWebContentRuntime } from "../../../runtime/content/content-runtime.ts";
 import { resolveEditorSelectionPointerHit } from "./dom-selection-hit-testing.ts";
 
 describe("editor selection pointer hit testing", () => {
@@ -38,6 +37,7 @@ describe("editor selection pointer hit testing", () => {
               id: blockId,
               type: "divider",
               parentId: null,
+              tombstone: null,
               metadataVersion: "1",
               contentVersion: null,
             }
@@ -53,7 +53,6 @@ describe("editor selection pointer hit testing", () => {
       target: list,
       clientX: 50,
       clientY: 108,
-      contentRuntime: {} as EditorWebContentRuntime,
       graph,
     });
 
@@ -84,8 +83,9 @@ describe("editor selection pointer hit testing", () => {
               id: blockId,
               type: "paragraph",
               parentId: null,
+              tombstone: null,
               metadataVersion: "1",
-              contentVersion: "1",
+              contentVersion: asContentVersion("1"),
             }
           : null,
       getParentId: () => null,
@@ -93,34 +93,6 @@ describe("editor selection pointer hit testing", () => {
       getChildBlockIds: () => [],
       readBlockSelectionModel: () => contentSelection(),
     };
-    const contentRuntime = {
-      readBlockProjection: () => ({
-        type: "doc",
-        content: [
-          {
-            type: "paragraph",
-            content: [
-              { type: "text", text: "a" },
-              { type: "hard_break" },
-              { type: "text", text: "b" },
-            ],
-          },
-        ],
-      }),
-      acquireBlockContent: (id: BlockId, blockType: "paragraph", reason: "canonical-transaction") => ({
-        blockId: id,
-        blockType,
-        reason,
-        release: vi.fn(),
-      }),
-      createTextAnchorInContext: (_lease: unknown, input: { readonly textOffset: number }) => ({
-        ok: true,
-        codec: "pointer-test",
-        payload: { encoded: btoa(String(input.textOffset)), assoc: 0 },
-        textOffset: input.textOffset,
-      }),
-    } as unknown as EditorWebContentRuntime;
-
     const caretRangeFromPoint = vi.fn(() => {
       const range = document.createRange();
       range.setStart(root, 2);
@@ -133,7 +105,6 @@ describe("editor selection pointer hit testing", () => {
       target: root.firstChild,
       clientX: 10,
       clientY: 10,
-      contentRuntime,
       graph,
     });
 
@@ -176,34 +147,6 @@ describe("editor selection pointer hit testing", () => {
       configurable: true,
       value: () => ({ offsetNode: text, offset: 3 }),
     });
-    const affinities: unknown[] = [];
-    const contentRuntime = {
-      readBlockProjection: () => ({
-        type: "doc",
-        content: [
-          { type: "paragraph", content: [{ type: "text", text: "abcdef" }] },
-        ],
-      }),
-      acquireBlockContent: (id: BlockId, blockType: "paragraph", reason: "canonical-transaction") => ({
-        blockId: id,
-        blockType,
-        reason,
-        release: vi.fn(),
-      }),
-      createTextAnchorInContext: (_lease: unknown, input: {
-        readonly textOffset: number;
-        readonly affinity?: "backward" | "forward" | null;
-      }) => {
-        affinities.push(input.affinity);
-        return {
-          ok: true,
-          codec: "pointer-test",
-          payload: { encoded: btoa(String(input.textOffset)), assoc: 0 },
-          textOffset: input.textOffset,
-          affinity: input.affinity ?? null,
-        };
-      },
-    } as unknown as EditorWebContentRuntime;
     const graph: EditorSelectionGraphReader = {
       getBlock: (id) =>
         id === blockId
@@ -211,8 +154,9 @@ describe("editor selection pointer hit testing", () => {
               id: blockId,
               type: "paragraph",
               parentId: null,
+              tombstone: null,
               metadataVersion: "1",
-              contentVersion: "1",
+              contentVersion: asContentVersion("1"),
             }
           : null,
       getParentId: () => null,
@@ -226,7 +170,6 @@ describe("editor selection pointer hit testing", () => {
         target: text,
         clientX,
         clientY,
-        contentRuntime,
         graph,
       });
 
@@ -240,7 +183,6 @@ describe("editor selection pointer hit testing", () => {
       expect.objectContaining({ textOffset: 3, affinity: "forward" }),
     );
     expect(forward?.target.block.id).toBe(blockId);
-    expect(affinities).toEqual([]);
 
     Reflect.deleteProperty(document, "caretPositionFromPoint");
     vi.restoreAllMocks();
@@ -279,8 +221,9 @@ describe("editor selection pointer hit testing", () => {
               id,
               type: id === wrapperId ? "columns" : "heading",
               parentId: id === childId ? wrapperId : null,
+              tombstone: null,
               metadataVersion: "1",
-              contentVersion: id === childId ? "1" : null,
+              contentVersion: id === childId ? asContentVersion("1") : null,
             }
           : null,
       getParentId: (id) => (id === childId ? wrapperId : null),
@@ -289,26 +232,6 @@ describe("editor selection pointer hit testing", () => {
       readBlockSelectionModel: (id) =>
         id === wrapperId ? wrapperSelection() : contentSelection(),
     };
-    const contentRuntime = {
-      readBlockProjection: () => ({
-        type: "doc",
-        content: [
-          { type: "paragraph", content: [{ type: "text", text: "heading" }] },
-        ],
-      }),
-      acquireBlockContent: (id: BlockId, blockType: "paragraph", reason: "canonical-transaction") => ({
-        blockId: id,
-        blockType,
-        reason,
-        release: vi.fn(),
-      }),
-      createTextAnchorInContext: (_lease: unknown, input: { readonly textOffset: number }) => ({
-        ok: true,
-        codec: "pointer-test",
-        payload: { encoded: btoa(String(input.textOffset)), assoc: 0 },
-        textOffset: input.textOffset,
-      }),
-    } as unknown as EditorWebContentRuntime;
     const originalElementFromPoint = Object.getOwnPropertyDescriptor(
       document,
       "elementFromPoint",
@@ -324,7 +247,6 @@ describe("editor selection pointer hit testing", () => {
         target: control,
         clientX: 100,
         clientY: 20,
-        contentRuntime,
         graph,
         requireStartEligible: true,
       }),
@@ -336,7 +258,6 @@ describe("editor selection pointer hit testing", () => {
         target: control,
         clientX: 100,
         clientY: 20,
-        contentRuntime,
         graph,
       })?.target.block.id,
     ).toBe(childId);
@@ -467,8 +388,9 @@ function versionedBlock(
     id,
     type,
     parentId,
+    tombstone: null,
     metadataVersion: "1",
-    contentVersion: hasContent ? "1" : null,
+    contentVersion: hasContent ? asContentVersion("1") : null,
   };
 }
 

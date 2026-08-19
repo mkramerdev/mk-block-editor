@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { asBlockId } from "@repo/editor-core/kernel";
+import { asBlockId, asContentVersion } from "@repo/editor-core/kernel";
 import type { BlockDefinition } from "@repo/editor-core/definitions";
 import type { VersionedBlock } from "@repo/editor-core/document";
 import { wholeSelection } from "@repo/editor-core/selection";
@@ -53,7 +53,7 @@ const source: VersionedBlock = {
   parentId: null,
   tombstone: null,
   metadataVersion: "1",
-  contentVersion: "1",
+  contentVersion: asContentVersion("1"),
 };
 
 function fixture(sourceBlock: VersionedBlock = source) {

@@ -21,7 +21,10 @@ import {
   utf8ByteLength,
 } from "../limits.ts";
 import { parseClipboardHtmlDocument } from "./html-document.ts";
-import { normalizeImportedPlainText, normalizeWhitespace } from "./plain-text.ts";
+import {
+  normalizeImportedPlainText,
+  normalizeWhitespace,
+} from "./plain-text.ts";
 import { sanitizeClipboardDocument } from "./sanitization.ts";
 
 export function parseHtmlCanonicalFragment(

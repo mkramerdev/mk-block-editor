@@ -1,5 +1,9 @@
 import type { InlineMarkDefinition } from "@repo/editor-core/content/marks";
-import { Schema, type MarkSpec, type NodeSpec } from "../../prosemirror/index.ts";
+import {
+  Schema,
+  type MarkSpec,
+  type NodeSpec,
+} from "../../prosemirror/index.ts";
 import { createInlineAtomNodeSpecs } from "../inline/atom-node-specs.ts";
 import { createInlineMarkSpecs } from "../inline/mark-specs.ts";
 import { defaultBlockLocalNodeSpecs } from "./node-specs.ts";

@@ -63,7 +63,9 @@ export function normalizeFirstDraftPersonQuery(query: string): string {
   return query.normalize("NFKC").trim().replace(/\s+/gu, " ").toLowerCase();
 }
 
-export function filterFirstDraftPeople(query: string): readonly FirstDraftPerson[] {
+export function filterFirstDraftPeople(
+  query: string,
+): readonly FirstDraftPerson[] {
   const normalizedQuery = normalizeFirstDraftPersonQuery(query);
   if (normalizedQuery.length === 0) return firstDraftPeople;
   return firstDraftPeople
@@ -81,14 +83,20 @@ export function filterFirstDraftPeople(query: string): readonly FirstDraftPerson
     .map(({ candidate }) => candidate);
 }
 
-function scorePerson(personRecord: FirstDraftPerson, query: string): number | null {
+function scorePerson(
+  personRecord: FirstDraftPerson,
+  query: string,
+): number | null {
   const name = normalizeFirstDraftPersonQuery(personRecord.displayName);
   const role = normalizeFirstDraftPersonQuery(personRecord.role);
   const keywords = personRecord.keywords.map(normalizeFirstDraftPersonQuery);
   if (name === query) return 0;
   if (name.startsWith(query)) return 1;
   if (name.split(" ").some((word) => word.startsWith(query))) return 2;
-  if (role.startsWith(query) || keywords.some((keyword) => keyword.startsWith(query))) {
+  if (
+    role.startsWith(query) ||
+    keywords.some((keyword) => keyword.startsWith(query))
+  ) {
     return 3;
   }
   if (

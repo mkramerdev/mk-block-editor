@@ -117,7 +117,9 @@ describe("deriveProseMirrorOperations", () => {
         deletedContent: [{ type: "text", text: "bc" }],
       },
     ]);
-    expect(derive(state, state.tr.insertText("pasted", 3)).operations).toMatchObject([
+    expect(
+      derive(state, state.tr.insertText("pasted", 3)).operations,
+    ).toMatchObject([
       {
         kind: "insertInlineContent",
         position: { offset: 2 },
@@ -144,7 +146,9 @@ describe("deriveProseMirrorOperations", () => {
       schema.nodes.mention!.create({ metadata: { id: "user-1" } }),
     ];
 
-    expect(derive(state, state.tr.replaceWith(2, 2, fragment)).operations).toEqual([
+    expect(
+      derive(state, state.tr.replaceWith(2, 2, fragment)).operations,
+    ).toEqual([
       {
         kind: "insertInlineContent",
         blockId,

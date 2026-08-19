@@ -17,11 +17,13 @@ export function useEditorStoreSelector<T>(
     selectedRef.current = { value: next };
     return next;
   };
-  const subscribe = useCallback((listener: () => void) => (
-    store.subscribeSelector
-      ? store.subscribeSelector(selector, isEqual, listener)
-      : store.subscribe(listener)
-  ), [isEqual, selector, store]);
+  const subscribe = useCallback(
+    (listener: () => void) =>
+      store.subscribeSelector
+        ? store.subscribeSelector(selector, isEqual, listener)
+        : store.subscribe(listener),
+    [isEqual, selector, store],
+  );
 
   return useSyncExternalStore(
     subscribe,

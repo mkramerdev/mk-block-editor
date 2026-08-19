@@ -105,8 +105,7 @@ interface MutableBlock {
 
 class FirstDraftSemanticError extends Error {}
 
-export interface AcceptFirstDraftTransactionInPostgresOptions
-  extends AcceptFirstDraftTransactionInput {
+export interface AcceptFirstDraftTransactionInPostgresOptions extends AcceptFirstDraftTransactionInput {
   readonly client: FirstDraftPostgresTransactionClient;
   readonly now?: number;
   readonly blockDefinitions?: Readonly<Record<BlockType, BlockDefinition>>;
@@ -480,14 +479,14 @@ function sameTransactionProposal(
     const candidate = proposed.content[index];
     return Boolean(
       candidate &&
-        entry.blockId === candidate.blockId &&
-        entry.blockType === candidate.blockType &&
-        entry.update.kind === candidate.update.kind &&
-        entry.update.format === candidate.update.format &&
-        entry.update.version === candidate.update.version &&
-        Buffer.from(entry.update.payload.copy()).equals(
-          Buffer.from(candidate.update.payload.copy()),
-        ),
+      entry.blockId === candidate.blockId &&
+      entry.blockType === candidate.blockType &&
+      entry.update.kind === candidate.update.kind &&
+      entry.update.format === candidate.update.format &&
+      entry.update.version === candidate.update.version &&
+      Buffer.from(entry.update.payload.copy()).equals(
+        Buffer.from(candidate.update.payload.copy()),
+      ),
     );
   });
 }

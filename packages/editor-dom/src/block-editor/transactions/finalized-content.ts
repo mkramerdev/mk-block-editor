@@ -46,7 +46,11 @@ export function applyFinalizedContentOperations(
         if (operation.kind === "deleteInlineRange") {
           transaction.delete(from, to);
         } else {
-          transaction.replaceWith(from, to, inlineFragment(next, operation.content));
+          transaction.replaceWith(
+            from,
+            to,
+            inlineFragment(next, operation.content),
+          );
         }
       }
       next = next.apply(transaction);
@@ -73,7 +77,9 @@ export function projectFinalizedTextSelection(
   const selection = TextSelection.create(state.doc, anchor, focus);
   return selection.eq(state.selection)
     ? state
-    : state.apply(state.tr.setSelection(selection).setMeta("addToHistory", false));
+    : state.apply(
+        state.tr.setSelection(selection).setMeta("addToHistory", false),
+      );
 }
 
 function inlineFragment(

@@ -18,7 +18,10 @@ import type {
   EditorLogicalContentOperation,
   EditorLogicalRichTextRange,
 } from "../../operations/language/logical-operations.ts";
-import { cloneJsonValue, jsonValuesEqual } from "../../kernel/json/json-value.ts";
+import {
+  cloneJsonValue,
+  jsonValuesEqual,
+} from "../../kernel/json/json-value.ts";
 
 export function rebaseLogicalContentOperationByExpectedContent(
   blockType: BlockType,
@@ -42,16 +45,36 @@ export function rebaseLogicalContentOperationByExpectedContent(
 function rebaseRangeOperationByExpectedContent(
   base: RichTextDocumentNodeJson,
   blockType: BlockType,
-  operation: Extract<EditorLogicalContentOperation, { readonly range: EditorLogicalRichTextRange }>,
+  operation: Extract<
+    EditorLogicalContentOperation,
+    { readonly range: EditorLogicalRichTextRange }
+  >,
 ): EditorLogicalContentOperation | null {
-  const expectedContent = "deletedContent" in operation ? operation.deletedContent : undefined;
-  if (!expectedContent || expectedContent.length === 0) return cloneJsonValue(operation);
-  if (inlineContentMatchesRange(base, blockType, operation.range.from.offset, operation.range.to.offset, expectedContent)) {
+  const expectedContent =
+    "deletedContent" in operation ? operation.deletedContent : undefined;
+  if (!expectedContent || expectedContent.length === 0)
+    return cloneJsonValue(operation);
+  if (
+    inlineContentMatchesRange(
+      base,
+      blockType,
+      operation.range.from.offset,
+      operation.range.to.offset,
+      expectedContent,
+    )
+  ) {
     return cloneJsonValue(operation);
   }
-  const relocatedFrom = findNearestInlineContentOffset(base, operation.range.from.offset, expectedContent);
+  const relocatedFrom = findNearestInlineContentOffset(
+    base,
+    operation.range.from.offset,
+    expectedContent,
+  );
   if (relocatedFrom === null) return null;
-  const expectedSize = expectedContent.reduce((total, node) => total + richInlineNodeSize(node), 0);
+  const expectedSize = expectedContent.reduce(
+    (total, node) => total + richInlineNodeSize(node),
+    0,
+  );
   const size = richTextDocumentContentSize(base);
   if (relocatedFrom + expectedSize > size) return null;
   return {
@@ -77,7 +100,11 @@ function inlineContentMatchesRange(
   expectedContent: readonly RichTextInlineNodeJson[],
 ): boolean {
   if (!rangeWithinDocument(base, from, to)) return false;
-  const actual = richInlineNodesToUnits(richTextBlockInlineContent(sliceRichTextDocument(blockType, base, from, to)));
+  const actual = richInlineNodesToUnits(
+    richTextBlockInlineContent(
+      sliceRichTextDocument(blockType, base, from, to),
+    ),
+  );
   const expected = richInlineNodesToUnits(expectedContent);
   return inlineUnitRangesEqual(actual, expected);
 }
@@ -89,11 +116,26 @@ function findNearestInlineContentOffset(
 ): number | null {
   const actualUnits = richInlineNodesToUnits(richTextBlockInlineContent(base));
   const expectedUnits = richInlineNodesToUnits(expectedContent);
-  if (expectedUnits.length === 0 || expectedUnits.length > actualUnits.length) return null;
+  if (expectedUnits.length === 0 || expectedUnits.length > actualUnits.length)
+    return null;
   let bestOffset: number | null = null;
-  for (let offset = 0; offset <= actualUnits.length - expectedUnits.length; offset += 1) {
-    if (!inlineUnitRangesEqual(actualUnits.slice(offset, offset + expectedUnits.length), expectedUnits)) continue;
-    if (bestOffset === null || Math.abs(offset - preferredOffset) < Math.abs(bestOffset - preferredOffset)) {
+  for (
+    let offset = 0;
+    offset <= actualUnits.length - expectedUnits.length;
+    offset += 1
+  ) {
+    if (
+      !inlineUnitRangesEqual(
+        actualUnits.slice(offset, offset + expectedUnits.length),
+        expectedUnits,
+      )
+    )
+      continue;
+    if (
+      bestOffset === null ||
+      Math.abs(offset - preferredOffset) <
+        Math.abs(bestOffset - preferredOffset)
+    ) {
       bestOffset = offset;
     }
   }
@@ -104,10 +146,23 @@ function inlineUnitRangesEqual(
   left: readonly RichTextInlineNodeJson[],
   right: readonly RichTextInlineNodeJson[],
 ): boolean {
-  return left.length === right.length && left.every((unit, index) => jsonValuesEqual(unit, right[index] ?? null));
+  return (
+    left.length === right.length &&
+    left.every((unit, index) => jsonValuesEqual(unit, right[index] ?? null))
+  );
 }
 
-function rangeWithinDocument(base: RichTextDocumentNodeJson, from: number, to: number): boolean {
+function rangeWithinDocument(
+  base: RichTextDocumentNodeJson,
+  from: number,
+  to: number,
+): boolean {
   const size = richTextDocumentContentSize(base);
-  return Number.isInteger(from) && Number.isInteger(to) && from >= 0 && to >= from && to <= size;
+  return (
+    Number.isInteger(from) &&
+    Number.isInteger(to) &&
+    from >= 0 &&
+    to >= from &&
+    to <= size
+  );
 }

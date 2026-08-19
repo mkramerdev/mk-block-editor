@@ -131,7 +131,10 @@ export function createSingleTextBlockPlainTextImportHandler(options?: {
 }): EditorPlainTextImportHandler {
   return {
     id: options?.id ?? "core.single-text-block",
-    importText(text: string, context: import("./codec-contracts.ts").EditorPlainTextImportContext) {
+    importText(
+      text: string,
+      context: import("./codec-contracts.ts").EditorPlainTextImportContext,
+    ) {
       const normalized = normalizeLineEndings(text);
       if (
         utf8ByteLength(normalized) > context.limits.maxPlainTextBytes ||

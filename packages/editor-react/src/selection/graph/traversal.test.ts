@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { VersionedBlock } from "@repo/editor-core/document";
-import type { BlockId } from "@repo/editor-core/kernel";
+import { asContentVersion, type BlockId } from "@repo/editor-core/kernel";
 import {
   contentSelection,
   wholeSelection,
@@ -118,10 +118,11 @@ function createGraph(input: {
       type: model.projection.category === "text" ? "paragraph" : "callout",
       parentId: parentById.get(blockId) ?? null,
       metadataVersion: "1",
-      contentVersion: model.projection.category === "text" ? "1" : null,
-      ...(tombstones.has(blockId)
-        ? { tombstone: { deletedAt: 1, reason: "test" } }
-        : {}),
+      contentVersion:
+        model.projection.category === "text" ? asContentVersion("1") : null,
+      tombstone: tombstones.has(blockId)
+        ? { deletedAt: 1, reason: "user-delete" }
+        : null,
     });
   }
   return {

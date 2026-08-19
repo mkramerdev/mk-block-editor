@@ -1,17 +1,49 @@
 import { useLayoutEffect, useState } from "react";
 import { render } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
-import type { EditorImplementation } from "@repo/editor-react/editor";
-import type { EditorExternalStore } from "@repo/editor-react/store";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  conventionalHistoryCommands,
-  conventionalHistoryKeybindings,
-} from "../../api/keybindings.ts";
+  createEditorExternalStore,
+  createInitialEditorSessionState,
+} from "@repo/editor-react/store";
+import { asBlockId } from "@repo/editor-core/kernel";
 import { testEditableEditorDefinition } from "../../tests/test-editor-definition.ts";
-import { compileRegisteredEditorCommands } from "../definition/commands.ts";
+import { createTestEditorSnapshot } from "../../tests/editor-snapshot-fixtures.ts";
+import { initializeTestEditableEditor } from "../../tests/test-editor-initializers.ts";
 import { registerDocumentInteractionOwner } from "../../document/interaction/document-interaction-router.ts";
-import { compileEditorKeybindings } from "./compiled-keybindings.ts";
+import type {
+  EditorCommandDefinition,
+  EditorKeyBinding,
+} from "../definition/contracts.ts";
+import { resolveEditorRuntimePort } from "../document/runtime-port-registry.ts";
+import type { EditableEditorRuntimePort } from "../document/render-port.ts";
 import { createEditorDocumentInputRouting } from "./document-input-routing.ts";
+
+const blockId = asBlockId("01890f07-1c00-7000-8000-000000000905");
+const historyCommands = [
+  {
+    id: "test.history.undo",
+    scope: "document",
+    execute: ({ editor }) => {
+      editor.undo();
+    },
+  },
+  {
+    id: "test.history.redo",
+    scope: "document",
+    execute: ({ editor }) => {
+      editor.redo();
+    },
+  },
+] satisfies readonly EditorCommandDefinition[];
+const historyKeybindings = [
+  { key: "Mod-z", commandId: "test.history.undo", scope: "document" },
+  { key: "Mod-y", commandId: "test.history.redo", scope: "document" },
+] satisfies readonly EditorKeyBinding[];
+const liveEditors: TestEditor[] = [];
+
+afterEach(() => {
+  for (const editor of liveEditors.splice(0)) editor.dispose();
+});
 
 describe("exact document command ownership", () => {
   it("routes a configured shortcut from the editor's active exact target", () => {
@@ -89,11 +121,13 @@ describe("exact document command ownership", () => {
   });
 });
 
-type TestEditor = EditorImplementation & {
+interface TestEditor {
+  readonly runtime: EditableEditorRuntimePort;
   readonly undo: ReturnType<typeof vi.fn>;
   readonly redo: ReturnType<typeof vi.fn>;
-  registerExactTarget(target: HTMLElement): void;
-};
+  registerExactTarget(target: HTMLElement): () => void;
+  dispose(): void;
+}
 
 function RoutingHarness({
   editor,
@@ -107,29 +141,35 @@ function RoutingHarness({
     if (!list) return undefined;
     const target = list.querySelector<HTMLElement>("[data-editor-text-root]");
     if (!target) throw new Error("Missing exact text target");
-    editor.registerExactTarget(target);
-    const store = {
-      getSnapshot: () => ({
-        overlay: { active: false, id: null, blockId: null, anchor: null },
-      }),
-    } as EditorExternalStore;
+    editor.runtime.bindNativeFocusOwnerDocument(list.ownerDocument);
+    const unregisterTarget = editor.registerExactTarget(target);
+    const store = createEditorExternalStore(
+      createInitialEditorSessionState({}),
+    );
     const input = createEditorDocumentInputRouting(list.ownerDocument, {
       definition: testEditableEditorDefinition,
       store,
-      editor: editor as never,
+      editor: editor.runtime,
     });
-    return registerDocumentInteractionOwner(list.ownerDocument, {
-      list,
-      deactivate: () => undefined,
-      pointerdown: () => undefined,
-      pointermove: () => undefined,
-      pointerup: () => undefined,
-      pointercancel: () => undefined,
-      beforeinput: input.beforeinput,
-      keydown: input.keydown,
-      keyup: () => undefined,
-      scroll: () => undefined,
-    });
+    const unregisterInteraction = registerDocumentInteractionOwner(
+      list.ownerDocument,
+      {
+        list,
+        releaseInteraction: () => undefined,
+        pointerdown: () => undefined,
+        pointermove: () => undefined,
+        pointerup: () => undefined,
+        pointercancel: () => undefined,
+        beforeinput: input.beforeinput,
+        keydown: input.keydown,
+        keyup: () => undefined,
+        scroll: () => undefined,
+      },
+    );
+    return () => {
+      unregisterInteraction();
+      unregisterTarget();
+    };
   }, [editor, list]);
   const prefix = testId ? `${testId}-` : "";
   return (
@@ -148,32 +188,29 @@ function RoutingHarness({
 }
 
 function historyEditor(): TestEditor {
-  const commands = compileRegisteredEditorCommands(conventionalHistoryCommands);
-  const targets = new Set<HTMLElement>();
-  return {
-    editable: true,
-    canUndo: true,
-    canRedo: true,
-    commands,
-    keybindings: compileEditorKeybindings(
-      conventionalHistoryKeybindings,
-      commands,
-    ),
-    selection: {
-      getSnapshot: () => ({ kind: "none" as const, revision: 0 }),
-      subscribe: () => () => undefined,
+  const editor = initializeTestEditableEditor({
+    definition: {
+      ...testEditableEditorDefinition,
+      commands: historyCommands,
+      keybindings: historyKeybindings,
     },
-    ownsNativeFocusTarget: (target: EventTarget | null) =>
-      target instanceof HTMLElement && targets.has(target),
-    ownsActiveElement: (ownerDocument: Document) =>
-      ownerDocument.activeElement instanceof HTMLElement &&
-      targets.has(ownerDocument.activeElement),
-    registerExactTarget: (target: HTMLElement) => {
-      targets.add(target);
-    },
-    undo: vi.fn(() => ({ status: "history-empty" as const })),
-    redo: vi.fn(() => ({ status: "history-empty" as const })),
-  } as unknown as TestEditor;
+    snapshot: createTestEditorSnapshot([{ id: blockId, type: "divider" }]),
+  });
+  const runtime = resolveEditorRuntimePort(editor);
+  const undo = vi.fn(runtime.undo.bind(runtime));
+  const redo = vi.fn(runtime.redo.bind(runtime));
+  const testEditor = {
+    runtime,
+    undo,
+    redo,
+    registerExactTarget: (target: HTMLElement) =>
+      runtime.registerAtomicFocusTarget(blockId, target),
+    dispose: () => editor.dispose(),
+  };
+  vi.spyOn(runtime, "undo").mockImplementation(testEditor.undo);
+  vi.spyOn(runtime, "redo").mockImplementation(testEditor.redo);
+  liveEditors.push(testEditor);
+  return testEditor;
 }
 
 function keydown(key: string, init: KeyboardEventInit): KeyboardEvent {

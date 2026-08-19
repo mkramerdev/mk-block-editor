@@ -75,7 +75,9 @@ function matchesMetadataFieldType(
     case "boolean":
       return typeof value === "boolean";
     case "object":
-      return value !== null && typeof value === "object" && !Array.isArray(value);
+      return (
+        value !== null && typeof value === "object" && !Array.isArray(value)
+      );
     case "array":
       return Array.isArray(value);
     case "null":

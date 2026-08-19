@@ -28,8 +28,16 @@ export function fixedPopoverPositionForAnchor(
   const openUpward = spaceBelow < height && spaceAbove > spaceBelow;
   const unclampedTop = openUpward ? rect.top - gap - height : rect.bottom + gap;
   return {
-    top: clamp(unclampedTop, margin, Math.max(margin, viewportHeight - margin - height)),
-    left: clamp(rect.left, margin, Math.max(margin, viewportWidth - width - margin)),
+    top: clamp(
+      unclampedTop,
+      margin,
+      Math.max(margin, viewportHeight - margin - height),
+    ),
+    left: clamp(
+      rect.left,
+      margin,
+      Math.max(margin, viewportWidth - width - margin),
+    ),
     placement: openUpward ? "top" : "bottom",
   };
 }
@@ -37,4 +45,3 @@ export function fixedPopoverPositionForAnchor(
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
-

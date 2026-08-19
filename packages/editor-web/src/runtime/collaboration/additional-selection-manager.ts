@@ -1,6 +1,7 @@
 import {
   cloneJsonValue,
   isStructuralKey,
+  jsonValuesEqual,
   type BlockId,
   type JsonValue,
 } from "@repo/editor-core/kernel";
@@ -13,7 +14,7 @@ import {
   type EditorSelectionGraphReader,
   type StableEditorSelection,
 } from "@repo/editor-react/selection";
-import type { EditorContentRuntime } from "../content/content-runtime.ts";
+import type { EditorContentRuntime } from "@repo/editor-core/content";
 import type { CompiledCanonicalEditorDefinition } from "../definition/compiled-editor-definition.ts";
 import type { EditorBlockInternalSelectionSubsystemDefinition } from "../definition/contracts.ts";
 import type {
@@ -358,17 +359,17 @@ export class AdditionalSelectionManager implements EditorAdditionalSelectionRead
       : (this.blockSnapshots ??= new Map());
     const previous = snapshots.get(blockId);
     const next = this.filteredBlockSnapshot(blockId, internalOnly);
-    if (previous && recordsKey(previous) === recordsKey(next)) return previous;
+    if (previous && jsonValuesEqual(previous, next)) return previous;
     snapshots.set(blockId, next);
     return next;
   }
 
   private mutate(mutation: () => void): void {
-    const previousGlobal = recordsKey(this.snapshot);
-    const previousBlocks = focusedKeys(this.blockListeners, (blockId) =>
+    const previousGlobal = this.snapshot;
+    const previousBlocks = focusedSnapshots(this.blockListeners, (blockId) =>
       this.getBlockSnapshot(blockId),
     );
-    const previousInternal = focusedKeys(
+    const previousInternal = focusedSnapshots(
       this.blockInternalListeners,
       (blockId) => this.getBlockInternalSnapshot(blockId),
     );
@@ -380,7 +381,7 @@ export class AdditionalSelectionManager implements EditorAdditionalSelectionRead
           ),
         )
       : emptyRecords;
-    if (previousGlobal !== recordsKey(this.snapshot)) {
+    if (!jsonValuesEqual(previousGlobal, this.snapshot)) {
       for (const listener of [...(this.globalListeners ?? [])]) {
         notifyListener(listener);
       }
@@ -844,31 +845,24 @@ function isWithinSubtree(
   return false;
 }
 
-function recordsKey(records: readonly AdditionalSelectionRecord[]): string {
-  return JSON.stringify(records);
-}
-
-function focusedKeys(
+function focusedSnapshots(
   listeners: ReadonlyMap<BlockId, Set<() => void>> | null,
   read: (blockId: BlockId) => readonly AdditionalSelectionRecord[],
-): ReadonlyMap<BlockId, string> {
-  if (!listeners) return emptyFocusedKeys;
+): ReadonlyMap<BlockId, readonly AdditionalSelectionRecord[]> {
+  if (!listeners) return emptyFocusedSnapshots;
   return new Map(
-    [...listeners.keys()].map((blockId) => [
-      blockId,
-      recordsKey(read(blockId)),
-    ]),
+    [...listeners.keys()].map((blockId) => [blockId, read(blockId)]),
   );
 }
 
 function notifyFocusedChanges(
   listeners: ReadonlyMap<BlockId, Set<() => void>> | null,
-  previous: ReadonlyMap<BlockId, string>,
+  previous: ReadonlyMap<BlockId, readonly AdditionalSelectionRecord[]>,
   read: (blockId: BlockId) => readonly AdditionalSelectionRecord[],
 ): void {
   if (!listeners) return;
   for (const [blockId, blockListeners] of listeners) {
-    if (previous.get(blockId) === recordsKey(read(blockId))) continue;
+    if (jsonValuesEqual(previous.get(blockId), read(blockId))) continue;
     for (const listener of [...blockListeners]) notifyListener(listener);
   }
 }
@@ -925,7 +919,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 const noop = () => undefined;
 const emptyRecords = Object.freeze([]) as readonly AdditionalSelectionRecord[];
-const emptyFocusedKeys: ReadonlyMap<BlockId, string> = new Map<
+const emptyFocusedSnapshots: ReadonlyMap<
   BlockId,
-  string
->();
+  readonly AdditionalSelectionRecord[]
+> = new Map<BlockId, readonly AdditionalSelectionRecord[]>();

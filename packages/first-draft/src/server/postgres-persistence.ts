@@ -17,8 +17,7 @@ import type {
 } from "./persistence.ts";
 
 export interface FirstDraftPostgresPersistence
-  extends FirstDraftTransactionPersistence,
-    FirstDraftDocumentLoader {
+  extends FirstDraftTransactionPersistence, FirstDraftDocumentLoader {
   assertReady(): Promise<void>;
   checkReadiness(): Promise<FirstDraftPostgresSchemaValidation>;
   close(): Promise<void>;

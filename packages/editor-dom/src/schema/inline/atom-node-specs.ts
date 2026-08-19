@@ -11,9 +11,9 @@ export function createInlineAtomNodeSpecs(
   );
 }
 
-export function createInlineAtomNodeSpec(
-  definition: { readonly type: string },
-): NodeSpec {
+export function createInlineAtomNodeSpec(definition: {
+  readonly type: string;
+}): NodeSpec {
   return {
     inline: true,
     group: "inline",

@@ -82,9 +82,7 @@ describe("editable canonical clipboard paste", () => {
     const runtime = editor as EditableEditorRuntimePort;
     const view = render(<EditorDocument editor={editor} />);
 
-    act(() =>
-      settleTextRange(editor, sourceFirst, 0, sourceLast, 3),
-    );
+    act(() => settleTextRange(editor, sourceFirst, 0, sourceLast, 3));
     const clipboard = new MemoryDataTransfer();
     const copy = clipboardEvent("copy", clipboard);
     textRoot(view.container, sourceFirst).dispatchEvent(copy);
@@ -107,9 +105,7 @@ describe("editable canonical clipboard paste", () => {
     const trailingId = pastedRoots[targetIndex + 1];
     if (!trailingId) throw new Error("Expected trailing pasted text block");
     expect(editor.readBlockPlainText(target, "paragraph")).toBe("leftone");
-    expect(editor.readBlockPlainText(trailingId, "paragraph")).toBe(
-      "tworight",
-    );
+    expect(editor.readBlockPlainText(trailingId, "paragraph")).toBe("tworight");
     expectCanonicalCollapsedCaret(runtime, trailingId, 3);
 
     await waitFor(() => {
@@ -142,9 +138,7 @@ describe("editable canonical clipboard paste", () => {
     );
 
     act(() => expect(editor.undo()).toEqual({ status: "applied" }));
-    expect(editor.readBlockPlainText(trailingId, "paragraph")).toBe(
-      "tworight",
-    );
+    expect(editor.readBlockPlainText(trailingId, "paragraph")).toBe("tworight");
     expectCanonicalCollapsedCaret(runtime, trailingId, 3);
 
     act(() => expect(editor.undo()).toEqual({ status: "applied" }));
@@ -155,9 +149,7 @@ describe("editable canonical clipboard paste", () => {
 
     act(() => expect(editor.redo()).toEqual({ status: "applied" }));
     expect(editor.readBlockPlainText(target, "paragraph")).toBe("leftone");
-    expect(editor.readBlockPlainText(trailingId, "paragraph")).toBe(
-      "tworight",
-    );
+    expect(editor.readBlockPlainText(trailingId, "paragraph")).toBe("tworight");
     expectCanonicalCollapsedCaret(runtime, trailingId, 3);
     act(() => expect(editor.redo()).toEqual({ status: "applied" }));
     expect(editor.readBlockPlainText(trailingId, "paragraph")).toBe(

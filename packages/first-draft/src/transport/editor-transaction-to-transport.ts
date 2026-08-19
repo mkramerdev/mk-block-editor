@@ -24,7 +24,9 @@ export function convertEditorTransactionToTransport(
   const metadata =
     transaction.kind === "block-metadata"
       ? cloneJsonValue(transaction.canonicalOperation)
-      : null;
+      : transaction.kind === "block-graph" && transaction.metadataOperation
+        ? cloneJsonValue(transaction.metadataOperation)
+        : null;
   const contentChanges =
     transaction.kind === "block-content"
       ? [

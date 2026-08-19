@@ -1,4 +1,9 @@
-import type { Block, BlockType } from "@repo/editor-core/document";
+import type {
+  Block,
+  BlockType,
+  RelativeTextPoint,
+} from "@repo/editor-core/document";
+import type { EditorContentTextAffinity } from "@repo/editor-core/content";
 import type {
   BlockSelectionCoverage,
   BlockSelectionCoverageResult,
@@ -15,7 +20,7 @@ export type EditorSelectionDirection = "forward" | "backward";
 
 export type EditorSelectionRangeCoverage = BlockSelectionCoverage;
 
-export type EditorSelectionTextAffinity = "forward" | "backward";
+export type EditorSelectionTextAffinity = EditorContentTextAffinity;
 
 /**
  * A logical selection intent. It contains no graph revision, derived range
@@ -62,10 +67,7 @@ export type EditorSelectionInvalidationReason =
   | "stale-graph"
   | "graph-changed";
 
-export interface EditorSelectionTextAnchorPayload {
-  encoded: string;
-  assoc?: -1 | 0 | 1;
-}
+export type EditorSelectionTextAnchorPayload = RelativeTextPoint;
 
 export interface EditorSelectionEncodedTextAnchor {
   kind: "block-relative-text";

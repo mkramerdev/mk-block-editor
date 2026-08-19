@@ -13,9 +13,7 @@ import {
 } from "./block-graph-patch.ts";
 
 const id = (suffix: number): BlockId =>
-  asBlockId(
-    `01890f07-1c00-7000-8000-${String(suffix).padStart(12, "0")}`,
-  );
+  asBlockId(`01890f07-1c00-7000-8000-${String(suffix).padStart(12, "0")}`);
 const record = (blockId: BlockId): VersionedBlock =>
   createVersionedBlockRecord({
     id: blockId,

@@ -50,7 +50,9 @@ export function projectCanonicalSelectionToTransaction(
   const logicalFocus = snapshot.endpoints.head;
   const anchor = stableDocumentPoint(logicalAnchor);
   const focus =
-    logicalAnchor && logicalFocus && sameLogicalPoint(logicalAnchor, logicalFocus)
+    logicalAnchor &&
+    logicalFocus &&
+    sameLogicalPoint(logicalAnchor, logicalFocus)
       ? anchor
       : stableDocumentPoint(logicalFocus);
   if (!direction || !anchor || !focus) {

@@ -178,10 +178,10 @@ export function createTableRangeCoverage(
   const columns = rowIds[0] ? graph.getChildBlockIds(rowIds[0]).length : 0;
   const complete = Boolean(
     resolved &&
-      Math.min(resolved.anchor.row, resolved.head.row) === 0 &&
-      Math.max(resolved.anchor.row, resolved.head.row) === rowIds.length - 1 &&
-      Math.min(resolved.anchor.column, resolved.head.column) === 0 &&
-      Math.max(resolved.anchor.column, resolved.head.column) === columns - 1,
+    Math.min(resolved.anchor.row, resolved.head.row) === 0 &&
+    Math.max(resolved.anchor.row, resolved.head.row) === rowIds.length - 1 &&
+    Math.min(resolved.anchor.column, resolved.head.column) === 0 &&
+    Math.max(resolved.anchor.column, resolved.head.column) === columns - 1,
   );
   return {
     blockId: tableId,

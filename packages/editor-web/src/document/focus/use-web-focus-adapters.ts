@@ -12,9 +12,7 @@ import { isEditorInteractiveControlTarget } from "../interaction/interactive-tar
 export interface WebFocusAdaptersOptions {
   editor: Pick<
     EditableEditorRuntimePort,
-    | "blurEditor"
-    | "ownsActiveElement"
-    | "ownsNativeFocusTarget"
+    "blurEditor" | "ownsActiveElement" | "ownsNativeFocusTarget"
   >;
   listElement?: HTMLElement | null;
   releaseComposition?: () => void;
@@ -82,7 +80,8 @@ export function useWebFocusAdapters({
       editor.blurEditor();
       return;
     }
-    if (!list.isConnected || editor.ownsActiveElement(list.ownerDocument)) return;
+    if (!list.isConnected || editor.ownsActiveElement(list.ownerDocument))
+      return;
     editor.blurEditor();
   }
 

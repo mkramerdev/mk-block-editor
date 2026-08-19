@@ -1,4 +1,8 @@
-import type { NodeView, NodeViewConstructor, PMNode } from "../prosemirror/index.ts";
+import type {
+  NodeView,
+  NodeViewConstructor,
+  PMNode,
+} from "../prosemirror/index.ts";
 import {
   normalizeHeadingLevel,
   type HeadingLevel,

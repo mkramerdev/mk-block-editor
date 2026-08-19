@@ -11,6 +11,8 @@ import { cloneJsonValue } from "../../kernel/json/json-value.ts";
 import { createBlockRecord } from "../../metadata/block-record.ts";
 import { blockCreationSelectionTargetKind } from "./creation-selection.ts";
 
+const MAX_BLOCK_ID_ALLOCATION_ATTEMPTS = 100;
+
 export interface PlanBlockTreeCreationInput {
   readonly blockDefinitions: Readonly<Record<BlockType, BlockDefinition>>;
   readonly type: BlockType;
@@ -55,7 +57,11 @@ export function planBlockTreeCreation(
       allocated.add(preferred);
       return createBlockRecord({ id: preferred, type }).id;
     }
-    for (let attempt = 0; attempt < 100; attempt += 1) {
+    for (
+      let attempt = 0;
+      attempt < MAX_BLOCK_ID_ALLOCATION_ATTEMPTS;
+      attempt += 1
+    ) {
       let id: BlockId;
       try {
         id = input.createBlockId

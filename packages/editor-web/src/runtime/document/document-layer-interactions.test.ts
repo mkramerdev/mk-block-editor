@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { createEditorDocumentLayerInteractionController } from "./document-layer-interactions.ts";
+import type { EditorDocumentLayerKeydownHandler } from "./contracts.ts";
 
 describe("EditorDocument layer interactions", () => {
   it("normalizes keydown input and gives the topmost handler LIFO precedence", () => {
     const controller = createEditorDocumentLayerInteractionController();
-    const lower = vi.fn(() => "unhandled" as const);
-    const upper = vi.fn(() => "handled" as const);
+    const lower = vi.fn<EditorDocumentLayerKeydownHandler>(() => "unhandled");
+    const upper = vi.fn<EditorDocumentLayerKeydownHandler>(() => "handled");
     controller.port.registerKeydownHandler(lower);
     controller.port.registerKeydownHandler(upper);
 

@@ -1,19 +1,30 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
+import { asBlockId } from "@repo/editor-core/kernel";
 import type { EditorTransportTransaction } from "../transport/transport-types.ts";
 import { serializeFirstDraftTransactionForDatabase } from "./persisted-transaction.ts";
 import { loadFirstDraftAcceptedTransactionsFromPostgres } from "./postgres-document-loader.ts";
+import type {
+  FirstDraftPostgresQueryResult,
+  FirstDraftPostgresTransactionClient,
+} from "./postgres-acceptance.ts";
 
-function transaction(transactionId: string, blockId: string): EditorTransportTransaction {
+function transaction(
+  transactionId: string,
+  blockId: string,
+): EditorTransportTransaction {
   return {
     transactionId,
     historyAction: "command",
-    graph: { changes: [{ kind: "delete", blockId }] },
+    graph: { changes: [{ kind: "delete", blockId: asBlockId(blockId) }] },
     metadata: null,
     content: [],
   };
 }
 
-function row(baseRevision: number, transactionId = `transaction-${baseRevision + 1}`) {
+function row(
+  baseRevision: number,
+  transactionId = `transaction-${baseRevision + 1}`,
+) {
   const value = transaction(transactionId, `block-${baseRevision + 1}`);
   return {
     transaction_id: transactionId,
@@ -24,14 +35,30 @@ function row(baseRevision: number, transactionId = `transaction-${baseRevision +
   };
 }
 
-function client(head: number, rows: readonly Record<string, unknown>[]) {
+function client(
+  head: number,
+  rows: readonly Record<string, unknown>[],
+): FirstDraftPostgresTransactionClient {
   return {
-    query: vi.fn(async (sql: string) => {
-      if (sql.startsWith("SELECT revision")) return { rows: [{ revision: head }] };
-      if (sql.startsWith("SELECT transaction_id")) return { rows };
-      return { rows: [] };
-    }),
+    query: async <Row extends Record<string, unknown>>(
+      sql: string,
+      values?: readonly unknown[],
+    ) => {
+      void values;
+      if (sql.startsWith("SELECT revision"))
+        return databaseResult<Row>([{ revision: head }]);
+      if (sql.startsWith("SELECT transaction_id"))
+        return databaseResult<Row>(rows);
+      return databaseResult<Row>([]);
+    },
   };
+}
+
+function databaseResult<Row extends Record<string, unknown>>(
+  rows: readonly Record<string, unknown>[],
+): FirstDraftPostgresQueryResult<Row> {
+  // The fake models the same generic row-decoding boundary as a PostgreSQL client.
+  return { rows: rows as readonly Row[] };
 }
 
 describe("First Draft accepted transaction replay", () => {
@@ -55,7 +82,9 @@ describe("First Draft accepted transaction replay", () => {
       documentId: "document-a",
       revision: 2,
     });
-    expect(result.ok && result.transactions.map((entry) => entry.revision)).toEqual([3, 4, 5]);
+    expect(
+      result.ok && result.transactions.map((entry) => entry.revision),
+    ).toEqual([3, 4, 5]);
     expect(result.ok && result.currentRevision).toBe(5);
   });
 

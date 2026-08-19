@@ -58,7 +58,7 @@ export default [
           patterns: [
             {
               regex:
-                "^@repo/editor-core/(?!(?:kernel|document|definitions|selection|operations|codecs|metadata)$|content/(?:rich-text|marks|inline-atoms)$).+",
+                "^@repo/editor-core/(?!(?:kernel|document|definitions|selection|operations|codecs|metadata|content)$|content/(?:rich-text|marks|inline-atoms)$).+",
               message:
                 "editor-yjs-dom may only import editor-core contracts through explicit domain subpaths.",
             },

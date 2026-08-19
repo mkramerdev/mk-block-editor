@@ -21,8 +21,7 @@ export function readEditorSelectionRangeBlockGeometry(
 ): EditorSelectionDocumentGeometry | null {
   const paint = deriveEditorSelectionRangeBlockPaint({
     rangeBlock,
-    textLength:
-      geometry.readTextCanonicalLength(rangeBlock.blockId) ?? 0,
+    textLength: geometry.readTextCanonicalLength(rangeBlock.blockId) ?? 0,
   });
   if (paint.kind === "text-range") {
     const rects = paint.ranges.flatMap((range) =>

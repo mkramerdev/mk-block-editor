@@ -9,24 +9,28 @@ const renderer = () => null;
 const definitions: Readonly<Record<string, BlockDefinition>> = {
   paragraph: {
     kind: "text",
+    rootLayout: "normal",
     type: "paragraph",
     renderer,
     split: { default: "paragraph" },
   },
   heading: {
     kind: "text",
+    rootLayout: "normal",
     type: "heading",
     renderer,
     split: { default: "paragraph" },
   },
   placeholder: {
     kind: "atomic",
+    rootLayout: "normal",
     type: "placeholder",
     renderer,
     replaceWith: "paragraph",
   },
   body: {
     kind: "wrapper",
+    rootLayout: "normal",
     type: "body",
     renderer,
     content: { required: ["block"], additional: "block" },

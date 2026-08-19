@@ -4,9 +4,7 @@ import type {
   EditorLogicalBlockGraphOperation,
   TransformBlocksPayload,
 } from "@repo/editor-core/operations";
-import type {
-  EditorOperation,
-} from "../history.ts";
+import type { EditorOperation } from "../history.ts";
 import type { EditorCommandState } from "../state/command-state.ts";
 import type { EditorDocumentUpdate } from "./document-update.ts";
 import type { EditorBlockGraphOperation } from "./block-graph-operation.ts";

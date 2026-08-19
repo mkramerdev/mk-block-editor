@@ -130,8 +130,9 @@ export function FirstDraftBlockChrome({
   visible = true,
 }: {
   readonly blockId: BlockId;
-  readonly editor: (FirstDraftBlockControlsEditor &
-    Pick<FirstDraftEditor, "editable">) | null;
+  readonly editor:
+    | (FirstDraftBlockControlsEditor & Pick<FirstDraftEditor, "editable">)
+    | null;
   readonly blockStartOffset?: CSSProperties["insetBlockStart"];
   readonly visible?: boolean;
 }) {

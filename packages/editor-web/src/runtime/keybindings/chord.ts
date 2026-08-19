@@ -48,7 +48,11 @@ const namedBaseKeys = new Map<string, string>([
 export function normalizeEditorKeyChord(
   chord: string,
 ): NormalizedEditorKeyChord {
-  if (typeof chord !== "string" || chord.length === 0 || chord.trim() !== chord) {
+  if (
+    typeof chord !== "string" ||
+    chord.length === 0 ||
+    chord.trim() !== chord
+  ) {
     throw new Error("Editor key chord must be a non-empty trimmed string.");
   }
   const parts = chord.split("-");
@@ -136,11 +140,7 @@ export function physicalEditorKeyChordSignature(
   const baseKey = parts.pop()!;
   const modifiers = new Set(
     parts.map((part) =>
-      part === "Mod"
-        ? platform === "apple"
-          ? "Meta"
-          : "Control"
-        : part,
+      part === "Mod" ? (platform === "apple" ? "Meta" : "Control") : part,
     ),
   );
   return [

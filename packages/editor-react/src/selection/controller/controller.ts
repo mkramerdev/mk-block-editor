@@ -1,4 +1,8 @@
-import { cloneJsonValue, type BlockId } from "@repo/editor-core/kernel";
+import {
+  canonicalJsonValueKey,
+  cloneJsonValue,
+  type BlockId,
+} from "@repo/editor-core/kernel";
 import type { EditorContentBaseToken } from "@repo/editor-core/operations";
 import type { BlockSelectionCoverageResult } from "@repo/editor-core/selection";
 import { type EditorSelectionGraphReader } from "../graph/reader.ts";
@@ -1539,12 +1543,35 @@ function selectionPaintDescriptorKey(value: unknown): string | null {
 }
 
 function stableDescriptorKey(value: unknown): string {
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
+  const jsonKey = canonicalJsonValueKey(value);
+  if (jsonKey !== null) return `json:${jsonKey}`;
+  if (
+    (typeof value === "object" && value !== null) ||
+    typeof value === "function"
+  ) {
+    let key = nonJsonDescriptorKeys.get(value);
+    if (key === undefined) {
+      key = nextNonJsonDescriptorKey;
+      nextNonJsonDescriptorKey += 1;
+      nonJsonDescriptorKeys.set(value, key);
+    }
+    return `identity:${key}`;
   }
+  if (typeof value === "symbol") {
+    let key = nonJsonSymbolKeys.get(value);
+    if (key === undefined) {
+      key = nextNonJsonDescriptorKey;
+      nextNonJsonDescriptorKey += 1;
+      nonJsonSymbolKeys.set(value, key);
+    }
+    return `symbol:${key}`;
+  }
+  return `${typeof value}:${String(value)}`;
 }
+
+const nonJsonDescriptorKeys = new WeakMap<object, number>();
+const nonJsonSymbolKeys = new Map<symbol, number>();
+let nextNonJsonDescriptorKey = 1;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);

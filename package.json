@@ -6,8 +6,9 @@
     "dev": "turbo run dev",
     "db:reset:first-draft": "pnpm --filter @repo/editor-first-draft reset:postgres",
     "db:seed:first-draft": "pnpm --filter @repo/editor-first-draft seed:postgres",
-    "lint": "turbo run lint",
-    "format": "prettier --write \"**/*.{ts,tsx,md}\"",
+    "lint": "pnpm run format:check && turbo run lint",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "check-types": "turbo run check-types"
   },
   "devDependencies": {

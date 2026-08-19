@@ -7,6 +7,7 @@ import {
 } from "./content-operations.ts";
 import { contentSelection } from "../../selection/block-selection.ts";
 import type { BlockDefinition } from "../../definitions/block-definition.ts";
+import type { BlockType } from "../../document/model/block.ts";
 import {
   boldMarkDefinition,
   italicMarkDefinition,
@@ -19,8 +20,8 @@ const testBlockDefinitions: Readonly<Record<BlockType, BlockDefinition>> = {
   paragraph: {
     type: "paragraph",
     kind: "text",
+    rootLayout: "normal",
     selection: contentSelection(),
-    root: false,
   },
 };
 const testInlineMarks = [

@@ -39,10 +39,7 @@ export function resolveEditableFocusTarget(
     return block.id;
   }
   let skippedRoot = false;
-  for (const childId of getSubtreeBlockIds(
-    graph,
-    block.id,
-  )) {
+  for (const childId of getSubtreeBlockIds(graph, block.id)) {
     if (!skippedRoot) {
       skippedRoot = true;
       continue;

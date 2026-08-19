@@ -53,17 +53,13 @@ function executeIndentationCommand(
   direction: "indent" | "outdent",
 ): boolean {
   const { editor, view } = context;
-  if (
-    isBlockEditorComposing(view.state) ||
-    !view.state.selection.empty
-  ) {
+  if (isBlockEditorComposing(view.state) || !view.state.selection.empty) {
     return false;
   }
-  const offset =
-    blockTextCoordinateCodec.proseMirrorPositionToCanonicalOffset(
-      view.state.selection.head,
-      view.state,
-    );
+  const offset = blockTextCoordinateCodec.proseMirrorPositionToCanonicalOffset(
+    view.state.selection.head,
+    view.state,
+  );
   const result =
     direction === "indent"
       ? editor.indentBlock({ blockId: context.blockId, offset })

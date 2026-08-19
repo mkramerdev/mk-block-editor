@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { asBlockId } from "@repo/editor-core/kernel";
 import {
   Plugin,
   TextSelection,
@@ -13,7 +14,7 @@ import type {
   ProseMirrorStateProposal,
 } from "./transactions/proposal.ts";
 
-const blockId = "block" as never;
+const blockId = asBlockId("01890f07-1c00-7000-8000-000000000301");
 const base = {
   graphRevision: 7,
   blockId,
@@ -49,7 +50,8 @@ describe("applyBlockTransaction", () => {
       },
     );
 
-    expect(proposed?.proposedState.selection.empty).toBe(false);
+    const captured = requireProposal(proposed);
+    expect(captured.proposedState.selection.empty).toBe(false);
     expect(view.state.selection.empty).toBe(false);
     expect(view.state.selection.anchor).toBe(1);
     expect(view.state.selection.head).toBe(3);
@@ -79,13 +81,19 @@ describe("applyBlockTransaction", () => {
   });
 
   it("retains an appended document-changing transaction in the proposal", () => {
-    const appendTransaction = vi.fn((transactions, _oldState, state) => {
-      if (transactions.some((transaction) => transaction.getMeta("append")))
-        return null;
-      return state.tr
-        .insertText("!", state.doc.content.size - 1)
-        .setMeta("append", true);
-    });
+    const appendTransaction = vi.fn(
+      (
+        transactions: readonly Transaction[],
+        _oldState: EditorState,
+        state: EditorState,
+      ) => {
+        if (transactions.some((transaction) => transaction.getMeta("append")))
+          return null;
+        return state.tr
+          .insertText("!", state.doc.content.size - 1)
+          .setMeta("append", true);
+      },
+    );
     const state = createState([new Plugin({ appendTransaction })]);
     const view = createTestView(state);
     let captured: ProseMirrorStateProposal | null = null;
@@ -100,9 +108,10 @@ describe("applyBlockTransaction", () => {
     });
 
     expect(result.status).toBe("installed");
-    expect(captured?.transactions).toHaveLength(2);
-    expect(captured?.transactions[1]?.docChanged).toBe(true);
-    expect(view.state).toBe(captured?.proposedState);
+    const proposal = requireProposal(captured);
+    expect(proposal.transactions).toHaveLength(2);
+    expect(proposal.transactions[1]?.docChanged).toBe(true);
+    expect(view.state).toBe(proposal.proposedState);
     expect(view.state.doc.textContent).toBe("axbc!");
   });
 
@@ -140,9 +149,10 @@ describe("applyBlockTransaction", () => {
       }),
     });
 
-    expect(captured?.transactions).toHaveLength(3);
+    const proposal = requireProposal(captured);
+    expect(proposal.transactions).toHaveLength(3);
     expect(
-      captured?.transactions.map((transaction) => transaction.doc.textContent),
+      proposal.transactions.map((transaction) => transaction.doc.textContent),
     ).toEqual(["axbc", "axbc1", "axbc12"]);
   });
 
@@ -241,4 +251,12 @@ function adapter(
     readContentBaseToken: () => base,
     evaluateProposal,
   };
+}
+
+function requireProposal(
+  proposal: ProseMirrorStateProposal | null,
+): ProseMirrorStateProposal {
+  expect(proposal).not.toBeNull();
+  if (proposal === null) throw new Error("proposal was not captured");
+  return proposal;
 }

@@ -2,7 +2,7 @@ import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import type { BlockDefinition } from "@repo/editor-core/definitions";
 import type { BlockType, VersionedBlock } from "@repo/editor-core/document";
 import type { BlockId } from "@repo/editor-core/kernel";
-import { asBlockId } from "@repo/editor-core/kernel";
+import { asBlockId, asContentVersion } from "@repo/editor-core/kernel";
 import {
   applyLogicalContentOperationToRichTextDocument,
   createBlockRichTextContentFromPlainText,
@@ -140,7 +140,8 @@ function block(
     parentId,
     version: {
       metadataVersion: "1",
-      contentVersion: definitions[type]?.kind === "text" ? "1" : null,
+      contentVersion:
+        definitions[type]?.kind === "text" ? asContentVersion("1") : null,
     },
   });
 }
@@ -196,6 +197,9 @@ function createTestEditor(
     ) => void;
     readonly selectionAnchorRuntime?: AssociationAwareTestAnchorRuntime;
     readonly selectionAnchorRequiresContentAccess?: boolean;
+    readonly failSelectionAnchorAfterContent?: boolean;
+    readonly onContentCommitted?: () => void;
+    readonly onContentPublished?: () => void;
     readonly documentValidators?: InitializeEditorImplementationOptions["documentValidators"];
   } = {},
 ) {
@@ -221,6 +225,7 @@ function createTestEditor(
     }
   >();
   let preparedCommitCount = 0;
+  let contentWasCommitted = false;
   const validateContentCommit = vi.fn((input: EditorContentCommitInput) => {
     if (options.rejectContentOperations) {
       return {
@@ -298,6 +303,8 @@ function createTestEditor(
       }
       if (next) content.set(change.baseToken.blockId, next);
     }
+    contentWasCommitted = true;
+    options.onContentCommitted?.();
     const applied = {
       kind: "applied-content-commit" as const,
       baseGraphRevision: state.input.graphRevision,
@@ -335,7 +342,7 @@ function createTestEditor(
     };
     return applied;
   });
-  const publishContentCommit = vi.fn();
+  const publishContentCommit = vi.fn(() => options.onContentPublished?.());
   const markInconsistent = vi.fn((message: string): never => {
     throw new Error(`test content runtime inconsistent: ${message}`);
   });
@@ -344,6 +351,12 @@ function createTestEditor(
       return { blockId, blockType, graphRevision, contentRevision: 0 };
     },
     validateContentCommit,
+    validateRemoteContentCommit: (input) => ({
+      kind: "validated-content-commit",
+      affectedBlockIds: input.updates.map((update) => update.base.blockId),
+      blocks: [],
+      removedBlocks: [],
+    }),
     validateContentTextPoint(prepared, point) {
       const state = preparedState.get(prepared);
       if (!state) return { ok: false, reason: "invalid" };
@@ -397,7 +410,9 @@ function createTestEditor(
   };
   const requestNativeFocus = vi.fn(() => ({ status: "focused" as const }));
   const releaseNativeFocus = vi.fn();
-  const presentTextProjection = vi.fn(() => ({ status: "focused" as const }));
+  const presentTextProjection = vi.fn<
+    NonNullable<InitializeEditorImplementationOptions["presentTextProjection"]>
+  >(() => ({ status: "focused" }));
   const blurEditor = vi.fn();
   const contentAccessCounts = new Map<BlockId, number>();
   const acquireTextContentAccess = vi.fn((blockId: BlockId) => {
@@ -443,6 +458,9 @@ function createTestEditor(
             affinity: point.affinity,
           }),
     createSelectionTextAnchor: (input) => {
+      if (options.failSelectionAnchorAfterContent && contentWasCommitted) {
+        return { ok: false as const };
+      }
       if (
         options.selectionAnchorRequiresContentAccess &&
         !contentAccessCounts.has(input.blockId)
@@ -1792,6 +1810,18 @@ describe("EditorImplementation active transaction", () => {
     });
     expect(fixture.editor.getBlock(removed.id)).toBeNull();
     expect(fixture.onCanonicalCommit).toHaveBeenCalledTimes(1);
+    expect(fixture.onCanonicalCommit.mock.calls[0]![0]).toMatchObject({
+      kind: "block-graph",
+      metadataOperation: {
+        kind: "updateBlockMetadata",
+        updates: [
+          {
+            blockId: paragraph.id,
+            values: { first: true, second: "value" },
+          },
+        ],
+      },
+    });
     expect(fixture.publications).toHaveBeenCalledTimes(1);
     expect(fixture.editor.undo()).toEqual({ status: "applied" });
     expect(fixture.editor.getBlock(paragraph.id)?.metadata).toBeUndefined();
@@ -2348,7 +2378,7 @@ describe("EditorImplementation active transaction", () => {
     });
     expect(
       fixture.editor.selectionController.commitCanonicalSelection(
-        anchorRuntime.selection(right.id, 0, null),
+        anchorRuntime.selection(right.id, 0, "forward"),
         fixture.editor,
         fixture.editor.getSelectionGraphRevision(),
         { publication: { kind: "standalone-local" }, cause: "keyboard" },
@@ -2478,14 +2508,17 @@ describe("EditorImplementation active transaction", () => {
       InitializeEditorImplementationOptions["documentValidators"]
     >[number];
     const validator = vi.fn((candidate: Parameters<DocumentValidator>[0]) => {
-      const leftContent = candidate.readContent(left.id, left.type);
+      const readContent = candidate.readContent;
+      expect(readContent).toBeDefined();
+      if (!readContent) throw new Error("validator content reader is missing");
+      const leftContent = readContent(left.id, left.type);
       observed.push(
         leftContent
           ? extractPlainTextFromRichTextDocument(leftContent.content)
           : "missing-left",
       );
       observed.push(
-        candidate.readContent(right.id, right.type) === null
+        readContent(right.id, right.type) === null
           ? "removed-right"
           : "present-right",
       );
@@ -3161,6 +3194,222 @@ describe("EditorImplementation content selection presentation", () => {
     expect(fixture.editor.getEditorInfo().documentRevision).toBe(2);
     expect(fixture.editor.canUndo).toBe(true);
     expect(fixture.publishContentCommit).toHaveBeenCalledOnce();
+    fixture.dispose();
+  });
+
+  it("delays only receipt and content publication until an idempotent release", () => {
+    const fixture = createTestEditor({ materializeAppliedBlocks: true });
+    const result = fixture.editor.acceptContentOperationProposal(
+      contentInsertionProposal(fixture.editor, 0, "x", 1, 1),
+      {
+        origin: "prosemirror-proposal",
+        selectionPresentation: "installed-by-proposed-state",
+        provenance: null,
+        releaseAfterProposedStateInstalled: true,
+      },
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.message);
+    expect(readContentText(fixture, id(1))).toBe("xone");
+    expect(fixture.editor.getEditorInfo().documentRevision).toBe(2);
+    expect(fixture.editor.canUndo).toBe(true);
+    expect(fixture.onCanonicalCommit).not.toHaveBeenCalled();
+    expect(fixture.publishContentCommit).not.toHaveBeenCalled();
+
+    result.release?.();
+    result.release?.();
+
+    expect(fixture.onCanonicalCommit).toHaveBeenCalledOnce();
+    expect(fixture.publishContentCommit).toHaveBeenCalledOnce();
+    expect(fixture.commitContent).toHaveBeenCalledOnce();
+    expect(fixture.editor.getEditorInfo().documentRevision).toBe(2);
+    expect(fixture.editor.canUndo).toBe(true);
+    fixture.dispose();
+  });
+
+  it("orders graph-plus-content installation before receipt and publication", () => {
+    const order: string[] = [];
+    const fixture = createTestEditor({
+      content: new Map([[id(1), text("hello world")]]),
+      materializeAppliedBlocks: true,
+      onContentCommitted: () => order.push("content-committed"),
+      onContentPublished: () => order.push("content-published"),
+      onCanonicalCommit: (_commit, editor) => {
+        expect(editor.getRootBlockIds()).toHaveLength(2);
+        order.push("canonical-installed");
+        expect(editor.canUndo).toBe(true);
+        order.push("history-recorded");
+        order.push("receipt");
+      },
+    });
+    const unsubscribe = fixture.editor.subscribeManifest(() =>
+      order.push("subscriber"),
+    );
+
+    expect(
+      fixture.editor.executeCoreBlockKeyBehavior({
+        key: "enter",
+        blockId: id(1),
+        blockType: "paragraph",
+        cursorOffset: 5,
+      }),
+    ).toBe(true);
+
+    expect(order).toEqual([
+      "content-committed",
+      "canonical-installed",
+      "history-recorded",
+      "receipt",
+      "content-published",
+      "subscriber",
+    ]);
+    unsubscribe();
+    fixture.dispose();
+  });
+
+  it("isolates a graph-plus-content receipt observer failure", () => {
+    const fixture = createTestEditor({
+      content: new Map([[id(1), text("hello world")]]),
+      materializeAppliedBlocks: true,
+      onCanonicalCommit: () => {
+        throw new Error("graph receipt observer failed");
+      },
+    });
+
+    expect(
+      fixture.editor.executeCoreBlockKeyBehavior({
+        key: "enter",
+        blockId: id(1),
+        blockType: "paragraph",
+        cursorOffset: 5,
+      }),
+    ).toBe(true);
+
+    expect(fixture.editor.getRootBlockIds()).toHaveLength(2);
+    expect(fixture.editor.canUndo).toBe(true);
+    expect(fixture.onCanonicalCommit).toHaveBeenCalledOnce();
+    expect(fixture.publishContentCommit).toHaveBeenCalledOnce();
+    expect(fixture.publications).toHaveBeenCalledOnce();
+    expect(fixture.markInconsistent).not.toHaveBeenCalled();
+    fixture.dispose();
+  });
+
+  it("uses the centralized inconsistent-runtime branch after content mutation", () => {
+    const fixture = createTestEditor({
+      materializeAppliedBlocks: true,
+      failSelectionAnchorAfterContent: true,
+    });
+    const revisionBefore = fixture.editor.getEditorInfo().documentRevision;
+
+    expect(() =>
+      fixture.editor.acceptContentOperationProposal(
+        contentInsertionProposal(fixture.editor, 0, "x", 1, 1),
+        {
+          origin: "prosemirror-proposal",
+          selectionPresentation: "native-already-established",
+          provenance: null,
+        },
+      ),
+    ).toThrow(/selection-resolution failed after live content mutation/i);
+
+    expect(readContentText(fixture, id(1))).toBe("xone");
+    expect(fixture.editor.getEditorInfo().documentRevision).toBe(
+      revisionBefore,
+    );
+    expect(fixture.editor.canUndo).toBe(false);
+    expect(fixture.markInconsistent).toHaveBeenCalledOnce();
+    expect(fixture.onCanonicalCommit).not.toHaveBeenCalled();
+    expect(fixture.publishContentCommit).not.toHaveBeenCalled();
+    expect(fixture.publications).not.toHaveBeenCalled();
+    fixture.dispose();
+  });
+
+  it("marks the runtime once when graph installation fails after content", () => {
+    const fixture = createTestEditor({
+      content: new Map([[id(1), text("hello world")]]),
+      materializeAppliedBlocks: true,
+    });
+    const internal = fixture.editor as unknown as {
+      commitCanonicalGraphMutation: () => () => void;
+    };
+    vi.spyOn(internal, "commitCanonicalGraphMutation").mockImplementationOnce(
+      () => {
+        throw new Error("test graph installation failed");
+      },
+    );
+
+    expect(() =>
+      fixture.editor.executeCoreBlockKeyBehavior({
+        key: "enter",
+        blockId: id(1),
+        blockType: "paragraph",
+        cursorOffset: 5,
+      }),
+    ).toThrow(/canonical-installation failed after live content mutation/i);
+
+    expect(fixture.commitContent).toHaveBeenCalledOnce();
+    expect(fixture.markInconsistent).toHaveBeenCalledOnce();
+    expect(fixture.editor.getRootBlockIds()).toEqual([id(1)]);
+    expect(fixture.editor.canUndo).toBe(false);
+    expect(fixture.onCanonicalCommit).not.toHaveBeenCalled();
+    expect(fixture.publishContentCommit).not.toHaveBeenCalled();
+    expect(fixture.publications).not.toHaveBeenCalled();
+    fixture.dispose();
+  });
+
+  it("keeps remote content publication after canonical installation and callback", () => {
+    const order: string[] = [];
+    const fixture = createTestEditor({
+      materializeAppliedBlocks: true,
+      onContentCommitted: () => order.push("content-committed"),
+      onContentPublished: () => order.push("content-published"),
+    });
+    const current = fixture.editor.getCommandState();
+    const proposal = contentInsertionProposal(fixture.editor, 0, "x", 1, 1);
+    const validated = fixture.validateContentCommit({
+      graphRevision: current.blockGraphVersion,
+      resultingGraphRevision: current.blockGraphVersion + 1,
+      changes: [{ baseToken: proposal.base, operations: proposal.operations }],
+      origin: "remote-test",
+    });
+    if (!("kind" in validated)) throw new Error(validated.message);
+    const nextBlock = {
+      ...current.blocks[id(1)]!,
+      contentVersion: asContentVersion("2"),
+    };
+    const nextState = {
+      ...current,
+      blockGraphVersion: current.blockGraphVersion + 1,
+      blocks: { ...current.blocks, [nextBlock.id]: nextBlock },
+      updatedAt: current.updatedAt + 1,
+    };
+    const unsubscribe = fixture.editor.subscribeManifest(() =>
+      order.push("subscriber"),
+    );
+
+    fixture.editor.commitValidatedRemoteTransaction({
+      nextState,
+      validatedContent: validated,
+      candidateBlockIds: [nextBlock.id],
+      contentChangedBlockIds: [nextBlock.id],
+      afterCanonicalStateInstalled: () => {
+        expect(fixture.editor.getSelectionGraphRevision()).toBe(2);
+        expect(readContentText(fixture, nextBlock.id)).toBe("xone");
+        order.push("after-canonical-state-installed");
+      },
+    });
+
+    expect(order).toEqual([
+      "content-committed",
+      "after-canonical-state-installed",
+      "content-published",
+      "subscriber",
+    ]);
+    expect(fixture.editor.canUndo).toBe(false);
+    expect(fixture.onCanonicalCommit).not.toHaveBeenCalled();
+    expect(fixture.markInconsistent).not.toHaveBeenCalled();
+    unsubscribe();
     fixture.dispose();
   });
 });

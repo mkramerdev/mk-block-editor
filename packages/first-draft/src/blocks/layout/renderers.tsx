@@ -447,10 +447,7 @@ export function TabPaneRenderer({ block, editor, children }: Props) {
     panes[0]?.id ??
     null;
   return (
-    <div
-      className="tabs-block__pane"
-      hidden={block.id !== activePaneId}
-    >
+    <div className="tabs-block__pane" hidden={block.id !== activePaneId}>
       <FirstDraftBlockChrome
         blockId={block.id}
         editor={editor}

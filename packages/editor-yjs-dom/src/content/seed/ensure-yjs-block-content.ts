@@ -12,7 +12,11 @@ import {
 
 export interface EnsureYjsBlockContentOptions {
   readonly blockType: BlockType;
-  readonly doc?: RichTextDocumentNodeJson | string | Record<string, unknown> | null;
+  readonly doc?:
+    | RichTextDocumentNodeJson
+    | string
+    | Record<string, unknown>
+    | null;
   readonly origin?: unknown;
 }
 
@@ -20,11 +24,12 @@ export function ensureYjsBlockContent(
   context: EditorYjsFragmentContext,
   options: EnsureYjsBlockContentOptions,
 ): boolean {
-  const content = typeof options.doc === "string"
-    ? createBlockRichTextContentFromPlainText(options.blockType, options.doc)
-    : isRichTextDocument(options.doc)
-      ? options.doc
-      : createBlockRichTextContentFromPlainText(options.blockType, "");
+  const content =
+    typeof options.doc === "string"
+      ? createBlockRichTextContentFromPlainText(options.blockType, options.doc)
+      : isRichTextDocument(options.doc)
+        ? options.doc
+        : createBlockRichTextContentFromPlainText(options.blockType, "");
   return ensureCanonicalYjsBlockContent(
     context,
     content,

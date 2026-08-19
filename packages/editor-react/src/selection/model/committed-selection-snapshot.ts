@@ -32,8 +32,7 @@ export interface CommittedSelectionDeferredDescriptor {
   readonly owner: CommittedSelectionOwner;
 }
 
-export interface CommittedSelectionFocusDescriptor
-  extends CommittedSelectionDeferredDescriptor {
+export interface CommittedSelectionFocusDescriptor extends CommittedSelectionDeferredDescriptor {
   readonly target: EditorLogicalSelectionPoint | null;
 }
 
@@ -460,10 +459,10 @@ function ownerKey(
 function validEndpoints(snapshot: EditorSelectionSnapshot): boolean {
   return Boolean(
     snapshot.anchor &&
-      snapshot.focus &&
-      snapshot.normalizedStart &&
-      snapshot.normalizedEnd &&
-      snapshot.direction,
+    snapshot.focus &&
+    snapshot.normalizedStart &&
+    snapshot.normalizedEnd &&
+    snapshot.direction,
   );
 }
 

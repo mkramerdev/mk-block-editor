@@ -22,8 +22,12 @@ export class InlineAtomPortalRegistry {
   private nextId = 1;
   private disposed = false;
 
-  register(target: HTMLElement, content: ReactNode): InlineAtomPortalRegistration {
-    if (this.disposed) return { update: () => undefined, remove: () => undefined };
+  register(
+    target: HTMLElement,
+    content: ReactNode,
+  ): InlineAtomPortalRegistration {
+    if (this.disposed)
+      return { update: () => undefined, remove: () => undefined };
     const id = this.nextId++;
     this.entries.set(id, { id, target, content });
     this.publish();

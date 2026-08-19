@@ -13,7 +13,7 @@ import {
   type SelectionController,
   type SelectionCompositionSessionSnapshot,
 } from "@repo/editor-react/selection";
-import type { EditorWebContentRuntime } from "../../../runtime/content/content-runtime.ts";
+import type { EditorContentRuntime } from "@repo/editor-core/content";
 import type { AnyEditorRuntimePort } from "../../../runtime/document/render-port.ts";
 import {
   editorBlockShellSelector,
@@ -23,7 +23,7 @@ import {
 } from "../../dom-markers.ts";
 import { isEditorInteractiveControlTarget } from "../../interaction/interactive-targets.ts";
 import { createWebSelectionTextAnchorAtOffset } from "../anchors/text-anchor.ts";
-import type { EditorBlockContentLease } from "../../../runtime/content/content-runtime.ts";
+import type { EditorBlockContentLease } from "@repo/editor-core/content";
 import { textOffsetFromDomPoint } from "../hit-testing/text-hit-testing.ts";
 import {
   applyNativeSelectionPaintMode,
@@ -33,7 +33,7 @@ import {
 export interface UseNativeSelectionSynchronizationOptions {
   readonly listElement: HTMLElement | null;
   readonly editor: AnyEditorRuntimePort;
-  readonly contentRuntime: EditorWebContentRuntime;
+  readonly contentRuntime: EditorContentRuntime;
   readonly selectionController: SelectionController;
   readonly presentation: {
     readonly nativeSelectionPaintMode: NativeSelectionPaintMode;
@@ -97,8 +97,7 @@ export function useNativeSelectionSynchronization({
       return;
 
     const editableTextSelection =
-      editor.editable &&
-      domSelectionTouchesEditableTextRoot(selection, list);
+      editor.editable && domSelectionTouchesEditableTextRoot(selection, list);
     const internalHostTextSelection =
       editableTextSelection &&
       domSelectionIsOwnedByEditableInternalSelectionHost(selection, list);
@@ -262,7 +261,7 @@ function selectionIsOwnedByEditableInternalSelectionHost(
 ): boolean {
   return Boolean(
     selection &&
-      domSelectionIsOwnedByEditableInternalSelectionHost(selection, list),
+    domSelectionIsOwnedByEditableInternalSelectionHost(selection, list),
   );
 }
 
@@ -312,13 +311,13 @@ function domSelectionMatchesCanonicalInputProjection(
   const focus = canonicalSelection.focus;
   const matches = Boolean(
     anchor &&
-      focus &&
-      anchor.blockId === blockId &&
-      focus.blockId === blockId &&
-      anchor.textOffset === anchorOffset &&
-      focus.textOffset === focusOffset &&
-      (selection.isCollapsed ||
-        canonicalSelection.direction === domSelectionDirection(selection)),
+    focus &&
+    anchor.blockId === blockId &&
+    focus.blockId === blockId &&
+    anchor.textOffset === anchorOffset &&
+    focus.textOffset === focusOffset &&
+    (selection.isCollapsed ||
+      canonicalSelection.direction === domSelectionDirection(selection)),
   );
   if (matches && editor.editable) {
     editor.acknowledgeTextActivation?.(
@@ -379,8 +378,8 @@ function nativeInteractiveControlOwnsSelection(list: HTMLElement): boolean {
   const active = list.ownerDocument.activeElement;
   return Boolean(
     active instanceof Element &&
-      (list.contains(active) || isInSameEditorInteractionScope(list, active)) &&
-      isEditorInteractiveControlTarget(active),
+    (list.contains(active) || isInSameEditorInteractionScope(list, active)) &&
+    isEditorInteractiveControlTarget(active),
   );
 }
 
@@ -388,7 +387,7 @@ function logicalPointFromDomSelection(
   node: Node,
   offset: number,
   editor: AnyEditorRuntimePort,
-  contentRuntime: EditorWebContentRuntime,
+  contentRuntime: EditorContentRuntime,
   selectionController: SelectionController,
   leases: Map<BlockId, EditorBlockContentLease>,
   collapsed: boolean,
@@ -443,7 +442,7 @@ function logicalPointFromDomSelection(
 
 function createContentSelectionPoint(
   editor: AnyEditorRuntimePort,
-  contentRuntime: EditorWebContentRuntime,
+  contentRuntime: EditorContentRuntime,
   target: EditorBlockSelectionTarget,
   textOffset: number,
   affinity: EditorLogicalSelectionPoint["affinity"],
@@ -502,6 +501,6 @@ function domSelectionBelongsToBlock(
       : selection.focusNode?.parentElement;
   return Boolean(
     anchor?.closest(`[data-editor-block-id="${CSS.escape(blockId)}"]`) &&
-      focus?.closest(`[data-editor-block-id="${CSS.escape(blockId)}"]`),
+    focus?.closest(`[data-editor-block-id="${CSS.escape(blockId)}"]`),
   );
 }

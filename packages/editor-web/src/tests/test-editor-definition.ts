@@ -17,8 +17,10 @@ import { EditableTextBlockPrimitive } from "../document/blocks/editable-text-blo
 import { conventionalHistoryCommands } from "../api/keybindings.ts";
 import type {
   EditableEditorDefinition,
-  EditableEditor,
   ReadEditorDefinition,
+} from "../runtime/definition/contracts.ts";
+import type {
+  EditableEditor,
   ReadEditor,
 } from "../runtime/document/contracts.ts";
 

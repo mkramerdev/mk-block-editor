@@ -25,8 +25,10 @@ describe("First Draft bootstrap codec", () => {
     const before = firstDraftBootstrapSnapshot(source).opaqueContentCheckpoints;
     const after = firstDraftBootstrapSnapshot(decoded).opaqueContentCheckpoints;
     expect(after).toEqual(before);
-    for (const blockId of Object.keys(before)) {
-      expect(after[blockId]?.payloadBase64).toBe(before[blockId]?.payloadBase64);
+    for (const blockId of Object.keys(before).map(asBlockId)) {
+      expect(after[blockId]?.payloadBase64).toBe(
+        before[blockId]?.payloadBase64,
+      );
     }
   });
 
@@ -56,7 +58,9 @@ describe("First Draft bootstrap codec", () => {
         blocks,
       });
       const snapshot = firstDraftBootstrapSnapshot(decoded);
-      expect(Object.keys(snapshot.opaqueContentCheckpoints)).toHaveLength(count);
+      expect(Object.keys(snapshot.opaqueContentCheckpoints)).toHaveLength(
+        count,
+      );
       expect(Object.keys(snapshot.content)).toHaveLength(count);
       expect(snapshot.rootBlockIds).toHaveLength(count);
       for (const entry of blocks) {
@@ -72,7 +76,9 @@ describe("First Draft bootstrap codec", () => {
       join(process.cwd(), "src/read-model/bootstrap.ts"),
       "utf8",
     );
-    expect(source).not.toMatch(/decodeBase64|EditorImmutableBinary|new YDoc|new Doc\(/u);
+    expect(source).not.toMatch(
+      /decodeBase64|EditorImmutableBinary|new YDoc|new Doc\(/u,
+    );
     expect(source).not.toContain("readCanonicalYjsBlockContent");
   });
 

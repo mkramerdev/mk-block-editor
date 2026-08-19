@@ -1,4 +1,3 @@
-import { Button } from "@repo/ui/button";
 import { Route, Routes } from "react-router";
 import FirstDraft from "./routes/first-draft";
 import FullEditor from "./routes/full-editor";
@@ -11,9 +10,6 @@ function Home() {
       <p>
         Get started by editing <code>apps/playground-react/src/App.tsx</code>.
       </p>
-      <Button appName="playground-react" className="action">
-        Open alert
-      </Button>
     </main>
   );
 }

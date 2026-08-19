@@ -46,7 +46,9 @@ export interface EdgeScrollControllerOptions {
 export const DEFAULT_EDGE_SCROLL_EDGE_ZONE_PX = 64;
 export const DEFAULT_EDGE_SCROLL_MAX_SPEED_PX_PER_SECOND = 900;
 
-export function createEdgeScrollController(options: EdgeScrollControllerOptions): EdgeScrollController {
+export function createEdgeScrollController(
+  options: EdgeScrollControllerOptions,
+): EdgeScrollController {
   return new DomEdgeScrollController(options);
 }
 
@@ -73,13 +75,23 @@ class DomEdgeScrollController implements EdgeScrollController {
       x: options.axes?.x ?? false,
       y: options.axes?.y ?? true,
     };
-    this.edgeZonePx = Math.max(1, options.edgeZonePx ?? DEFAULT_EDGE_SCROLL_EDGE_ZONE_PX);
-    this.maxSpeedPxPerSecond = Math.max(0, options.maxSpeedPxPerSecond ?? DEFAULT_EDGE_SCROLL_MAX_SPEED_PX_PER_SECOND);
+    this.edgeZonePx = Math.max(
+      1,
+      options.edgeZonePx ?? DEFAULT_EDGE_SCROLL_EDGE_ZONE_PX,
+    );
+    this.maxSpeedPxPerSecond = Math.max(
+      0,
+      options.maxSpeedPxPerSecond ??
+        DEFAULT_EDGE_SCROLL_MAX_SPEED_PX_PER_SECOND,
+    );
     this.speedRamp = options.speedRamp ?? linearSpeedRamp;
     this.onTick = options.onTick;
     this.onScroll = options.onScroll;
     const view = options.scrollElement.ownerDocument.defaultView;
-    this.readNow = options.now ?? (() => view?.performance.now() ?? globalThis.performance?.now() ?? Date.now());
+    this.readNow =
+      options.now ??
+      (() =>
+        view?.performance.now() ?? globalThis.performance?.now() ?? Date.now());
     const frameScheduler = resolveEdgeScrollFrameScheduler(options, view);
     this.requestFrame = frameScheduler.requestFrame;
     this.cancelFrame = frameScheduler.cancelFrame;
@@ -148,8 +160,10 @@ class DomEdgeScrollController implements EdgeScrollController {
       ? clamp(previousScrollTop + deltaY, 0, maxScrollTop(this.scrollElement))
       : previousScrollTop;
 
-    if (nextScrollLeft !== previousScrollLeft) this.scrollElement.scrollLeft = nextScrollLeft;
-    if (nextScrollTop !== previousScrollTop) this.scrollElement.scrollTop = nextScrollTop;
+    if (nextScrollLeft !== previousScrollLeft)
+      this.scrollElement.scrollLeft = nextScrollLeft;
+    if (nextScrollTop !== previousScrollTop)
+      this.scrollElement.scrollTop = nextScrollTop;
 
     const didScrollX = nextScrollLeft !== previousScrollLeft;
     const didScrollY = nextScrollTop !== previousScrollTop;
@@ -184,17 +198,27 @@ class DomEdgeScrollController implements EdgeScrollController {
     }
     const rect = resolveEdgeScrollViewportRect(this.scrollElement);
     return {
-      velocityX: this.axes.x ? this.resolveAxisVelocity(this.pointer.clientX, rect.left, rect.right) : 0,
-      velocityY: this.axes.y ? this.resolveAxisVelocity(this.pointer.clientY, rect.top, rect.bottom) : 0,
+      velocityX: this.axes.x
+        ? this.resolveAxisVelocity(this.pointer.clientX, rect.left, rect.right)
+        : 0,
+      velocityY: this.axes.y
+        ? this.resolveAxisVelocity(this.pointer.clientY, rect.top, rect.bottom)
+        : 0,
     };
   }
 
-  private resolveAxisVelocity(clientPosition: number, start: number, end: number): number {
-    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return 0;
+  private resolveAxisVelocity(
+    clientPosition: number,
+    start: number,
+    end: number,
+  ): number {
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start)
+      return 0;
     const leadingDistance = start + this.edgeZonePx - clientPosition;
     if (leadingDistance > 0) return -this.speedForEdgeDistance(leadingDistance);
     const trailingDistance = clientPosition - (end - this.edgeZonePx);
-    if (trailingDistance > 0) return this.speedForEdgeDistance(trailingDistance);
+    if (trailingDistance > 0)
+      return this.speedForEdgeDistance(trailingDistance);
     return 0;
   }
 
@@ -216,7 +240,8 @@ function resolveEdgeScrollFrameScheduler(
   cancelFrame: (handle: number) => void;
   available: boolean;
 } {
-  const requestFrame = options.requestAnimationFrame ?? view?.requestAnimationFrame?.bind(view);
+  const requestFrame =
+    options.requestAnimationFrame ?? view?.requestAnimationFrame?.bind(view);
   if (!requestFrame) {
     return {
       requestFrame: () => 0,
@@ -226,7 +251,10 @@ function resolveEdgeScrollFrameScheduler(
   }
   return {
     requestFrame,
-    cancelFrame: options.cancelAnimationFrame ?? view?.cancelAnimationFrame?.bind(view) ?? (() => undefined),
+    cancelFrame:
+      options.cancelAnimationFrame ??
+      view?.cancelAnimationFrame?.bind(view) ??
+      (() => undefined),
     available: true,
   };
 }
@@ -246,10 +274,15 @@ function maxScrollTop(element: HTMLElement): number {
   return Math.max(0, element.scrollHeight - element.clientHeight);
 }
 
-function resolveEdgeScrollViewportRect(element: HTMLElement): Pick<DOMRect, "left" | "top" | "right" | "bottom"> {
+function resolveEdgeScrollViewportRect(
+  element: HTMLElement,
+): Pick<DOMRect, "left" | "top" | "right" | "bottom"> {
   const doc = element.ownerDocument;
   const view = doc.defaultView;
-  const rootScroller = element === doc.scrollingElement || element === doc.documentElement || element === doc.body;
+  const rootScroller =
+    element === doc.scrollingElement ||
+    element === doc.documentElement ||
+    element === doc.body;
   if (view && rootScroller) {
     const viewport = view.visualViewport;
     const left = viewport?.offsetLeft ?? 0;

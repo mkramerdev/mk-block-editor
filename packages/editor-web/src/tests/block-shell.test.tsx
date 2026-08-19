@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { createBlockRecord } from "@repo/editor-core/metadata";
+import { createVersionedBlockRecord } from "@repo/editor-core/metadata";
+import { asContentVersion } from "@repo/editor-core/kernel";
 import type { BlockId } from "@repo/editor-core/kernel";
 import { BlockShell } from "../document/blocks/block-shell.tsx";
 import { createEditorBlockDomRegistry } from "../document/blocks/block-dom-registry.ts";
@@ -12,12 +13,14 @@ vi.mock("../document/blocks/block-renderer", () => ({
 const selectionController = {} as never;
 
 function block(id = "shell-block" as BlockId, parentId: BlockId | null = null) {
-  return createBlockRecord({
+  return createVersionedBlockRecord({
     id,
     type: "paragraph",
     parentId,
-    metadataVersion: "1",
-    contentVersion: "1",
+    version: {
+      metadataVersion: "1",
+      contentVersion: asContentVersion("1"),
+    },
   });
 }
 

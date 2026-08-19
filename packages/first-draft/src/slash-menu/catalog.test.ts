@@ -1,4 +1,8 @@
 import { assertValidCanonicalBlockFragment } from "@repo/editor-core/editing";
+import type {
+  EditableEditorDefinition,
+  Editor,
+} from "@repo/editor-web/document-runtime";
 import { describe, expect, it } from "vitest";
 import { firstDraftBlockDefinitions } from "../first-draft-definition.tsx";
 import {
@@ -7,11 +11,22 @@ import {
 } from "./catalog.ts";
 import { materializeFirstDraftSlashAction } from "./materialize.ts";
 
+const emptyDefinition = {
+  blocks: firstDraftBlockDefinitions,
+  defaultRoot: "paragraph",
+  inlineMarks: [],
+  inlineAtoms: [],
+} satisfies EditableEditorDefinition;
+
 const emptyEditor = {
+  definition: emptyDefinition,
   getRootBlockIds: () => [],
   getChildBlockIds: () => [],
   getBlock: () => null,
-};
+} satisfies Pick<
+  Editor,
+  "definition" | "getRootBlockIds" | "getChildBlockIds" | "getBlock"
+>;
 
 describe("First Draft slash catalog", () => {
   it("contains all 27 user-insertable actions in stable order", () => {
@@ -47,10 +62,9 @@ describe("First Draft slash catalog", () => {
   });
 
   it("filters every query word case-insensitively and ranks exact/prefix matches", () => {
-    expect(filterFirstDraftSlashActions("HEADING h2").map(({ id }) => id)).toEqual([
-      "heading-2",
-      "toggle-heading-2",
-    ]);
+    expect(
+      filterFirstDraftSlashActions("HEADING h2").map(({ id }) => id),
+    ).toEqual(["heading-2", "toggle-heading-2"]);
     expect(filterFirstDraftSlashActions("table").map(({ id }) => id)).toEqual([
       "table",
     ]);
@@ -80,16 +94,62 @@ describe("First Draft slash catalog", () => {
     }
   });
 
+  it("materializes against the block registry supplied by the editor", () => {
+    const definitionReads = new Set<PropertyKey>();
+    const blocks = new Proxy(firstDraftBlockDefinitions, {
+      get(target, property, receiver) {
+        definitionReads.add(property);
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    const editor = {
+      ...emptyEditor,
+      definition: { ...emptyDefinition, blocks },
+    } satisfies Pick<
+      Editor,
+      "definition" | "getRootBlockIds" | "getChildBlockIds" | "getBlock"
+    >;
+
+    for (const id of ["paragraph", "columns-2", "tabs", "table"] as const) {
+      const candidate = firstDraftSlashActionCatalog.find(
+        (item) => item.id === id,
+      );
+      if (!candidate) throw new Error(`missing action ${id}`);
+      const materialized = materializeFirstDraftSlashAction(candidate, editor);
+      expect(() =>
+        assertValidCanonicalBlockFragment(materialized.fragment, {
+          blockDefinitions: blocks,
+        }),
+      ).not.toThrow();
+    }
+
+    expect([...definitionReads]).toEqual(
+      expect.arrayContaining([
+        "paragraph",
+        "columns",
+        "column",
+        "tabs",
+        "tabPane",
+        "table",
+        "tableRow",
+        "tableCell",
+      ]),
+    );
+  });
+
   it("sets all heading and nested toggle-heading levels", () => {
     for (let level = 1; level <= 6; level += 1) {
       const heading = materialize(`heading-${level}`);
-      expect(heading.blocks.find(({ type }) => type === "heading")?.metadata)
-        .toEqual({ level });
+      expect(
+        heading.blocks.find(({ type }) => type === "heading")?.metadata,
+      ).toEqual({ level });
       const toggle = materialize(`toggle-heading-${level}`);
-      expect(toggle.blocks.find(({ type }) => type === "toggleHeading")?.metadata)
-        .toBeUndefined();
-      expect(toggle.blocks.find(({ type }) => type === "heading")?.metadata)
-        .toEqual({ level });
+      expect(
+        toggle.blocks.find(({ type }) => type === "toggleHeading")?.metadata,
+      ).toBeUndefined();
+      expect(
+        toggle.blocks.find(({ type }) => type === "heading")?.metadata,
+      ).toEqual({ level });
     }
   });
 
@@ -117,15 +177,25 @@ describe("First Draft slash catalog", () => {
     ]);
     for (const count of [2, 3, 4] as const) {
       const fragment = materialize(`columns-${count}`);
-      expect(fragment.blocks.filter(({ type }) => type === "column")).toHaveLength(count);
-      expect(fragment.blocks.filter(({ type }) => type === "paragraph")).toHaveLength(count);
-      for (const column of fragment.blocks.filter(({ type }) => type === "column")) {
+      expect(
+        fragment.blocks.filter(({ type }) => type === "column"),
+      ).toHaveLength(count);
+      expect(
+        fragment.blocks.filter(({ type }) => type === "paragraph"),
+      ).toHaveLength(count);
+      for (const column of fragment.blocks.filter(
+        ({ type }) => type === "column",
+      )) {
         expect(column.metadata).toEqual({ layoutWeight: 1_000_000 });
       }
     }
     const tabs = materialize("tabs");
-    expect(tabs.blocks.filter(({ type }) => type === "tabPane")).toHaveLength(2);
-    expect(tabs.blocks.filter(({ type }) => type === "paragraph")).toHaveLength(2);
+    expect(tabs.blocks.filter(({ type }) => type === "tabPane")).toHaveLength(
+      2,
+    );
+    expect(tabs.blocks.filter(({ type }) => type === "paragraph")).toHaveLength(
+      2,
+    );
   });
 
   it("creates a 3 by 3 table with unique column ids and empty cell content", () => {
@@ -136,7 +206,9 @@ describe("First Draft slash catalog", () => {
     expect(rows).toHaveLength(3);
     expect(cells).toHaveLength(9);
     for (const row of rows) {
-      expect(cells.filter(({ parentId }) => parentId === row.id)).toHaveLength(3);
+      expect(cells.filter(({ parentId }) => parentId === row.id)).toHaveLength(
+        3,
+      );
     }
     const columnIds = table.metadata?.columnIds as readonly string[];
     expect(columnIds).toHaveLength(3);
@@ -174,9 +246,7 @@ describe("First Draft slash catalog", () => {
     expect(
       tabs.fragment.blocks.find(({ id }) => id === tabs.selectionBlockId)
         ?.parentId,
-    ).toBe(
-      tabs.fragment.blocks.find(({ type }) => type === "tabPane")?.id,
-    );
+    ).toBe(tabs.fragment.blocks.find(({ type }) => type === "tabPane")?.id);
 
     const table = materialization("table");
     expect(recordType(table, table.selectionBlockId)).toBe("tableCell");

@@ -1,7 +1,4 @@
-import type {
-  Block,
-  OrderedBlockGraph,
-} from "../model/block.ts";
+import type { Block, OrderedBlockGraph } from "../model/block.ts";
 import type { BlockId } from "../../kernel/identity/ids.ts";
 
 export interface CanonicalOrderContext<BlockRecord extends Block = Block> {
@@ -11,7 +8,9 @@ export interface CanonicalOrderContext<BlockRecord extends Block = Block> {
   readonly ancestorChainById: ReadonlyMap<BlockId, readonly BlockId[]>;
 }
 
-export interface CanonicalSubtreeOrderBounds<BlockRecord extends Block = Block> {
+export interface CanonicalSubtreeOrderBounds<
+  BlockRecord extends Block = Block,
+> {
   readonly first: BlockRecord;
   readonly last: BlockRecord;
   readonly nextAfterSubtree: BlockRecord | null;
@@ -43,9 +42,12 @@ export function deriveCanonicalOrderContext<BlockRecord extends Block>(
       throw new Error(`block ${blockId} appears more than once in containment`);
     }
     const block = graph.blocks[blockId] as BlockRecord | undefined;
-    if (!block) throw new Error(`containment references unknown block ${blockId}`);
+    if (!block)
+      throw new Error(`containment references unknown block ${blockId}`);
     if (block.tombstone) {
-      throw new Error(`tombstoned block ${blockId} appears in live containment`);
+      throw new Error(
+        `tombstoned block ${blockId} appears in live containment`,
+      );
     }
     if ((block.parentId ?? null) !== expectedParentId) {
       throw new Error(
@@ -80,13 +82,17 @@ export function deriveCanonicalOrderContext<BlockRecord extends Block>(
       throw new Error(`child sequence references unknown parent ${parentId}`);
     }
     if (parent.tombstone) {
-      throw new Error(`tombstoned block ${parentId} owns a live child sequence`);
+      throw new Error(
+        `tombstoned block ${parentId} owns a live child sequence`,
+      );
     }
     if (!childIds || childIds.length === 0) continue;
     const seen = new Set<BlockId>();
     for (const childId of childIds) {
       if (seen.has(childId)) {
-        throw new Error(`parent ${parentId} contains duplicate child ${childId}`);
+        throw new Error(
+          `parent ${parentId} contains duplicate child ${childId}`,
+        );
       }
       seen.add(childId);
     }
@@ -149,7 +155,9 @@ export function getDirectChildren<BlockRecord extends Block>(
   return childIds.map((blockId) => {
     const block = graph.blocks[blockId] as BlockRecord | undefined;
     if (!block || block.tombstone) {
-      throw new Error(`ordered containment references unavailable block ${blockId}`);
+      throw new Error(
+        `ordered containment references unavailable block ${blockId}`,
+      );
     }
     return block;
   });
@@ -231,7 +239,8 @@ export function getParentChain<BlockRecord extends Block>(
   blockId: BlockId,
 ): BlockId[] {
   return [
-    ...(deriveCanonicalOrderContext(graph).ancestorChainById.get(blockId) ?? []),
+    ...(deriveCanonicalOrderContext(graph).ancestorChainById.get(blockId) ??
+      []),
   ];
 }
 

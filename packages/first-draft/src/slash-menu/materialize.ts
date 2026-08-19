@@ -6,7 +6,7 @@ import {
   type CanonicalBlockRecord,
   type MaterializedCanonicalBlockCreation,
 } from "@repo/editor-core/editing";
-import { createBlockId, type BlockId } from "@repo/editor-core/kernel";
+import type { BlockId } from "@repo/editor-core/kernel";
 import { createBlockRecord } from "@repo/editor-core/metadata";
 import type { Editor } from "@repo/editor-web/document-runtime";
 import { createDefaultColumnMetadata } from "../blocks/columns/model.ts";
@@ -14,17 +14,26 @@ import {
   createFirstDraftTableColumnIds,
   createFirstDraftTableMetadata,
 } from "../blocks/table/model.ts";
-import { firstDraftBlockDefinitions } from "../first-draft-definition.tsx";
+import { createFirstDraftBlockIdAllocator } from "../identity/block-id-allocator.ts";
 import type { FirstDraftSlashAction } from "./catalog.ts";
 
 export function materializeFirstDraftSlashAction(
   action: FirstDraftSlashAction,
-  editor: Pick<Editor, "getRootBlockIds" | "getChildBlockIds" | "getBlock">,
+  editor: Pick<
+    Editor,
+    "definition" | "getRootBlockIds" | "getChildBlockIds" | "getBlock"
+  >,
 ): FirstDraftSlashMaterialization {
+  const blockDefinitions = editor.definition.blocks;
   const reservedBlockIds = readLiveBlockIds(editor);
-  const common = {
-    blockDefinitions: firstDraftBlockDefinitions,
+  const allocateBlockId = createFirstDraftBlockIdAllocator(editor, {
     reservedBlockIds,
+    purpose: "First Draft block creation",
+  });
+  const common = {
+    blockDefinitions,
+    reservedBlockIds,
+    createBlockId: allocateBlockId,
   } as const;
   switch (action.kind.type) {
     case "paragraph":
@@ -77,6 +86,7 @@ export function materializeFirstDraftSlashAction(
           type: "toggleHeading",
         }),
         action.kind.level,
+        blockDefinitions,
       );
     case "bookmark":
       return requireSelection(
@@ -87,11 +97,26 @@ export function materializeFirstDraftSlashAction(
         }),
       );
     case "columns":
-      return materializeColumns(action.kind.count, reservedBlockIds);
+      return materializeColumns(
+        action.kind.count,
+        blockDefinitions,
+        reservedBlockIds,
+        allocateBlockId,
+      );
     case "tabs":
-      return materializeTabs(reservedBlockIds);
+      return materializeTabs(
+        blockDefinitions,
+        reservedBlockIds,
+        allocateBlockId,
+      );
     case "table":
-      return materializeTable(reservedBlockIds, 3, 3);
+      return materializeTable(
+        blockDefinitions,
+        reservedBlockIds,
+        allocateBlockId,
+        3,
+        3,
+      );
   }
 }
 
@@ -104,22 +129,27 @@ export interface FirstDraftSlashMaterialization {
 function withNestedHeadingLevel(
   creation: MaterializedCanonicalBlockCreation,
   level: number,
+  blockDefinitions: Editor["definition"]["blocks"],
 ): FirstDraftSlashMaterialization {
   return recreateMaterialization(
     creation,
     creation.fragment.blocks.map((record) =>
       record.type === "heading" ? { ...record, metadata: { level } } : record,
     ),
+    blockDefinitions,
   );
 }
 
 function materializeColumns(
   count: 2 | 3 | 4,
+  blockDefinitions: Editor["definition"]["blocks"],
   reservedBlockIds: ReadonlySet<BlockId>,
+  allocateBlockId: () => BlockId,
 ): FirstDraftSlashMaterialization {
   const creation = materializeCanonicalBlockCreation({
-    blockDefinitions: firstDraftBlockDefinitions,
+    blockDefinitions,
     reservedBlockIds,
+    createBlockId: allocateBlockId,
     type: "columns",
     defaultContentCount: count,
   });
@@ -130,15 +160,19 @@ function materializeColumns(
         ? { ...record, metadata: createDefaultColumnMetadata() }
         : record,
     ),
+    blockDefinitions,
   );
 }
 
 function materializeTabs(
+  blockDefinitions: Editor["definition"]["blocks"],
   reservedBlockIds: ReadonlySet<BlockId>,
+  allocateBlockId: () => BlockId,
 ): FirstDraftSlashMaterialization {
   const creation = materializeCanonicalBlockCreation({
-    blockDefinitions: firstDraftBlockDefinitions,
+    blockDefinitions,
     reservedBlockIds,
+    createBlockId: allocateBlockId,
     type: "tabs",
     defaultContentCount: 2,
   });
@@ -161,43 +195,33 @@ function materializeTabs(
         plainText: "",
       };
     }),
+    blockDefinitions,
   );
 }
 
 function materializeTable(
+  blockDefinitions: Editor["definition"]["blocks"],
   reservedBlockIds: ReadonlySet<BlockId>,
+  allocateBlockId: () => BlockId,
   rows: number,
   columns: number,
 ): FirstDraftSlashMaterialization {
   const columnIds = createFirstDraftTableColumnIds(columns);
   const base = materializeCanonicalBlockCreation({
-    blockDefinitions: firstDraftBlockDefinitions,
+    blockDefinitions,
     reservedBlockIds,
+    createBlockId: allocateBlockId,
     type: "table",
     metadata: createFirstDraftTableMetadata(columnIds),
     defaultContentCount: rows,
   });
-  const allocated = new Set<BlockId>([
-    ...reservedBlockIds,
-    ...base.fragment.blocks.map(({ id }) => id),
-  ]);
-  const allocate = (): BlockId => {
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      const id = createBlockId();
-      if (!allocated.has(id)) {
-        allocated.add(id);
-        return id;
-      }
-    }
-    throw new Error("unable to allocate unique table cell ids");
-  };
   const records: CanonicalBlockRecord[] = [];
   for (const record of base.fragment.blocks) {
     records.push(record);
     if (record.type !== "tableCell") continue;
     for (let index = 1; index < columns; index += 1) {
       const cell = createBlockRecord({
-        id: allocate(),
+        id: allocateBlockId(),
         type: "tableCell",
         parentId: record.parentId,
       });
@@ -210,7 +234,7 @@ function materializeTable(
       });
     }
   }
-  return recreateMaterialization(base, records);
+  return recreateMaterialization(base, records, blockDefinitions);
 }
 
 function requireSelection(
@@ -225,9 +249,10 @@ function requireSelection(
 function recreateMaterialization(
   source: MaterializedCanonicalBlockCreation,
   blocks: readonly CanonicalBlockRecord[],
+  blockDefinitions: Editor["definition"]["blocks"],
 ): FirstDraftSlashMaterialization {
   const materialization = requireSelection(source);
-  const fragment = recreateFragment(source.fragment, blocks);
+  const fragment = recreateFragment(source.fragment, blocks, blockDefinitions);
   if (
     !fragment.blocks.some(({ id }) => id === materialization.rootBlockId) ||
     !fragment.blocks.some(({ id }) => id === materialization.selectionBlockId)
@@ -246,13 +271,14 @@ function recreateMaterialization(
 function recreateFragment(
   source: CanonicalBlockFragment,
   blocks: readonly CanonicalBlockRecord[],
+  blockDefinitions: Editor["definition"]["blocks"],
 ): CanonicalBlockFragment {
   return createCanonicalBlockFragment({
     blocks,
     rootBlockIds: source.rootBlockIds,
     start: source.start,
     end: source.end,
-    blockDefinitions: firstDraftBlockDefinitions,
+    blockDefinitions,
   });
 }
 

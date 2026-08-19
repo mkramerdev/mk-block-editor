@@ -1,16 +1,22 @@
 import { describe, expect, it, vi } from "vitest";
 import { createBlockLocalProseMirrorState } from "@repo/editor-dom/block-editor";
 import { EditorView } from "@repo/editor-dom/prosemirror";
-import type { EditorImplementation } from "@repo/editor-react/editor";
-import type { EditorExternalStore } from "@repo/editor-react/store";
+import {
+  createEditorExternalStore,
+  createInitialEditorSessionState,
+} from "@repo/editor-react/store";
+import { asBlockId } from "@repo/editor-core/kernel";
 import type {
   EditorCommandDefinition,
   EditorKeyBinding,
 } from "../definition/contracts.ts";
 import { testEditableEditorDefinition } from "../../tests/test-editor-definition.ts";
-import { compileRegisteredEditorCommands } from "../definition/commands.ts";
-import { compileEditorKeybindings } from "./compiled-keybindings.ts";
 import { createEditorKeybindingPlugin } from "./block-keybinding-plugin.ts";
+import { initializeTestEditableEditor } from "../../tests/test-editor-initializers.ts";
+import { createTestEditorSnapshot } from "../../tests/editor-snapshot-fixtures.ts";
+import { resolveEditorRuntimePort } from "../document/runtime-port-registry.ts";
+
+const blockId = asBlockId("01890f07-1c00-7000-8000-000000000904");
 
 describe("mounted block keybinding integration", () => {
   it("gives a configured block binding the first opportunity", () => {
@@ -120,6 +126,9 @@ function behaviorWithSharedChord(
       { key: "Mod-b", commandId: block.id, scope: "block" },
       { key: "Mod-b", commandId: document.id, scope: "document" },
     ],
+  } satisfies {
+    readonly commands: readonly EditorCommandDefinition[];
+    readonly keybindings: readonly EditorKeyBinding[];
   };
 }
 
@@ -131,35 +140,37 @@ function invokePlugin(
   event: KeyboardEvent,
 ): boolean {
   const state = createBlockLocalProseMirrorState({
-    blockId: "keybinding-plugin-block" as never,
+    blockId,
     blockType: "paragraph",
     doc: "text",
   });
   const dom = document.createElement("div");
   const view = new EditorView({ mount: dom }, { state });
-  const commands = compileRegisteredEditorCommands(behavior.commands);
-  const editor = {
-    commands,
-    keybindings: compileEditorKeybindings(behavior.keybindings, commands),
-  } as unknown as EditorImplementation;
-  const store = {
-    getSnapshot: () => ({
-      overlay: { active: false, id: null, blockId: null, anchor: null },
-    }),
-  } as EditorExternalStore;
+  const editor = initializeTestEditableEditor({
+    definition: {
+      ...testEditableEditorDefinition,
+      commands: behavior.commands,
+      keybindings: behavior.keybindings,
+    },
+    snapshot: createTestEditorSnapshot([
+      { id: blockId, type: "paragraph", text: "text" },
+    ]),
+  });
+  const store = createEditorExternalStore(createInitialEditorSessionState({}));
   const plugin = createEditorKeybindingPlugin({
     definition: testEditableEditorDefinition,
     store,
-    editor,
-    blockId: "keybinding-plugin-block" as never,
+    editor: resolveEditorRuntimePort(editor),
+    blockId,
     blockType: "paragraph",
   });
   const handleKeyDown = plugin.props.handleKeyDown;
   if (!handleKeyDown) throw new Error("Missing keybinding plugin handler.");
   try {
-    return handleKeyDown(view, event);
+    return handleKeyDown.call(plugin, view, event) ?? false;
   } finally {
     view.destroy();
+    editor.dispose();
   }
 }
 

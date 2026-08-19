@@ -20,8 +20,7 @@ export {
   type EditorKeybindingRuntimeContext,
 } from "./document-resolver.ts";
 
-export interface EditorBlockKeybindingRuntimeContext
-  extends EditorKeybindingRuntimeContext {
+export interface EditorBlockKeybindingRuntimeContext extends EditorKeybindingRuntimeContext {
   readonly blockId: BlockId;
   readonly blockType: BlockType;
   readonly view: EditorView;

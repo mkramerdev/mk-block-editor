@@ -34,7 +34,9 @@ export function serializeCanonicalFragmentHtml(
     readonly inlineMarks: readonly InlineMarkDefinition[];
     readonly inlineAtoms?: readonly {
       readonly type: string;
-      readonly metadata: Readonly<Record<string, InlineMetadataFieldDefinition>>;
+      readonly metadata: Readonly<
+        Record<string, InlineMetadataFieldDefinition>
+      >;
     }[];
     readonly htmlExportHandlers?: readonly EditorHtmlExportHandler[];
   },

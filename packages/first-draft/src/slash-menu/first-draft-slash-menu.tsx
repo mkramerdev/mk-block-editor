@@ -56,9 +56,7 @@ export function FirstDraftSlashMenu({
     activeState.query === (slashSession?.query ?? "");
   const activeId = slashSession
     ? retainFirstDraftTypingTriggerActiveId(
-        activeState.sessionId === slashSession.id
-          ? activeState.activeId
-          : null,
+        activeState.sessionId === slashSession.id ? activeState.activeId : null,
         candidates,
       )
     : null;
@@ -179,20 +177,21 @@ export function FirstDraftSlashMenu({
     optionRefs.current.get(activeId)?.scrollIntoView({ block: "nearest" });
   }, [activeId]);
 
-  const { menuRef, position: menuPosition } = useFirstDraftTypingTriggerMenuPosition(
-    geometry,
-    slashSession?.blockId ?? null,
-    slashSession?.range.from ?? null,
-  );
+  const { menuRef, position: menuPosition } =
+    useFirstDraftTypingTriggerMenuPosition(
+      geometry,
+      slashSession?.blockId ?? null,
+      slashSession?.range.from ?? null,
+    );
   if (!slashSession) return null;
   const activeOptionId = activeId ? optionId(activeId) : undefined;
   const style: CSSProperties = menuPosition
-    ? {
+    ? ({
         left: menuPosition.left,
         top: menuPosition.top,
         visibility: "visible",
         "--first-draft-slash-menu-available-block-size": `${menuPosition.availableHeight}px`,
-      } as CSSProperties
+      } as CSSProperties)
     : { visibility: "hidden" };
 
   return (

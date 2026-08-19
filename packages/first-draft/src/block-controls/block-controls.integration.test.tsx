@@ -8,7 +8,10 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BlockId } from "@repo/editor-core/kernel";
 import { addEditorBlockOperations } from "@repo/editor-web/block-operations";
-import { EditorDocument } from "@repo/editor-web/document-runtime";
+import {
+  EditorDocument,
+  type EditorChangeCallback,
+} from "@repo/editor-web/document-runtime";
 import { initializeTestEditableEditor as initializeEditableEditor } from "../test-editor.ts";
 import type { EditableEditorDefinition } from "@repo/editor-web/editor";
 import type { FirstDraftBlockRendererProps } from "../first-draft-editor-contracts.ts";
@@ -309,7 +312,7 @@ describe("First Draft canonical plus insertion", () => {
         }),
       ).toEqual({ status: "focused" });
     });
-    const sourceTextRoot = fixture.editor.readActiveTextView()!.dom;
+    const sourceTextRoot = activeTextRoot(fixture.container);
     expect(sourceProjection.hidden).toBe(true);
     const rootsBefore = fixture.editor.getRootBlockIds();
     const selectionSettlements = vi.fn();
@@ -328,9 +331,9 @@ describe("First Draft canonical plus insertion", () => {
     fireEvent.keyDown(grip, { key: "Enter" });
 
     expect(fixture.editor.getRootBlockIds()).toEqual(rootsBefore);
-    expect(fixture.editor.selectionController.getCanonicalSnapshot()).toMatchObject(
-      { kind: "none" },
-    );
+    expect(
+      fixture.editor.selectionController.getCanonicalSnapshot(),
+    ).toMatchObject({ kind: "none" });
     expect(selectionSettlements).toHaveBeenCalledOnce();
     expect(selectionSettlements).toHaveBeenCalledWith({ kind: "none" });
     expect(onChange).not.toHaveBeenCalled();
@@ -348,7 +351,7 @@ describe("First Draft canonical plus insertion", () => {
         fixture.editor.focusText(sourceId, { offset: 0, preventScroll: true }),
       ).toEqual({ status: "focused" });
     });
-    const sourceTextRoot = fixture.editor.readActiveTextView()!.dom;
+    const sourceTextRoot = activeTextRoot(fixture.container);
     expect(sourceProjection.hidden).toBe(true);
     expect(document.activeElement).toBe(sourceTextRoot);
 
@@ -373,11 +376,9 @@ describe("First Draft canonical plus insertion", () => {
     expect(fixture.editor.getBlock(createdId)?.type).toBe("paragraph");
     expect(onChange).toHaveBeenCalledOnce();
     await waitFor(() =>
-      expect(document.activeElement).toBe(
-        fixture.editor.readActiveTextView()?.dom,
-      ),
+      expect(document.activeElement).toBe(activeTextRoot(fixture.container)),
     );
-    const createdTextRoot = fixture.editor.readActiveTextView()!.dom;
+    const createdTextRoot = activeTextRoot(fixture.container);
     expect(nativeCaretOffset(createdTextRoot)).toBe(0);
     expect(
       fixture.editor.selectionController.getCanonicalSnapshot(),
@@ -443,20 +444,7 @@ describe("First Draft canonical plus insertion", () => {
 describe("First Draft hover and mounted-view identity", () => {
   it("does not execute unrelated renderers or remount shells/text projections across hover", () => {
     const counts = new Map<BlockId, number>();
-    const projectionRegistrations = new Map<BlockId, number>();
     const fixture = renderFirstDraft({
-      inspect(editor) {
-        const register = editor.registerTextEditingHost.bind(editor);
-        vi.spyOn(editor, "registerTextEditingHost").mockImplementation(
-          (input) => {
-            projectionRegistrations.set(
-              input.blockId,
-              (projectionRegistrations.get(input.blockId) ?? 0) + 1,
-            );
-            return register(input);
-          },
-        );
-      },
       definition(viewState) {
         const base = createFirstDraftEditorDefinition(viewState);
         function CountingParagraphRenderer(
@@ -483,8 +471,6 @@ describe("First Draft hover and mounted-view identity", () => {
     expect(shells.length).toBeGreaterThanOrEqual(100);
     const unrelatedId = id("fd-paragraph-outro");
     const unrelatedCount = counts.get(unrelatedId);
-    const unrelatedProjectionRegistrations =
-      projectionRegistrations.get(unrelatedId);
     const unrelatedShell = shell(fixture.container, unrelatedId);
     const unrelatedText = textRoot(fixture.container, unrelatedId);
     const zoneA = zoneFor(fixture.container, "fd-paragraph-intro");
@@ -498,9 +484,6 @@ describe("First Draft hover and mounted-view identity", () => {
     fireEvent.pointerMove(textB);
 
     expect(counts.get(unrelatedId)).toBe(unrelatedCount);
-    expect(projectionRegistrations.get(unrelatedId)).toBe(
-      unrelatedProjectionRegistrations,
-    );
     expect(shell(fixture.container, unrelatedId)).toBe(unrelatedShell);
     expect(textRoot(fixture.container, unrelatedId)).toBe(unrelatedText);
     expect(zoneFor(fixture.container, "fd-paragraph-intro")).toBe(zoneA);
@@ -513,20 +496,7 @@ describe("First Draft hover and mounted-view identity", () => {
 
   it("preserves unrelated renderer, shell, and text-view identities during plus insertion", () => {
     const counts = new Map<BlockId, number>();
-    const projectionRegistrations = new Map<BlockId, number>();
     const fixture = renderFirstDraft({
-      inspect(editor) {
-        const register = editor.registerTextEditingHost.bind(editor);
-        vi.spyOn(editor, "registerTextEditingHost").mockImplementation(
-          (input) => {
-            projectionRegistrations.set(
-              input.blockId,
-              (projectionRegistrations.get(input.blockId) ?? 0) + 1,
-            );
-            return register(input);
-          },
-        );
-      },
       definition(viewState) {
         const base = createFirstDraftEditorDefinition(viewState);
         function CountingParagraphRenderer(
@@ -549,8 +519,6 @@ describe("First Draft hover and mounted-view identity", () => {
     });
     const unrelatedId = id("fd-paragraph-outro");
     const unrelatedCount = counts.get(unrelatedId);
-    const unrelatedProjectionRegistrations =
-      projectionRegistrations.get(unrelatedId);
     const unrelatedShell = shell(fixture.container, unrelatedId);
     const unrelatedText = textRoot(fixture.container, unrelatedId);
     fireEvent.pointerMove(
@@ -562,9 +530,6 @@ describe("First Draft hover and mounted-view identity", () => {
       )!,
     );
     expect(counts.get(unrelatedId)).toBe(unrelatedCount);
-    expect(projectionRegistrations.get(unrelatedId)).toBe(
-      unrelatedProjectionRegistrations,
-    );
     expect(shell(fixture.container, unrelatedId)).toBe(unrelatedShell);
     expect(textRoot(fixture.container, unrelatedId)).toBe(unrelatedText);
   });
@@ -572,16 +537,13 @@ describe("First Draft hover and mounted-view identity", () => {
 
 function renderFirstDraft(
   options: {
-    readonly onChange?: ReturnType<typeof vi.fn>;
+    readonly onChange?: EditorChangeCallback;
     readonly prepare?: (
       editor: ReturnType<typeof addEditorBlockOperations>,
     ) => void;
     readonly definition?: (
       viewState: ReturnType<typeof createFirstDraftViewStateStore>,
     ) => EditableEditorDefinition;
-    readonly inspect?: (
-      editor: ReturnType<typeof addEditorBlockOperations>,
-    ) => void;
   } = {},
 ) {
   const viewState = createFirstDraftViewStateStore({
@@ -599,7 +561,6 @@ function renderFirstDraft(
   );
   disposables.push(editor);
   options.prepare?.(editor);
-  options.inspect?.(editor);
   const result = render(
     <FirstDraftViewStateProvider store={viewState}>
       <FirstDraftBlockHoverProvider enabled={editor.editable}>
@@ -645,6 +606,14 @@ function textRoot(
     ":scope > * [data-editor-text-root='true'], :scope > [data-editor-text-root='true']",
   );
   if (!element) throw new Error(`Missing text root for ${blockId}`);
+  return element;
+}
+
+function activeTextRoot(container: ParentNode): HTMLElement {
+  const element = container.querySelector<HTMLElement>(
+    ".ProseMirror[data-editor-input-owner='true']",
+  );
+  if (!element) throw new Error("Missing active text root");
   return element;
 }
 

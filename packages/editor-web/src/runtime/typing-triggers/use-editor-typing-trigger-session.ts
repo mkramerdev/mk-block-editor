@@ -8,7 +8,10 @@ import type {
 
 /** Headless subscription adapter. Product code owns all presentation. */
 export function useEditorTypingTriggerSession(
-  editor: EditableEditor,
+  editor: Pick<
+    EditableEditor,
+    "getTypingTriggerSession" | "subscribeTypingTriggerSession"
+  >,
 ): EditorTypingTriggerSession | null {
   return useSyncExternalStore(
     editor.subscribeTypingTriggerSession,

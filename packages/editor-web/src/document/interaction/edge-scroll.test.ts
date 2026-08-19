@@ -106,22 +106,45 @@ describe("createEdgeScrollController", () => {
   it("uses the visible viewport bounds for the document scrolling element", () => {
     const raf = createRafDriver();
     const scrollElement = document.documentElement;
-    Object.defineProperty(document, "scrollingElement", { configurable: true, value: scrollElement });
-    Object.defineProperty(window, "innerHeight", { configurable: true, value: 100 });
-    Object.defineProperty(window, "innerWidth", { configurable: true, value: 200 });
-    Object.defineProperty(scrollElement, "clientHeight", { configurable: true, value: 100 });
-    Object.defineProperty(scrollElement, "scrollHeight", { configurable: true, value: 1000 });
-    Object.defineProperty(scrollElement, "clientWidth", { configurable: true, value: 200 });
-    Object.defineProperty(scrollElement, "scrollWidth", { configurable: true, value: 200 });
+    Object.defineProperty(document, "scrollingElement", {
+      configurable: true,
+      value: scrollElement,
+    });
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 100,
+    });
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 200,
+    });
+    Object.defineProperty(scrollElement, "clientHeight", {
+      configurable: true,
+      value: 100,
+    });
+    Object.defineProperty(scrollElement, "scrollHeight", {
+      configurable: true,
+      value: 1000,
+    });
+    Object.defineProperty(scrollElement, "clientWidth", {
+      configurable: true,
+      value: 200,
+    });
+    Object.defineProperty(scrollElement, "scrollWidth", {
+      configurable: true,
+      value: 200,
+    });
     scrollElement.scrollTop = 0;
-    vi.spyOn(scrollElement, "getBoundingClientRect").mockReturnValue(domRect({
-      left: 0,
-      top: 0,
-      right: 200,
-      bottom: 1000,
-      width: 200,
-      height: 1000,
-    }));
+    vi.spyOn(scrollElement, "getBoundingClientRect").mockReturnValue(
+      domRect({
+        left: 0,
+        top: 0,
+        right: 200,
+        bottom: 1000,
+        width: 200,
+        height: 1000,
+      }),
+    );
     const controller = createEdgeScrollController({
       scrollElement,
       axes: { y: true },
@@ -162,29 +185,45 @@ describe("createEdgeScrollController", () => {
   });
 });
 
-function createScrollableElement(options: {
-  scrollTop?: number;
-  scrollLeft?: number;
-  clientHeight?: number;
-  scrollHeight?: number;
-  clientWidth?: number;
-  scrollWidth?: number;
-} = {}): HTMLElement {
+function createScrollableElement(
+  options: {
+    scrollTop?: number;
+    scrollLeft?: number;
+    clientHeight?: number;
+    scrollHeight?: number;
+    clientWidth?: number;
+    scrollWidth?: number;
+  } = {},
+): HTMLElement {
   const element = document.createElement("div");
-  Object.defineProperty(element, "clientHeight", { configurable: true, value: options.clientHeight ?? 100 });
-  Object.defineProperty(element, "scrollHeight", { configurable: true, value: options.scrollHeight ?? 1000 });
-  Object.defineProperty(element, "clientWidth", { configurable: true, value: options.clientWidth ?? 200 });
-  Object.defineProperty(element, "scrollWidth", { configurable: true, value: options.scrollWidth ?? 200 });
+  Object.defineProperty(element, "clientHeight", {
+    configurable: true,
+    value: options.clientHeight ?? 100,
+  });
+  Object.defineProperty(element, "scrollHeight", {
+    configurable: true,
+    value: options.scrollHeight ?? 1000,
+  });
+  Object.defineProperty(element, "clientWidth", {
+    configurable: true,
+    value: options.clientWidth ?? 200,
+  });
+  Object.defineProperty(element, "scrollWidth", {
+    configurable: true,
+    value: options.scrollWidth ?? 200,
+  });
   element.scrollTop = options.scrollTop ?? 0;
   element.scrollLeft = options.scrollLeft ?? 0;
-  vi.spyOn(element, "getBoundingClientRect").mockReturnValue(domRect({
-    left: 0,
-    top: 0,
-    right: options.clientWidth ?? 200,
-    bottom: options.clientHeight ?? 100,
-    width: options.clientWidth ?? 200,
-    height: options.clientHeight ?? 100,
-  }));
+  vi.spyOn(element, "getBoundingClientRect").mockReturnValue(
+    domRect({
+      left: 0,
+      top: 0,
+      right: options.clientWidth ?? 200,
+      bottom: options.clientHeight ?? 100,
+      width: options.clientWidth ?? 200,
+      height: options.clientHeight ?? 100,
+    }),
+  );
   return element;
 }
 

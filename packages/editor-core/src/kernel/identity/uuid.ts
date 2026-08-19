@@ -41,7 +41,7 @@ export function asBlockId(value: string): BlockId {
 }
 
 export function createBlockId(now?: number): BlockId {
-  return createStructuralKey(now) as BlockId;
+  return asBlockId(createStructuralKey(now));
 }
 
 function fillRandomBytes(bytes: Uint8Array): void {

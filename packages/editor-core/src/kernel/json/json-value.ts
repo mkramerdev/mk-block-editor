@@ -190,6 +190,45 @@ export function jsonValuesEqual(left: unknown, right: unknown): boolean {
   return validJsonValuesEqual(left as JsonValue, right as JsonValue);
 }
 
+/**
+ * Returns a deterministic scalar key for one valid JSON value.
+ *
+ * This is intended only for subsystems that genuinely require a scalar map or
+ * memoization key. Object member order is ignored, while array order remains
+ * significant. Invalid values are rejected instead of being stringified with
+ * JavaScript's lossy non-JSON behavior.
+ */
+export function canonicalJsonValueKey(value: unknown): string | null {
+  if (
+    validateJsonValueAtPath(value, "value", new WeakSet<object>()).length > 0
+  ) {
+    return null;
+  }
+  return encodeCanonicalJsonValueKey(value as JsonValue);
+}
+
+function encodeCanonicalJsonValueKey(value: JsonValue): string {
+  if (value === null) return "null";
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "number") {
+    return Object.is(value, -0) ? "-0" : JSON.stringify(value);
+  }
+  if (typeof value === "string") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(encodeCanonicalJsonValueKey).join(",")}]`;
+  }
+  const objectValue = value as JsonObject;
+  const entries = Object.keys(objectValue)
+    .sort()
+    .map(
+      (key) =>
+        `${JSON.stringify(key)}:${encodeCanonicalJsonValueKey(objectValue[key]!)}`,
+    );
+  return `{${entries.join(",")}}`;
+}
+
 function validJsonValuesEqual(left: JsonValue, right: JsonValue): boolean {
   if (Object.is(left, right)) return true;
   if (Array.isArray(left) || Array.isArray(right)) {

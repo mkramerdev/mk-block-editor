@@ -11,9 +11,15 @@ describe("editor link URL schema", () => {
   });
 
   it("allows explicit inline link protocols", () => {
-    expect(sanitizeEditorLinkUrl("http://example.test/article")).toBe("http://example.test/article");
-    expect(sanitizeEditorLinkUrl("https://example.test/article")).toBe("https://example.test/article");
-    expect(sanitizeEditorLinkUrl("mailto:ada@example.test")).toBe("mailto:ada@example.test");
+    expect(sanitizeEditorLinkUrl("http://example.test/article")).toBe(
+      "http://example.test/article",
+    );
+    expect(sanitizeEditorLinkUrl("https://example.test/article")).toBe(
+      "https://example.test/article",
+    );
+    expect(sanitizeEditorLinkUrl("mailto:ada@example.test")).toBe(
+      "mailto:ada@example.test",
+    );
   });
 
   it("allows explicit relative inline links", () => {
@@ -24,8 +30,14 @@ describe("editor link URL schema", () => {
   });
 
   it("normalizes host-like inline links to https", () => {
-    expect(sanitizeEditorLinkUrl("example.test/article")).toBe("https://example.test/article");
-    expect(sanitizeEditorLinkUrl("localhost:3000/docs")).toBe("https://localhost:3000/docs");
-    expect(sanitizeEditorLinkUrl("//example.test/path")).toBe("https://example.test/path");
+    expect(sanitizeEditorLinkUrl("example.test/article")).toBe(
+      "https://example.test/article",
+    );
+    expect(sanitizeEditorLinkUrl("localhost:3000/docs")).toBe(
+      "https://localhost:3000/docs",
+    );
+    expect(sanitizeEditorLinkUrl("//example.test/path")).toBe(
+      "https://example.test/path",
+    );
   });
 });

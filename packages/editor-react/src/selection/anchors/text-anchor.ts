@@ -55,10 +55,7 @@ export function validateEditorSelectionTextAnchor(
     return invalidAnchor("text anchor version is unsupported");
   if (!isObject(value.payload))
     return invalidAnchor("text anchor payload must be an object");
-  return createEditorSelectionTextAnchor({
-    codec: value.codec as string,
-    payload: value.payload as unknown as EditorSelectionTextAnchorPayload,
-  });
+  return validateEditorSelectionTextAnchorPayload(value.codec, value.payload);
 }
 
 export function resolveEditorSelectionTextAnchorPoint(
@@ -112,8 +109,8 @@ export function anchorResolutionFailure(
 }
 
 function validateEditorSelectionTextAnchorPayload(
-  codec: string,
-  payload: EditorSelectionTextAnchorPayload,
+  codec: unknown,
+  payload: unknown,
 ): CreateEditorSelectionTextAnchorResult {
   if (typeof codec !== "string" || !/^[a-z][a-z0-9.-]{0,127}$/u.test(codec)) {
     return invalidAnchor("text anchor codec is invalid");
@@ -139,7 +136,10 @@ function validateEditorSelectionTextAnchorPayload(
       kind: "block-relative-text",
       codec,
       version: 1,
-      payload,
+      payload: {
+        encoded: payload.encoded,
+        ...(payload.assoc === undefined ? {} : { assoc: payload.assoc }),
+      },
     },
   };
 }

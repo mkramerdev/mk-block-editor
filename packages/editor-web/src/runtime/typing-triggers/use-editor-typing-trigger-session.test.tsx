@@ -2,7 +2,7 @@ import { act, renderHook } from "@testing-library/react";
 import type { BlockId } from "@repo/editor-core/kernel";
 import { describe, expect, it, vi } from "vitest";
 import type {
-  Editor,
+  EditableEditor,
   EditorTypingTriggerSession,
   EditorTypingTriggerSessionId,
 } from "../document/contracts.ts";
@@ -13,8 +13,14 @@ describe("useEditorTypingTriggerSession", () => {
     const first = createSessionStoreEditor();
     const second = createSessionStoreEditor();
     const { result, rerender, unmount } = renderHook(
-      ({ editor }: { readonly editor: Editor }) =>
-        useEditorTypingTriggerSession(editor),
+      ({
+        editor,
+      }: {
+        readonly editor: Pick<
+          EditableEditor,
+          "getTypingTriggerSession" | "subscribeTypingTriggerSession"
+        >;
+      }) => useEditorTypingTriggerSession(editor),
       { initialProps: { editor: first.editor } },
     );
 
@@ -57,7 +63,10 @@ function createSessionStoreEditor() {
         unsubscribe();
       };
     },
-  } as Editor;
+  } satisfies Pick<
+    EditableEditor,
+    "getTypingTriggerSession" | "subscribeTypingTriggerSession"
+  >;
   return {
     editor,
     unsubscribe,

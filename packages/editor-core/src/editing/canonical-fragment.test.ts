@@ -123,7 +123,9 @@ describe("canonical block fragments", () => {
         ),
         { blockDefinitions: constrainedDefinitions },
       ),
-    ).toContain(`fragment block ${root} has invalid direct parent for type quote`);
+    ).toContain(
+      `fragment block ${root} has invalid direct parent for type quote`,
+    );
   });
 
   it.each([
@@ -274,5 +276,21 @@ describe("canonical block fragments", () => {
 
     expect(created.fragment.blocks).toHaveLength(1);
     expect(created.selectionBlockId).toBe(created.rootBlockId);
+  });
+
+  it("forwards current-document collision checks to canonical allocation", () => {
+    const collision = id(90);
+    const candidates = [collision, id(91), id(92)];
+    const created = materializeCanonicalBlockCreation({
+      type: "quote",
+      blockDefinitions: definitions,
+      createBlockId: () => candidates.shift() ?? id(93),
+      isBlockIdReserved: (blockId) => blockId === collision,
+    });
+
+    expect(created.fragment.blocks.map((block) => block.id)).toEqual([
+      id(91),
+      id(92),
+    ]);
   });
 });

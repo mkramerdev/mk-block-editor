@@ -107,7 +107,8 @@ function resolveCollapsedSummary(
   if (
     wrapperChildren[0] !== summary.id ||
     wrapperChildren.length !== 2 ||
-    context.editor.getBlock(wrapperChildren[1]!)?.type !== toggleListItemBodyType
+    context.editor.getBlock(wrapperChildren[1]!)?.type !==
+      toggleListItemBodyType
   ) {
     return null;
   }

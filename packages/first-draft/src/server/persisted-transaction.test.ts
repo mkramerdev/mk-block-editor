@@ -103,6 +103,9 @@ describe("First Draft database-only transaction serialization", () => {
     const remote = decodeFirstDraftMessage(transportAfterPersistence.buffer);
     expect(remote.ok).toBe(true);
     if (!remote.ok) throw new Error(remote.error);
+    if (remote.message.type !== "proposed-editor-transaction") {
+      throw new Error("Expected a proposed editor transaction");
+    }
     const remoteBlock = remote.message.transaction.content[0]!;
     expect(remoteBlock.update.payload.equals(immutableBytes)).toBe(true);
     Reflect.set(remoteBlock.update.payload, "0", 255);

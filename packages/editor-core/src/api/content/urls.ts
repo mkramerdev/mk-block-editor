@@ -1,3 +1,1 @@
-export {
-  sanitizeEditorLinkUrl,
-} from "../../content/urls/editor-url.ts";
+export { sanitizeEditorLinkUrl } from "../../content/urls/editor-url.ts";

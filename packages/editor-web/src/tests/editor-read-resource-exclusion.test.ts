@@ -93,7 +93,9 @@ vi.mock(
       >();
     return {
       ...actual,
-      EditorTypingTriggerSessionController: class extends actual.EditorTypingTriggerSessionController {
+      EditorTypingTriggerSessionController: class
+        extends actual.EditorTypingTriggerSessionController
+      {
         constructor(
           ...args: ConstructorParameters<
             typeof actual.EditorTypingTriggerSessionController

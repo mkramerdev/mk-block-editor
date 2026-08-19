@@ -16,7 +16,7 @@ import {
   type SelectionController,
 } from "@repo/editor-react/selection";
 import type { CanonicalContentResources } from "../content/canonical-resources.ts";
-import type { EditorContentRuntime } from "../content/content-runtime.ts";
+import type { EditorContentRuntime } from "@repo/editor-core/content";
 import type { ReadEditorDefinition } from "../definition/contracts.ts";
 import type { CompiledCanonicalEditorDefinition } from "../definition/compiled-editor-definition.ts";
 import type { EditorDiagnostics, ReadEditor } from "./contracts.ts";

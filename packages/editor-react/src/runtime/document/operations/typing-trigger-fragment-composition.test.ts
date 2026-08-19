@@ -2,13 +2,17 @@ import { createBlockRichTextContentFromPlainText } from "@repo/editor-core/conte
 import type { BlockType, VersionedBlock } from "@repo/editor-core/document";
 import type { BlockDefinition } from "@repo/editor-core/definitions";
 import { materializeCanonicalBlockCreation } from "@repo/editor-core/editing";
-import type { BlockId } from "@repo/editor-core/kernel";
+import {
+  asBlockId,
+  asContentVersion,
+  type BlockId,
+} from "@repo/editor-core/kernel";
 import { describe, expect, it } from "vitest";
 import type { CanonicalEditCompositionGraph } from "./canonical-edit-composition.ts";
 import { resolveTypingTriggerFragmentComposition } from "./typing-trigger-fragment-composition.ts";
 
-const sourceId = "source" as BlockId;
-const quoteId = "quote" as BlockId;
+const sourceId = asBlockId("01890f07-1c00-7000-8000-000000000401");
+const quoteId = asBlockId("01890f07-1c00-7000-8000-000000000402");
 const definitions: Readonly<Record<BlockType, BlockDefinition>> = {
   paragraph: {
     kind: "text",
@@ -93,8 +97,8 @@ function createGraph(
     type: "paragraph",
     parentId,
     metadataVersion: "metadata",
-    contentVersion: "content",
-    tombstone: false,
+    contentVersion: asContentVersion("content"),
+    tombstone: null,
   };
   const quote: VersionedBlock = {
     id: quoteId,
@@ -102,11 +106,12 @@ function createGraph(
     parentId: null,
     metadataVersion: "metadata",
     contentVersion: null,
-    tombstone: false,
+    tombstone: null,
   };
   return {
     blockDefinitions: definitions,
-    getBlock: (id) => (id === sourceId ? source : id === quoteId ? quote : null),
+    getBlock: (id) =>
+      id === sourceId ? source : id === quoteId ? quote : null,
     getRootBlockIds: () => (parentId ? [quoteId] : [sourceId]),
     getChildBlockIds: (id) => (id === quoteId ? [sourceId] : []),
     readBlockContent: (id, type) =>

@@ -12,13 +12,11 @@ import {
   createInlineAtomNodeViews,
 } from "./inline-atom-node-view.ts";
 
-const renderMention = vi.fn(
-  (metadata: Readonly<Record<string, unknown>>) => (
-    <span data-mention-id={String(metadata.id)}>
-      mention:{String(metadata.id)}
-    </span>
-  ),
-);
+const renderMention = vi.fn((metadata: Readonly<Record<string, unknown>>) => (
+  <span data-mention-id={String(metadata.id)}>
+    mention:{String(metadata.id)}
+  </span>
+));
 const mentionDefinition = {
   type: "mention",
   metadata: { id: { type: "string", required: true } },
@@ -55,10 +53,12 @@ describe("document-owned inline atom portals", () => {
       [mentionDefinition, emojiDefinition],
       portals,
     );
-    const mention = schema.nodes.mention!.create({ metadata: { id: "user-123" } });
+    const mention = schema.nodes.mention!.create({
+      metadata: { id: "user-123" },
+    });
     let view!: ReturnType<(typeof views)["mention"]>;
     act(() => {
-      view = views.mention!(mention, null as never, () => 0, [], null as never);
+      view = views.mention!(mention);
     });
 
     expect(Object.keys(views).sort()).toStrictEqual(["emoji", "mention"]);
@@ -79,13 +79,10 @@ describe("document-owned inline atom portals", () => {
     });
     let view!: ReturnType<ReturnType<typeof createInlineAtomNodeView>>;
     act(() => {
-      view = createInlineAtomNodeView(mentionDefinition, portals)(
-        schema.nodes.mention!.create({ metadata: { id: "user-1" } }),
-        null as never,
-        () => 0,
-        [],
-        null as never,
-      );
+      view = createInlineAtomNodeView(
+        mentionDefinition,
+        portals,
+      )(schema.nodes.mention!.create({ metadata: { id: "user-1" } }));
     });
     const dom = view.dom;
 
@@ -93,7 +90,6 @@ describe("document-owned inline atom portals", () => {
       expect(
         view.update?.(
           schema.nodes.mention!.create({ metadata: { id: "user-2" } }),
-          [],
         ),
       ).toBe(true);
     });
@@ -103,7 +99,6 @@ describe("document-owned inline atom portals", () => {
     expect(
       view.update?.(
         schema.nodes.emoji!.create({ metadata: { value: "emoji" } }),
-        [],
       ),
     ).toBe(false);
     owner.unmount();
@@ -121,22 +116,18 @@ describe("document-owned inline atom portals", () => {
     act(() => {
       first = create(
         schema.nodes.mention!.create({ metadata: { id: "first" } }),
-        null as never,
-        () => 0,
-        [],
-        null as never,
       );
       second = create(
         schema.nodes.mention!.create({ metadata: { id: "second" } }),
-        null as never,
-        () => 0,
-        [],
-        null as never,
       );
     });
 
-    expect(first.ignoreMutation?.({ type: "childList" } as MutationRecord)).toBe(true);
-    expect(first.ignoreMutation?.({ type: "selection" } as never)).toBe(false);
+    expect(
+      first.ignoreMutation?.({ type: "childList" } as MutationRecord),
+    ).toBe(true);
+    expect(
+      first.ignoreMutation?.({ type: "selection", target: first.dom }),
+    ).toBe(false);
     expect(first.dom.textContent).toBe("mention:first");
     expect(second.dom.textContent).toBe("mention:second");
     act(() => first.destroy?.());

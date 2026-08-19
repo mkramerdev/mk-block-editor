@@ -68,10 +68,14 @@ function isExcludedClipboardControl(
   list: HTMLElement,
   ownsNativeTarget: (target: EventTarget | null) => boolean,
 ): boolean {
-  const elements = path.filter((entry): entry is Element => entry instanceof Element);
+  const elements = path.filter(
+    (entry): entry is Element => entry instanceof Element,
+  );
   if (
     elements.some((element) =>
-      element.matches("[data-editor-ui='true']:not([data-editor-clipboard-delegate='true'])"),
+      element.matches(
+        "[data-editor-ui='true']:not([data-editor-clipboard-delegate='true'])",
+      ),
     )
   )
     return true;

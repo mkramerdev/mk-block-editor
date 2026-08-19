@@ -207,9 +207,10 @@ describe("block-local state and schema", () => {
     const linkSchema = createBlockLocalProseMirrorSchema({
       inlineMarks: [linkMarkDefinition],
     });
-    const linkSpec = linkSchema.marks.link.spec.parseDOM?.[0] as
-      | TestParseRule
-      | undefined;
+    const linkMark = linkSchema.marks.link;
+    expect(linkMark).toBeDefined();
+    if (!linkMark) throw new Error("link mark is missing from the schema");
+    const linkSpec = linkMark.spec.parseDOM?.[0] as TestParseRule | undefined;
     const anchor = document.createElement("a");
     anchor.href = "/doc";
     anchor.title = "Doc";

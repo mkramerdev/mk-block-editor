@@ -19,7 +19,10 @@ describe("First Draft slash policies", () => {
       blockId: "block" as never,
       blockType,
       trigger: "/",
-      triggerRange: { from: textBeforeTrigger.length, to: textBeforeTrigger.length + 1 },
+      triggerRange: {
+        from: textBeforeTrigger.length,
+        to: textBeforeTrigger.length + 1,
+      },
       textBeforeTrigger,
     });
     expect(allowed(context(""))).toBe(true);
@@ -32,11 +35,21 @@ describe("First Draft slash policies", () => {
 
   it("always retains one active candidate and wraps movement", () => {
     const candidates = firstDraftSlashActionCatalog.slice(0, 3);
-    expect(retainFirstDraftTypingTriggerActiveId(null, candidates)).toBe("paragraph");
-    expect(retainFirstDraftTypingTriggerActiveId("heading-1", candidates)).toBe("heading-1");
-    expect(retainFirstDraftTypingTriggerActiveId("missing", candidates)).toBe("paragraph");
-    expect(moveFirstDraftTypingTriggerActiveId("paragraph", candidates, -1)).toBe("heading-2");
-    expect(moveFirstDraftTypingTriggerActiveId("heading-2", candidates, 1)).toBe("paragraph");
+    expect(retainFirstDraftTypingTriggerActiveId(null, candidates)).toBe(
+      "paragraph",
+    );
+    expect(retainFirstDraftTypingTriggerActiveId("heading-1", candidates)).toBe(
+      "heading-1",
+    );
+    expect(retainFirstDraftTypingTriggerActiveId("missing", candidates)).toBe(
+      "paragraph",
+    );
+    expect(
+      moveFirstDraftTypingTriggerActiveId("paragraph", candidates, -1),
+    ).toBe("heading-2");
+    expect(
+      moveFirstDraftTypingTriggerActiveId("heading-2", candidates, 1),
+    ).toBe("paragraph");
   });
 
   it("dismisses only after the canonical second space revision", () => {

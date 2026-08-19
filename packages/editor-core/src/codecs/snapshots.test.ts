@@ -89,9 +89,18 @@ describe("editor snapshot text content ownership", () => {
     const validated = validateEditorInstanceSnapshotAtBoundary(source, options);
 
     source.rootBlockIds.length = 0;
-    source.blocks[blockId].metadata.nested.label = "after";
-    source.content[blockId].content[0]!.content[0]!.text = "after";
-    source.opaqueContentCheckpoints[blockId].payloadBase64 = "Ag==";
+    const sourceBlock = source.blocks[blockId];
+    const sourceContent = source.content[blockId];
+    const sourceCheckpoint = source.opaqueContentCheckpoints[blockId];
+    expect(sourceBlock).toBeDefined();
+    expect(sourceContent).toBeDefined();
+    expect(sourceCheckpoint).toBeDefined();
+    if (!sourceBlock || !sourceContent || !sourceCheckpoint) {
+      throw new Error("snapshot fixture is incomplete");
+    }
+    sourceBlock.metadata.nested.label = "after";
+    sourceContent.content[0]!.content[0]!.text = "after";
+    sourceCheckpoint.payloadBase64 = "Ag==";
 
     expect(validated.snapshot.rootBlockIds).toStrictEqual([blockId]);
     expect(validated.snapshot.blocks[blockId]?.metadata).toStrictEqual({

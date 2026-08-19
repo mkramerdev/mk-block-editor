@@ -13,7 +13,7 @@ import { normalizeHeadingLevel } from "@repo/editor-core/document";
 import type { TextPlaceholder } from "@repo/editor-dom/block-editor";
 import type { RichTextDocumentNodeJson } from "@repo/editor-core/content/rich-text";
 import type { AnyEditorRuntimePort } from "../../runtime/document/render-port.ts";
-import type { EditorWebContentRuntime } from "../../runtime/content/content-runtime.ts";
+import type { EditorContentRuntime } from "@repo/editor-core/content";
 import type { InlineAtomDefinition } from "../../runtime/definition/contracts.ts";
 
 interface CanonicalTextProjectionOptions {
@@ -139,7 +139,7 @@ interface ReadInlineAtomLeaf extends ReadTextLeafBase {
 type ReadTextLeaf = ReadPlainTextLeaf | ReadHardBreakLeaf | ReadInlineAtomLeaf;
 
 function readTextModelFromProjection(
-  content: ReturnType<EditorWebContentRuntime["readBlockProjection"]>,
+  content: ReturnType<EditorContentRuntime["readBlockProjection"]>,
   inlineAtoms: ReadonlyMap<string, InlineAtomDefinition>,
   inlineMarks: readonly InlineMarkDefinition[],
 ): CanonicalTextModel {
@@ -185,10 +185,10 @@ function isTrustedReadRichTextDocument(
 ): content is Record<string, unknown> {
   return Boolean(
     content &&
-      typeof content === "object" &&
-      !Array.isArray(content) &&
-      (content as { readonly type?: unknown }).type === "doc" &&
-      Array.isArray((content as { readonly content?: unknown }).content),
+    typeof content === "object" &&
+    !Array.isArray(content) &&
+    (content as { readonly type?: unknown }).type === "doc" &&
+    Array.isArray((content as { readonly content?: unknown }).content),
   );
 }
 
@@ -320,9 +320,9 @@ function nodeHasMark(
     node.marks.some((mark) =>
       Boolean(
         mark &&
-          typeof mark === "object" &&
-          "type" in mark &&
-          mark.type === markName,
+        typeof mark === "object" &&
+        "type" in mark &&
+        mark.type === markName,
       ),
     )
   );

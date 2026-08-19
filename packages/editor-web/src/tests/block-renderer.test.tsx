@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
-import { createBlockRecord } from "@repo/editor-core/metadata";
+import { createVersionedBlockRecord } from "@repo/editor-core/metadata";
 import type { BlockId } from "@repo/editor-core/kernel";
 import type { BlockType } from "@repo/editor-core/document";
 import { createSelectionController } from "@repo/editor-react/selection";
@@ -68,7 +68,7 @@ describe("BlockRenderer", () => {
     const renderPort = {
       definition,
     } as EditorRuntimePort;
-    const block = createBlockRecord({
+    const block = createVersionedBlockRecord({
       id: blockId,
       type: blockType,
     });
@@ -107,7 +107,7 @@ describe("BlockRenderer", () => {
   });
 
   it("throws the useful missing-renderer error", () => {
-    const block = createBlockRecord({
+    const block = createVersionedBlockRecord({
       id: blockId,
       type: "missing",
     });

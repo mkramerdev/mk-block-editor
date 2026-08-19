@@ -6,6 +6,8 @@ import type { EditorLogicalContentOperation } from "@repo/editor-core/operations
 import {
   richTextBlockInlineContent,
   EditorImmutableBinary,
+  type EditorContentCheckpoint,
+  type EditorContentOperationUpdate,
   type RichTextDocumentNodeJson,
 } from "@repo/editor-core/content/rich-text";
 import {
@@ -26,17 +28,15 @@ import type {
   AppliedContentCommit,
   ContentCommitRejection,
   EditorContentBaseToken,
-  EditorContentCheckpoint,
   EditorContentCommitChange,
-  EditorContentOperationUpdate,
   ValidatedContentCommit,
-} from "@repo/editor-react/editor";
+} from "@repo/editor-core/operations";
 import type {
   EditorContentStoreRuntimeOptions,
   EditorContentStoreSlot,
   EditorRawBlockContent,
   EditorBlockContentLease,
-} from "../../runtime/content/content-runtime.ts";
+} from "@repo/editor-core/content";
 import {
   LOCAL_CONTENT_FORMAT,
   LOCAL_CONTENT_FORMAT_VERSION,
@@ -103,12 +103,13 @@ interface LocalAnchorTombstone {
   readonly content: EditorRawBlockContent;
 }
 
-export const localBlockContentStore: EditorContentStoreSlot = {
-  format: LOCAL_CONTENT_FORMAT,
-  createRuntime(options) {
-    return createLocalBlockContentStoreRuntime(options);
-  },
-};
+export const localBlockContentStore: EditorContentStoreSlot<LocalContentRuntime> =
+  {
+    format: LOCAL_CONTENT_FORMAT,
+    createRuntime(options) {
+      return createLocalBlockContentStoreRuntime(options);
+    },
+  };
 
 export function encodeLocalContentCheckpoint(
   content: RichTextDocumentNodeJson,
@@ -166,6 +167,7 @@ function createLocalBlockContentStoreRuntime(
   >();
   const anchorTombstoneById = new Map<BlockId, LocalAnchorTombstone>();
   const liveLeaseCountById = new Map<BlockId, number>();
+  const activeLeases = new WeakSet<EditorBlockContentLease>();
   let nextAnchorEpoch = 1;
   const blockListeners = new Map<
     BlockId,
@@ -189,7 +191,9 @@ function createLocalBlockContentStoreRuntime(
       continue;
     }
     if (!checkpoint || sourceContent === undefined) {
-      throw new Error(`Text block ${blockId} requires projection and checkpoint`);
+      throw new Error(
+        `Text block ${blockId} requires projection and checkpoint`,
+      );
     }
     const content = normalizeProjection(
       blockType,
@@ -209,7 +213,10 @@ function createLocalBlockContentStoreRuntime(
     operationVersion: LOCAL_CONTENT_FORMAT_VERSION,
     acquireBlockContent(blockId, blockType, reason) {
       requireCurrentBlock(blockId, blockType);
-      liveLeaseCountById.set(blockId, (liveLeaseCountById.get(blockId) ?? 0) + 1);
+      liveLeaseCountById.set(
+        blockId,
+        (liveLeaseCountById.get(blockId) ?? 0) + 1,
+      );
       let released = false;
       const lease: EditorBlockContentLease = {
         blockId,
@@ -218,17 +225,21 @@ function createLocalBlockContentStoreRuntime(
         release() {
           if (released) return;
           released = true;
+          activeLeases.delete(lease);
           const count = (liveLeaseCountById.get(blockId) ?? 1) - 1;
           if (count === 0) liveLeaseCountById.delete(blockId);
           else liveLeaseCountById.set(blockId, count);
         },
       };
+      activeLeases.add(lease);
       return lease;
     },
     readOpaqueBlockState(blockId) {
       const blockType = blockTypeById.get(blockId);
       if (!blockType) return null;
-      const checkpoint = encodeLocalContentCheckpoint(contentById.get(blockId)!);
+      const checkpoint = encodeLocalContentCheckpoint(
+        contentById.get(blockId)!,
+      );
       return Object.freeze({
         kind: "checkpoint" as const,
         format: checkpoint.format,
@@ -273,7 +284,9 @@ function createLocalBlockContentStoreRuntime(
           continue;
         }
         if (!checkpoint || projection === undefined) {
-          throw new Error(`Text block ${blockId} requires projection and checkpoint`);
+          throw new Error(
+            `Text block ${blockId} requires projection and checkpoint`,
+          );
         }
         const next = ownContent(
           normalizeProjection(blockType, projection, inlineMarks, inlineAtoms),
@@ -515,8 +528,8 @@ function createLocalBlockContentStoreRuntime(
           introduced,
           restoresAnchorLineage: Boolean(
             introduced &&
-              tombstone?.blockType === blockType &&
-              rawContentEqual(tombstone.content, after),
+            tombstone?.blockType === blockType &&
+            rawContentEqual(tombstone.content, after),
           ),
         });
       }
@@ -821,6 +834,7 @@ function createLocalBlockContentStoreRuntime(
     },
     createTextAnchorInContext(lease, input) {
       try {
+        requireOwnedLease(lease);
         requireCurrentBlock(lease.blockId, lease.blockType);
         const content = contentById.get(lease.blockId)!;
         const offset = normalizeAnchorOffset(input.textOffset);
@@ -871,7 +885,10 @@ function createLocalBlockContentStoreRuntime(
         return {
           ok: true,
           codec: LOCAL_OPERATION_TEXT_ANCHOR_CODEC,
-          payload: { encoded: encodeLocalTextAnchor(anchor), assoc: anchor.assoc },
+          payload: {
+            encoded: encodeLocalTextAnchor(anchor),
+            assoc: anchor.assoc,
+          },
           textOffset: offset,
         };
       } catch (error) {
@@ -887,6 +904,7 @@ function createLocalBlockContentStoreRuntime(
         return { ok: false, reason: "invalid" };
       }
       try {
+        requireOwnedLease(lease);
         const content = runtime.readBlockProjection(
           lease.blockId,
           lease.blockType,
@@ -1062,6 +1080,12 @@ function createLocalBlockContentStoreRuntime(
       throw new Error(
         `Content block ${blockId} has type ${currentType}, not ${blockType}`,
       );
+    }
+  }
+
+  function requireOwnedLease(lease: EditorBlockContentLease): void {
+    if (!activeLeases.has(lease)) {
+      throw new Error("Block content lease is not owned by this runtime");
     }
   }
 

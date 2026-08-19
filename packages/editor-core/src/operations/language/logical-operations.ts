@@ -83,38 +83,33 @@ export interface EditorLogicalContentOperationBase {
   readonly target: EditorLogicalInlineTarget;
 }
 
-export interface EditorInsertInlineContentOperation
-  extends EditorLogicalContentOperationBase {
+export interface EditorInsertInlineContentOperation extends EditorLogicalContentOperationBase {
   readonly kind: "insertInlineContent";
   readonly position: EditorLogicalRichTextPoint;
   readonly content: readonly RichTextInlineNodeJson[];
 }
 
-export interface EditorDeleteInlineRangeOperation
-  extends EditorLogicalContentOperationBase {
+export interface EditorDeleteInlineRangeOperation extends EditorLogicalContentOperationBase {
   readonly kind: "deleteInlineRange";
   readonly range: EditorLogicalRichTextRange;
   readonly deletedContent?: readonly RichTextInlineNodeJson[];
 }
 
-export interface EditorReplaceInlineRangeOperation
-  extends EditorLogicalContentOperationBase {
+export interface EditorReplaceInlineRangeOperation extends EditorLogicalContentOperationBase {
   readonly kind: "replaceInlineRange";
   readonly range: EditorLogicalRichTextRange;
   readonly content: readonly RichTextInlineNodeJson[];
   readonly deletedContent?: readonly RichTextInlineNodeJson[];
 }
 
-export interface EditorInlineMarkRangeOperation
-  extends EditorLogicalContentOperationBase {
+export interface EditorInlineMarkRangeOperation extends EditorLogicalContentOperationBase {
   readonly kind: "addInlineMark" | "removeInlineMark";
   readonly range: EditorLogicalRichTextRange;
   readonly markName: InlineMarkName;
   readonly attrs?: RichTextAttrsJson | null;
 }
 
-export interface EditorSetInlineEntityOperation
-  extends EditorLogicalContentOperationBase {
+export interface EditorSetInlineEntityOperation extends EditorLogicalContentOperationBase {
   readonly kind: "setInlineEntity";
   readonly range: EditorLogicalRichTextRange;
   readonly entity: RichTextInlineNodeJson;

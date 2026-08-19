@@ -1,5 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
-import type { BlockId, BlockType } from "@repo/editor-core/kernel";
+import type { BlockId } from "@repo/editor-core/kernel";
+import type { BlockType } from "@repo/editor-core/document";
 import type {
   CommittedSelectionSnapshot,
   SelectionCompositionSessionSnapshot,

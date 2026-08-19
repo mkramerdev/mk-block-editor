@@ -1,12 +1,14 @@
 import {
   asBlockId,
+  asContentVersion,
   type EditorOpaqueContentCheckpoint,
+  EditorImmutableBinary,
   type JsonObject,
 } from "@repo/editor-core/kernel";
-import { createBlockRecord } from "@repo/editor-core/metadata";
+import { createVersionedBlockRecord } from "@repo/editor-core/metadata";
 import { getCanonicalBlockOrder } from "@repo/editor-core/document";
 import type { ContentVersion } from "@repo/editor-core/kernel";
-import type { Block, BlockType } from "@repo/editor-core/document";
+import type { BlockType, VersionedBlock } from "@repo/editor-core/document";
 import type { BlockId } from "@repo/editor-core/kernel";
 import { encodeLocalContentCheckpoint } from "../content/local/runtime.ts";
 import {
@@ -20,7 +22,7 @@ export interface EditorBlockGraphFixture {
   updatedAt: number;
   rootBlockIds: BlockId[];
   childIdsByParentId: Partial<Record<BlockId, BlockId[]>>;
-  blocks: Record<BlockId, Block>;
+  blocks: Record<BlockId, VersionedBlock>;
 }
 
 export type EditorDocumentContentInput =
@@ -34,7 +36,7 @@ export interface EditorDocumentBlockData {
   parentId: BlockId | null;
   metadataVersion: string;
   contentVersion: ContentVersion | null;
-  tombstone: Block["tombstone"];
+  tombstone: VersionedBlock["tombstone"];
   metadata?: JsonObject;
   contentHydrationUpdate: Uint8Array;
   contentReadProjection: RichTextDocumentNodeJson | null;
@@ -57,7 +59,7 @@ export interface EditorDocumentBlockBatchData {
 export interface MaterializedEditorDocumentData {
   blockGraphVersion: number;
   blockIds: readonly BlockId[];
-  blocks: Record<BlockId, Block>;
+  blocks: Record<BlockId, VersionedBlock>;
   rootBlockIds: readonly BlockId[];
   childIdsByParentId: Readonly<Partial<Record<BlockId, readonly BlockId[]>>>;
   opaqueContentCheckpoints: Record<BlockId, EditorOpaqueContentCheckpoint>;
@@ -72,14 +74,26 @@ export function testBlockId(index: number): BlockId {
   );
 }
 
+export function createTestContentOperationUpdate(runtime: {
+  readonly format: string;
+  readonly operationVersion: number;
+}) {
+  return {
+    kind: "operation" as const,
+    format: runtime.format,
+    version: runtime.operationVersion,
+    payload: EditorImmutableBinary.copyOf(new Uint8Array()),
+  };
+}
+
 export function createBlockGraphFromTypes(
   types: readonly BlockType[],
 ): EditorBlockGraphFixture {
-  const blocks: Record<BlockId, Block> = {};
+  const blocks: Record<BlockId, VersionedBlock> = {};
   const rootBlockIds: BlockId[] = [];
   for (let index = 0; index < types.length; index += 1) {
     const id = testBlockId(index);
-    blocks[id] = createBlockRecord({
+    blocks[id] = createVersionedBlockRecord({
       id,
       type: types[index] ?? "paragraph",
       metadata: metadataForType(types[index] ?? "paragraph"),
@@ -111,7 +125,7 @@ export function materializeEditorDocumentData(
   const blockDataById = new Map(
     blockBatch.blocks.map((block) => [block.id, block]),
   );
-  const blocks: Record<BlockId, Block> = {};
+  const blocks: Record<BlockId, VersionedBlock> = {};
   const opaqueContentCheckpoints = {} as Record<
     BlockId,
     EditorOpaqueContentCheckpoint
@@ -121,18 +135,22 @@ export function materializeEditorDocumentData(
     const block = blockDataById.get(blockId);
     if (!block)
       throw new Error(`document order references missing block ${blockId}`);
-    blocks[blockId] = createBlockRecord({
+    blocks[blockId] = createVersionedBlockRecord({
       id: block.id,
       type: block.type,
       parentId: block.parentId,
-      metadataVersion: block.metadataVersion,
-      contentVersion: block.contentVersion,
+      version: {
+        metadataVersion: block.metadataVersion,
+        contentVersion: block.contentVersion,
+      },
       tombstone: block.tombstone,
       metadata: block.metadata,
     });
     if (block.contentReadProjection) {
       contentById[blockId] = block.contentReadProjection;
-      const checkpoint = encodeLocalContentCheckpoint(block.contentReadProjection);
+      const checkpoint = encodeLocalContentCheckpoint(
+        block.contentReadProjection,
+      );
       opaqueContentCheckpoints[blockId] = {
         kind: checkpoint.kind,
         format: checkpoint.format,
@@ -162,14 +180,14 @@ function encodeBase64(bytes: Uint8Array): string {
 }
 
 function blocksInRootOrder(
-  blocks: Readonly<Record<BlockId, Block>>,
+  blocks: Readonly<Record<BlockId, VersionedBlock>>,
   traversal: readonly BlockId[],
 ): BlockId[] {
   return traversal.filter((blockId) => blocks[blockId]?.parentId === null);
 }
 
 function childSequences(
-  blocks: Readonly<Record<BlockId, Block>>,
+  blocks: Readonly<Record<BlockId, VersionedBlock>>,
   traversal: readonly BlockId[],
 ): Partial<Record<BlockId, BlockId[]>> {
   const result = {} as Partial<Record<BlockId, BlockId[]>>;
@@ -203,7 +221,7 @@ export function blockDataFromBlockGraph(
       type: block.type,
       parentId: block.parentId,
       metadataVersion: block.metadataVersion,
-      contentVersion: block.contentVersion ?? ("v1" as ContentVersion),
+      contentVersion: block.contentVersion ?? asContentVersion("v1"),
       tombstone: block.tombstone,
       metadata: block.metadata,
       contentHydrationUpdate: new Uint8Array(),

@@ -64,7 +64,9 @@ export function EditableTextBlockPrimitive({
         ":scope > [data-editor-text-slot='true']",
       );
       if (!projection || !slot) {
-        throw new Error(`Text host ${block.id} is missing its projection or slot.`);
+        throw new Error(
+          `Text host ${block.id} is missing its projection or slot.`,
+        );
       }
       const registration = runtime.registerTextEditingHost({
         blockId: block.id,

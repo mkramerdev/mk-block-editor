@@ -55,11 +55,7 @@ export function resolveTypingTriggerFragmentComposition(input: {
 
   const remainingSize = size - (input.range.to - input.range.from);
   if (remainingSize === 0) {
-    const replacement = replacementPlacement(
-      graph,
-      liveSource,
-      rootTypes,
-    );
+    const replacement = replacementPlacement(graph, liveSource, rootTypes);
     if (replacement) {
       return {
         deletion: blockRange(liveSource, input.graphRevision),
@@ -144,20 +140,22 @@ function boundaryAccepts(
   if (parentId === null) {
     return candidateTypes.every((type) => {
       const definition = graph.blockDefinitions[type];
-      return Boolean(definition && blockDefinitionAcceptsParent(definition, null));
+      return Boolean(
+        definition && blockDefinitionAcceptsParent(definition, null),
+      );
     });
   }
   const parent = graph.getBlock(parentId);
   const definition = parent ? graph.blockDefinitions[parent.type] : undefined;
   return Boolean(
     parent &&
-      !parent.tombstone &&
-      definition &&
-      blockDefinitionAcceptsSequence(
-        graph.blockDefinitions,
-        definition,
-        candidateTypes,
-      ),
+    !parent.tombstone &&
+    definition &&
+    blockDefinitionAcceptsSequence(
+      graph.blockDefinitions,
+      definition,
+      candidateTypes,
+    ),
   );
 }
 

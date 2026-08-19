@@ -72,7 +72,11 @@ export type LoadFirstDraftAcceptedTransactionsResult =
     }
   | {
       readonly ok: false;
-      readonly reason: "missing" | "revision-unavailable" | "invalid" | "unavailable";
+      readonly reason:
+        | "missing"
+        | "revision-unavailable"
+        | "invalid"
+        | "unavailable";
       readonly message: string;
     };
 

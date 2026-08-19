@@ -1,8 +1,10 @@
 import { createElement, useState } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { EditorImplementation } from "@repo/editor-react/editor";
-import { useWebFocusAdapters } from "../document/focus/use-web-focus-adapters.ts";
+import {
+  useWebFocusAdapters,
+  type WebFocusAdaptersOptions,
+} from "../document/focus/use-web-focus-adapters.ts";
 
 describe("web focus adapters", () => {
   it("does not convert blank list space into block or text focus", () => {
@@ -12,7 +14,7 @@ describe("web focus adapters", () => {
       blurEditor: vi.fn(),
       ownsNativeFocusTarget: vi.fn(() => false),
       ownsActiveElement: vi.fn(() => false),
-    } as unknown as EditorImplementation;
+    };
     render(createElement(FocusLifecycleHarness, { editor }));
 
     fireEvent.mouseDown(screen.getByTestId("focus-lifecycle-list"), {
@@ -29,7 +31,7 @@ describe("web focus adapters", () => {
       blurEditor,
       ownsNativeFocusTarget: vi.fn(() => false),
       ownsActiveElement: vi.fn(() => false),
-    } as unknown as EditorImplementation;
+    };
     const rendered = render(createElement(FocusLifecycleHarness, { editor }));
     const originalVisibility = Object.getOwnPropertyDescriptor(
       document,
@@ -76,7 +78,7 @@ describe("web focus adapters", () => {
       blurEditor,
       ownsNativeFocusTarget: vi.fn(() => false),
       ownsActiveElement: vi.fn(() => false),
-    } as unknown as EditorImplementation;
+    } satisfies WebFocusAdaptersOptions["editor"];
     render(createElement(FocusLifecycleHarness, { editor }));
     const textRoot = screen.getByTestId("focus-lifecycle-text-root");
     blurEditor.mockImplementation(() => textRoot.blur());
@@ -99,10 +101,7 @@ describe("web focus adapters", () => {
       blurEditor: vi.fn(),
       ownsNativeFocusTarget: vi.fn(() => false),
       ownsActiveElement: vi.fn(() => false),
-      selectionController: {
-        getCanonicalSnapshot: vi.fn(() => ({ kind: "none" })),
-      },
-    } as unknown as EditorImplementation;
+    } satisfies WebFocusAdaptersOptions["editor"];
     render(createElement(FocusLifecycleHarness, { editor }));
     const external = document.createElement("input");
     document.body.append(external);
@@ -124,7 +123,7 @@ describe("web focus adapters", () => {
       blurEditor,
       ownsNativeFocusTarget: vi.fn(() => false),
       ownsActiveElement: vi.fn(() => false),
-    } as unknown as EditorImplementation;
+    } satisfies WebFocusAdaptersOptions["editor"];
     render(createElement(FocusLifecycleHarness, { editor }));
     const list = screen.getByTestId("focus-lifecycle-list");
     const input = screen.getByTestId(
@@ -158,7 +157,7 @@ describe("web focus adapters", () => {
 function FocusLifecycleHarness({
   editor,
 }: {
-  readonly editor: EditorImplementation;
+  readonly editor: WebFocusAdaptersOptions["editor"];
 }) {
   const [listElement, setListElement] = useState<HTMLDivElement | null>(null);
   const focus = useWebFocusAdapters({

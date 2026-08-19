@@ -1,10 +1,19 @@
 import type { VersionedBlock } from "@repo/editor-core/document";
-import { getCanonicalBlockOrder } from "@repo/editor-core/document";
+import {
+  blocksHaveEqualCanonicalState,
+  getCanonicalBlockOrder,
+} from "@repo/editor-core/document";
 import type { BlockId } from "@repo/editor-core/kernel";
-import type { EditorCommandState, EditorManifestState } from "../state/command-state.ts";
+import type {
+  EditorCommandState,
+  EditorManifestState,
+} from "../state/command-state.ts";
 import type { EditorSnapshotReconciliation } from "../api/contracts.ts";
 
-export function editorManifestStatesEqual(previous: EditorManifestState, next: EditorManifestState): boolean {
+export function editorManifestStatesEqual(
+  previous: EditorManifestState,
+  next: EditorManifestState,
+): boolean {
   return (
     previous.blockGraphVersion === next.blockGraphVersion &&
     previous.blocks === next.blocks &&
@@ -25,26 +34,29 @@ export function manifestDataMatchesCurrentState(
   for (let index = 0; index < nextOrder.length; index += 1) {
     const blockId = nextOrder[index];
     if (!blockId || currentOrder[index] !== blockId) return false;
-    if (!blocksEquivalent(current.blocks[blockId], data.blocks[blockId])) return false;
+    if (!blocksEquivalent(current.blocks[blockId], data.blocks[blockId]))
+      return false;
   }
   return true;
 }
 
-export function blocksEquivalent(left: VersionedBlock | undefined, right: VersionedBlock | undefined): boolean {
+export function blocksEquivalent(
+  left: VersionedBlock | undefined,
+  right: VersionedBlock | undefined,
+): boolean {
   if (left === right) return true;
   if (!left || !right) return false;
-  return left.id === right.id &&
-    left.type === right.type &&
-    left.parentId === right.parentId &&
-    JSON.stringify(left.tombstone ?? null) === JSON.stringify(right.tombstone ?? null) &&
-    JSON.stringify(left.metadata ?? null) === JSON.stringify(right.metadata ?? null);
+  return blocksHaveEqualCanonicalState(left, right);
 }
 
 export function parentKey(parentId: BlockId | null): string {
   return parentId ?? "root";
 }
 
-export function sameBlockIdList(left: readonly BlockId[], right: readonly BlockId[]): boolean {
+export function sameBlockIdList(
+  left: readonly BlockId[],
+  right: readonly BlockId[],
+): boolean {
   if (left === right) return true;
   if (left.length !== right.length) return false;
   for (let index = 0; index < left.length; index += 1) {

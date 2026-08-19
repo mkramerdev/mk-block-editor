@@ -195,7 +195,10 @@ export async function validateFirstDraftPostgresSchema(
     const expected = expectedColumns[table];
     const actualNames = actual.map((row) => String(row.column_name));
     const expectedNames = expected.map(([name]) => name);
-    if (JSON.stringify(actualNames) !== JSON.stringify(expectedNames)) {
+    if (
+      actualNames.length !== expectedNames.length ||
+      actualNames.some((name, index) => name !== expectedNames[index])
+    ) {
       issues.push(
         `public.${table} columns are incompatible (expected ${expectedNames.join(", ")}).`,
       );

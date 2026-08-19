@@ -8,17 +8,33 @@ import {
 } from "@testing-library/react";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { BlockId } from "@repo/editor-core/kernel";
-import type { CommittedSelectionSnapshot } from "@repo/editor-react/selection";
+import { asBlockId, type BlockId } from "@repo/editor-core/kernel";
+import { createBlockRecord } from "@repo/editor-core/metadata";
+import {
+  createCommittedSelectionSnapshot,
+  type CommittedSelectionSnapshot,
+  type EditorLogicalSelectionPoint,
+  type EditorSelectionRangeBlock,
+  type EditorSelectionSnapshot,
+  type SelectionInlineMarkFormatStates,
+} from "@repo/editor-react/selection";
 import type { EditableEditor } from "@repo/editor-web/editor";
+import {
+  compileReadEditorDefinition,
+  initializeReadEditor,
+  type ReadEditorDefinition,
+} from "@repo/editor-web/read-runtime";
 import { FirstDraftSelectionMenu } from "./first-draft-selection-menu.tsx";
 
 describe("FirstDraftSelectionMenu", () => {
   beforeEach(() => {
-    vi.stubGlobal("ResizeObserver", class {
-      observe() {}
-      disconnect() {}
-    });
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
   });
 
   afterEach(() => {
@@ -40,16 +56,27 @@ describe("FirstDraftSelectionMenu", () => {
         if (blockId === headBlockId && offset === 4 && affinity === "forward") {
           return { left: 200, top: 100, width: 1, height: 18 };
         }
-        if (blockId === anchorBlockId && offset === 1 && affinity === "backward") {
+        if (
+          blockId === anchorBlockId &&
+          offset === 1 &&
+          affinity === "backward"
+        ) {
           return { left: 80, top: 40, width: 1, height: 18 };
         }
-        if (blockId === anchorBlockId && offset === 2 && affinity === "backward") {
+        if (
+          blockId === anchorBlockId &&
+          offset === 2 &&
+          affinity === "backward"
+        ) {
           return { left: 80, top: 160, width: 1, height: 18 };
         }
         return null;
       },
     );
-    const editor = editorFixture({ selection: initial, readCaretRect: readCaret });
+    const editor = editorFixture({
+      selection: initial,
+      readCaretRect: readCaret,
+    });
     const frames = frameQueue();
     render(<FirstDraftSelectionMenu editor={editor} />);
     const menu = screen.getByLabelText("Text formatting");
@@ -77,7 +104,8 @@ describe("FirstDraftSelectionMenu", () => {
     });
     readCaret.mockClear();
     const selectionListener = editor.selection.subscribe.mock.calls[0]?.[0];
-    if (!selectionListener) throw new Error("selection listener was not installed");
+    if (!selectionListener)
+      throw new Error("selection listener was not installed");
     act(() => selectionListener());
     frames.flush();
     expect(readCaret.mock.calls).toEqual([
@@ -182,14 +210,14 @@ describe("FirstDraftSelectionMenu", () => {
     const editor = editorFixture();
     render(<FirstDraftSelectionMenu editor={editor} />);
     expect(
-      screen.getByLabelText("Text formatting").getAttribute(
-        "data-first-draft-selection-menu",
-      ),
+      screen
+        .getByLabelText("Text formatting")
+        .getAttribute("data-first-draft-selection-menu"),
     ).toBe("true");
     expect(
-      screen.getByLabelText("Text formatting").getAttribute(
-        "data-editor-preserve-selection",
-      ),
+      screen
+        .getByLabelText("Text formatting")
+        .getAttribute("data-editor-preserve-selection"),
     ).toBe("true");
     expect(screen.getByLabelText("Bold").getAttribute("aria-pressed")).toBe(
       "false",
@@ -292,7 +320,9 @@ describe("FirstDraftSelectionMenu", () => {
     render(<FirstDraftSelectionMenu editor={editor} />);
     fireEvent.click(screen.getByLabelText("Link"));
     expect(
-      screen.getByText("The selection contains different links. Applying replaces them."),
+      screen.getByText(
+        "The selection contains different links. Applying replaces them.",
+      ),
     ).toBeTruthy();
     expect((screen.getByLabelText("URL") as HTMLInputElement).value).toBe("");
     fireEvent.change(screen.getByLabelText("URL"), {
@@ -302,9 +332,7 @@ describe("FirstDraftSelectionMenu", () => {
     expect(
       screen.getByText("The original text selection is no longer available.")
         .textContent,
-    ).toBe(
-      "The original text selection is no longer available.",
-    );
+    ).toBe("The original text selection is no longer available.");
     expect(screen.getByLabelText("Edit link")).toBeTruthy();
   });
 
@@ -317,7 +345,8 @@ describe("FirstDraftSelectionMenu", () => {
     fireEvent.change(input, { target: { value: "https://captured.example" } });
     options.eligible = false;
     const selectionListener = editor.selection.subscribe.mock.calls[0]?.[0];
-    if (!selectionListener) throw new Error("selection listener was not installed");
+    if (!selectionListener)
+      throw new Error("selection listener was not installed");
     act(() => selectionListener());
     expect(screen.getByLabelText("URL")).toBe(input);
     expect(input.value).toBe("https://captured.example");
@@ -335,14 +364,16 @@ describe("FirstDraftSelectionMenu", () => {
     document.body.append(unrelated);
     unrelated.focus();
     const current = editor.selection.getSnapshot();
-    if (current.kind !== "document") throw new Error("expected document selection");
+    if (current.kind !== "document")
+      throw new Error("expected document selection");
     editor.selection.getSnapshot.mockReturnValue({
       kind: "document",
       revision: 8,
       snapshot: { ...current.snapshot, revision: 8 },
     });
     const selectionListener = editor.selection.subscribe.mock.calls[0]?.[0];
-    if (!selectionListener) throw new Error("selection listener was not installed");
+    if (!selectionListener)
+      throw new Error("selection listener was not installed");
     act(() => selectionListener());
     expect(screen.queryByRole("form", { name: "Edit link" })).toBeNull();
     expect(document.activeElement).toBe(unrelated);
@@ -355,53 +386,81 @@ describe("FirstDraftSelectionMenu", () => {
   it("does not render for an ineligible or block-internal selection", () => {
     const editor = editorFixture({ eligible: false });
     const view = render(<FirstDraftSelectionMenu editor={editor} />);
-    expect(screen.queryByRole("toolbar", { name: "Text formatting" })).toBeNull();
+    expect(
+      screen.queryByRole("toolbar", { name: "Text formatting" }),
+    ).toBeNull();
     view.unmount();
     expect(editor.selection.subscribe).toHaveBeenCalledOnce();
   });
 
   it("renders no menu for a read-only editor", () => {
-    render(
-      <FirstDraftSelectionMenu
-        editor={{ editable: false } as never}
-      />,
-    );
+    const blockId = asBlockId("01890f07-1c00-7000-8000-000000000906");
+    const definition = {
+      blocks: {
+        paragraph: {
+          kind: "text",
+          rootLayout: "normal",
+          type: "paragraph",
+          split: { default: "paragraph" },
+          renderer: () => null,
+        },
+        divider: {
+          kind: "atomic",
+          rootLayout: "normal",
+          type: "divider",
+          renderer: () => null,
+        },
+      },
+      defaultRoot: "paragraph",
+      inlineMarks: [],
+      inlineAtoms: [],
+    } satisfies ReadEditorDefinition;
+    const editor = initializeReadEditor({
+      compiledDefinition: compileReadEditorDefinition(definition),
+      snapshot: {
+        blockGraphVersion: 1,
+        blocks: {
+          [blockId]: createBlockRecord({
+            id: blockId,
+            type: "divider",
+          }),
+        },
+        rootBlockIds: [blockId],
+        childIdsByParentId: {},
+        content: {},
+        opaqueContentCheckpoints: {},
+      },
+    });
+    render(<FirstDraftSelectionMenu editor={editor} />);
     expect(screen.queryByLabelText("Text formatting")).toBeNull();
+    editor.dispose();
   });
 });
 
-function editorFixture(options: {
-  eligible?: boolean;
-  readonly selection?: CommittedSelectionSnapshot;
-  readonly readCaretRect?: ReturnType<typeof vi.fn>;
-  readonly linkState?: {
-    readonly active: boolean;
-    readonly mixed: boolean;
-    readonly value: Readonly<Record<string, unknown>> | null;
-  };
-  readonly formatResult?: Readonly<Record<string, unknown>>;
-} = {}) {
+function editorFixture(
+  options: {
+    eligible?: boolean;
+    readonly selection?: CommittedSelectionSnapshot;
+    readonly readCaretRect?: ReturnType<typeof vi.fn>;
+    readonly linkState?: {
+      readonly active: boolean;
+      readonly mixed: boolean;
+      readonly value: Readonly<Record<string, unknown>> | null;
+    };
+    readonly formatResult?: Readonly<Record<string, unknown>>;
+  } = {},
+) {
   const blockId = "selection-menu-block" as BlockId;
-  const selection = options.selection ?? ({
-    revision: 7,
-    kind: "document",
-    owner: { kind: "document" },
-    endpoints: {
-      head: {
-        blockId,
-        blockType: "paragraph",
-        category: "content",
-        textOffset: 4,
-        textAnchor: { codec: "test", payload: { encoded: "AA==", assoc: 0 } },
-        affinity: "forward",
-      },
-    },
-  } as unknown as CommittedSelectionSnapshot);
-  const states = Object.fromEntries(
+  const defaultPoint = selectionPoint(blockId, 4, "forward");
+  const selection =
+    options.selection ?? selectionFixture(defaultPoint, defaultPoint, 7);
+  const states: SelectionInlineMarkFormatStates = Object.fromEntries(
     ["strong", "em", "underline", "strikethrough", "code", "link"].map(
       (markName) => [
         markName,
         {
+          markName,
+          commandId: `test:${markName}`,
           active: false,
           mixed: markName === "em",
           value: null,
@@ -412,26 +471,38 @@ function editorFixture(options: {
       ],
     ),
   );
-  if (options.linkState) {
-    states.link = {
-      ...states.link,
-      ...options.linkState,
-    };
-  }
+  const resolvedStates: SelectionInlineMarkFormatStates = options.linkState
+    ? {
+        ...states,
+        link: {
+          ...states.link!,
+          ...options.linkState,
+        },
+      }
+    : states;
   return {
     editable: true,
     selection: {
-      getSnapshot: vi.fn(() => ({ kind: "document", revision: 7, snapshot: selection })),
+      getSnapshot: vi.fn(() => ({
+        kind: "document",
+        revision: 7,
+        snapshot: selection,
+      })),
       subscribe: vi.fn(() => vi.fn()),
     },
     readCurrentSelectionInlineMarkFormatStates: vi.fn(() =>
       options.eligible === false
         ? { ok: false, reason: "empty-range" }
-        : { ok: true, snapshot: {}, states, blockIds: [blockId] },
+        : {
+            ok: true,
+            snapshot: {},
+            states: resolvedStates,
+            blockIds: [blockId],
+          },
     ),
     subscribeBlock: vi.fn(() => vi.fn()),
-    formatSelectionInlineMark: vi.fn(() =>
-      options.formatResult ?? { ok: true, changed: true },
+    formatSelectionInlineMark: vi.fn(
+      () => options.formatResult ?? { ok: true, changed: true },
     ),
     geometry: {
       subscribe: vi.fn(() => vi.fn()),
@@ -453,35 +524,83 @@ function editorFixture(options: {
 }
 
 function selectionFixture(
-  anchor: ReturnType<typeof selectionPoint>,
-  head: ReturnType<typeof selectionPoint>,
+  anchor: EditorLogicalSelectionPoint,
+  head: EditorLogicalSelectionPoint,
   revision: number,
 ): CommittedSelectionSnapshot {
-  return {
-    revision,
-    kind: "document",
-    owner: { kind: "document" },
+  const rangeBlocks = [
+    selectionRangeBlock(anchor, head),
+    ...(anchor.blockId === head.blockId
+      ? []
+      : [selectionRangeBlock(head, head)]),
+  ];
+  const documentSelection = {
+    phase: "committed",
+    selectionRevision: revision,
+    graphRevision: 1,
+    lastInvalidationReason: null,
     direction: "forward",
-    endpoints: { anchor, head, normalizedStart: anchor, normalizedEnd: head },
-  } as unknown as CommittedSelectionSnapshot;
+    anchor,
+    focus: head,
+    normalizedStart: anchor,
+    normalizedEnd: head,
+    rangeBlocks,
+  } satisfies EditorSelectionSnapshot;
+  const result = createCommittedSelectionSnapshot({
+    kind: "document",
+    revision,
+    documentSelection,
+  });
+  if (!result.ok) {
+    throw new Error(`invalid selection-menu fixture: ${result.reason}`);
+  }
+  return result.snapshot;
 }
 
 function selectionPoint(
   blockId: BlockId,
   textOffset: number,
   affinity: "forward" | "backward",
-) {
+): EditorLogicalSelectionPoint {
   return {
     blockId,
     blockType: "paragraph",
-    category: "content",
+    blockCategory: "text",
     textOffset,
     textAnchor: {
+      kind: "block-relative-text",
       codec: "test",
+      version: 1,
       payload: { encoded: `${blockId}:${textOffset}`, assoc: 0 },
     },
     affinity,
-  } as const;
+  };
+}
+
+function selectionRangeBlock(
+  start: EditorLogicalSelectionPoint,
+  end: EditorLogicalSelectionPoint,
+): EditorSelectionRangeBlock {
+  const coverage =
+    start.blockId === end.blockId && start.textOffset === end.textOffset
+      ? ("none" as const)
+      : ("partial" as const);
+  return {
+    blockId: start.blockId,
+    blockType: start.blockType,
+    category: "text",
+    coverage,
+    coverageResult: {
+      blockId: start.blockId,
+      blockType: start.blockType,
+      modelId: "content",
+      coverage,
+      ...(coverage === "none" ? {} : { paint: { kind: "content" as const } }),
+    },
+    selectable: true,
+    startOffset: start.textOffset,
+    endOffset: end.textOffset,
+  };
 }
 
 function frameQueue() {
@@ -523,7 +642,10 @@ function lifecycleEditorFixture() {
     readonly blockId: BlockId;
     readonly release: ReturnType<typeof vi.fn>;
   }> = [];
-  let current: Readonly<Record<string, unknown>> = { kind: "none", revision: 0 };
+  let current: Readonly<Record<string, unknown>> = {
+    kind: "none",
+    revision: 0,
+  };
   let currentBlockId: BlockId | null = null;
   let strongActive = false;
   const markState = (markName: string) => ({
@@ -532,9 +654,7 @@ function lifecycleEditorFixture() {
     value: null,
     canExecute: true,
     action: markName === "strong" && strongActive ? "remove" : "add",
-    ranges: currentBlockId
-      ? [{ blockId: currentBlockId, from: 1, to: 4 }]
-      : [],
+    ranges: currentBlockId ? [{ blockId: currentBlockId, from: 1, to: 4 }] : [],
   });
   const editor = {
     editable: true,

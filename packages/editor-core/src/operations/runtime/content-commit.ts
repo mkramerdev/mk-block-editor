@@ -16,7 +16,10 @@ import type { BlockType } from "../../document/model/block.ts";
 import type { EditorContentOperationUpdate } from "../../kernel/content/encoded-content.ts";
 import type { BlockId } from "../../kernel/identity/ids.ts";
 import type { EditorLogicalContentOperation } from "../language/logical-operations.ts";
-import { cloneJsonValue, jsonValuesEqual } from "../../kernel/json/json-value.ts";
+import {
+  cloneJsonValue,
+  jsonValuesEqual,
+} from "../../kernel/json/json-value.ts";
 
 export interface EditorContentBaseToken {
   readonly graphRevision: number;
@@ -176,8 +179,7 @@ function isDeeplyFrozen(value: unknown): boolean {
   return Object.values(value as Record<string, unknown>).every(isDeeplyFrozen);
 }
 
-export interface PrepareLogicalContentOperationsOptions
-  extends ApplyLogicalContentOperationOptions {
+export interface PrepareLogicalContentOperationsOptions extends ApplyLogicalContentOperationOptions {
   readonly normalization?: RichInlineContentNormalizationOptions;
   /** The owning runtime already validated the exact requested operations. */
   readonly validatedOperations?: boolean;

@@ -40,7 +40,6 @@ describe("static editor constructors", () => {
     expect(() => read.dispose()).not.toThrow();
     expect(() => editable.dispose()).not.toThrow();
   });
-
 });
 
 describe("read editor runtime", () => {

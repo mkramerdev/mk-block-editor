@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { BlockId } from "../kernel/identity/ids.ts";
 import type { ContentVersion } from "../kernel/versioning/versions.ts";
-import { createBlockRecord, createVersionedBlockRecord } from "./block-record.ts";
+import {
+  createBlockRecord,
+  createVersionedBlockRecord,
+} from "./block-record.ts";
 
 describe("editor block factory", () => {
   it("fills canonical defaults and preserves caller metadata without product-specific sanitization", () => {

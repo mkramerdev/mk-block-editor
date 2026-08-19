@@ -47,7 +47,8 @@ export function resolveCanonicalCreationSelection(
     if (!record.content) {
       return {
         ok: false,
-        message: "The creation text selection target is not a content endpoint.",
+        message:
+          "The creation text selection target is not a content endpoint.",
       };
     }
     const offset = intent.selectionOffset ?? 0;

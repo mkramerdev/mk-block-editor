@@ -5,9 +5,7 @@ export {
   resolveCommittedSelectionSnapshotTextAnchors,
 } from "../selection/materialization/materialize.ts";
 export { getEditorSelectionCommandEligibility } from "../selection/materialization/command-eligibility.ts";
-export {
-  readCurrentSelectionInlineMarkFormatStates,
-} from "../selection/formatting/inline-mark-state.ts";
+export { readCurrentSelectionInlineMarkFormatStates } from "../selection/formatting/inline-mark-state.ts";
 export { resolveStructuralEditRange } from "../selection/editing/resolve-structural-edit-range.ts";
 export type { ResolveStructuralEditRangeOptions } from "../selection/editing/resolve-structural-edit-range.ts";
 export {

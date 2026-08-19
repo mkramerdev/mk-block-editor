@@ -134,7 +134,8 @@ function operationFromStep(input: {
   if (input.step instanceof RemoveMarkStep)
     return operationFromMarkStep(input, false);
   return {
-    message: "Unsupported ProseMirror step; add a direct canonical operation conversion",
+    message:
+      "Unsupported ProseMirror step; add a direct canonical operation conversion",
   };
 }
 
@@ -171,7 +172,9 @@ function operationFromReplaceStep(input: {
   const from = canonicalOffset(input.beforeNode, step.from);
   const to = canonicalOffset(input.beforeNode, step.to);
   if (from === null || to === null || to < from) {
-    return { message: "ProseMirror ReplaceStep range is outside block content" };
+    return {
+      message: "ProseMirror ReplaceStep range is outside block content",
+    };
   }
   let inserted: readonly RichTextInlineNodeJson[];
   let deleted: readonly RichTextInlineNodeJson[];
@@ -269,7 +272,9 @@ function operationFromMarkStep(
   };
 }
 
-function canonicalInlineContent(value: unknown): readonly RichTextInlineNodeJson[] {
+function canonicalInlineContent(
+  value: unknown,
+): readonly RichTextInlineNodeJson[] {
   return mergeAdjacentTextNodes(
     proseMirrorInlineFragmentToCanonicalJson(value),
   );

@@ -8,6 +8,7 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BlockId } from "@repo/editor-core/kernel";
 import { FirstDraftBlockControlHoverZone } from "./block-control-hover-zone.tsx";
+import type { EditorBlockOperationResult } from "@repo/editor-web/block-operations";
 import {
   FIRST_DRAFT_BLOCK_CONTROL_OFFSETS,
   FirstDraftBlockControls,
@@ -34,7 +35,7 @@ describe("FirstDraftBlockControls", () => {
   });
 
   it("renders the accessible insertion control and inert visible grip", () => {
-    const insertBlock = vi.fn(() => ({ ok: true, handled: true }) as const);
+    const insertBlock = vi.fn(successfulInsertion);
     const { container, getByRole } = render(
       <FirstDraftBlockControls blockId={blockId} editor={{ insertBlock }} />,
     );
@@ -58,15 +59,7 @@ describe("FirstDraftBlockControls", () => {
   });
 
   it("prevents mousedown focus theft and inserts exactly once on click", () => {
-    const insertBlock = vi.fn(() => ({
-      ok: true,
-      handled: true,
-      transaction: {
-        transaction: {
-          selection: { kind: "text-offset", blockId, offset: 0 },
-        },
-      },
-    }) as never);
+    const insertBlock = vi.fn(successfulInsertion);
     const { getByRole } = render(
       <FirstDraftBlockControls blockId={blockId} editor={{ insertBlock }} />,
     );
@@ -85,7 +78,14 @@ describe("FirstDraftBlockControls", () => {
   });
 
   it("stops click only when insertion reports handled", () => {
-    const insertBlock = vi.fn(() => ({ ok: false, handled: false }) as const);
+    const insertBlock = vi.fn(
+      () =>
+        ({
+          ok: false,
+          handled: false,
+          reason: "invalid-input",
+        }) satisfies EditorBlockOperationResult,
+    );
     const { getByRole } = render(
       <FirstDraftBlockControls blockId={blockId} editor={{ insertBlock }} />,
     );
@@ -97,7 +97,7 @@ describe("FirstDraftBlockControls", () => {
   });
 
   it("exposes the typed block-start custom property", () => {
-    const insertBlock = vi.fn(() => ({ ok: true, handled: true }) as const);
+    const insertBlock = vi.fn(successfulInsertion);
     const offset: CSSProperties["insetBlockStart"] = "0.75rem";
     const { container } = render(
       <FirstDraftBlockControls
@@ -113,7 +113,7 @@ describe("FirstDraftBlockControls", () => {
   });
 
   it("keeps every grip event inert", () => {
-    const insertBlock = vi.fn(() => ({ ok: true, handled: true }) as const);
+    const insertBlock = vi.fn(successfulInsertion);
     const { container } = render(
       <FirstDraftBlockControls blockId={blockId} editor={{ insertBlock }} />,
     );
@@ -132,6 +132,28 @@ describe("FirstDraftBlockControls", () => {
     expect(insertBlock).not.toHaveBeenCalled();
   });
 });
+
+function successfulInsertion(): EditorBlockOperationResult {
+  return {
+    ok: true,
+    handled: true,
+    transaction: {
+      ok: true,
+      changed: true,
+      transaction: {
+        blocks: {},
+        rootBlockIds: [],
+        childIdsByParentId: {},
+        contentOperations: [],
+        stagedContent: {},
+        selection: { kind: "none" },
+        affectedBlockIds: [],
+        splitOutputs: {},
+      },
+      operationResult: { ok: true },
+    },
+  };
+}
 
 describe("FirstDraftBlockControlHoverZone", () => {
   it("is permanent, empty, non-focusable product UI only while editable", () => {

@@ -13,6 +13,7 @@ import type {
   EditorDocumentLayerKeydownHandler,
   EditorDocumentLayerKeydownResult,
   EditorTypingTriggerInlineReplacement,
+  EditorTypingTriggerSessionId,
 } from "@repo/editor-web/document-runtime";
 import type { EditableEditor } from "@repo/editor-web/editor";
 import type { EditorTypingTriggerSession } from "@repo/editor-web/typing-triggers";
@@ -222,8 +223,6 @@ describe("FirstDraftMentionMenu", () => {
     ).mockReturnValue({
       left: 100,
       top: 400,
-      right: 101,
-      bottom: 418,
       width: 1,
       height: 18,
     });
@@ -302,7 +301,7 @@ function session(
 ): EditorTypingTriggerSession {
   const blockId = "mention-source" as BlockId;
   return {
-    id: "mention-session",
+    id: typingTriggerSessionId("mention-session"),
     triggerId,
     trigger: triggerId === "mention" ? "@" : "/",
     blockId,
@@ -312,6 +311,12 @@ function session(
     revision,
     selection: { blockId, offset: query.length + 5 },
   };
+}
+
+function typingTriggerSessionId(value: string): EditorTypingTriggerSessionId {
+  if (value.trim() === "")
+    throw new Error("Typing-trigger session ID is empty");
+  return value as EditorTypingTriggerSessionId;
 }
 
 function editorFixture(initial: EditorTypingTriggerSession | null) {

@@ -4,11 +4,16 @@ import type {
   StructuralTransactionOperation,
 } from "../types.ts";
 
+type MoveBlocksOperation = Extract<
+  StructuralTransactionOperation,
+  { readonly kind: "moveBlocks" }
+>;
+
 export function moveBlocks(input: {
   readonly blockIds: readonly BlockId[];
   readonly sourcePlacement: BlockPlacement;
   readonly destinationPlacement: BlockPlacement;
-}): StructuralTransactionOperation {
+}): MoveBlocksOperation {
   return {
     kind: "moveBlocks",
     blockIds: [...input.blockIds],

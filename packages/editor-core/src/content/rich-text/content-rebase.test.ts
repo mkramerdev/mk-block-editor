@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { applyLogicalContentOperationToRichTextDocument } from "./content-operations.ts";
 import { rebaseLogicalContentOperationByExpectedContent } from "./content-rebase.ts";
 import type { BlockDefinition } from "../../definitions/block-definition.ts";
+import type { BlockType } from "../../document/model/block.ts";
 import { contentSelection } from "../../selection/block-selection.ts";
 import { boldMarkDefinition } from "../marks/schema.ts";
 import { asBlockId } from "../../kernel/identity/uuid.ts";
@@ -11,8 +12,8 @@ const blockDefinitions: Readonly<Record<BlockType, BlockDefinition>> = {
   paragraph: {
     type: "paragraph",
     kind: "text",
+    rootLayout: "normal",
     selection: contentSelection(),
-    root: false,
   },
 };
 const applyOptions = { blockDefinitions, inlineMarks: [boldMarkDefinition] };
@@ -23,11 +24,11 @@ describe("logical rich content rebase", () => {
       type: "doc",
       content: [
         {
-        type: "paragraph",
-        content: [
-          { type: "text", text: "R" },
-          { type: "text", text: "abc", marks: [{ type: "strong" }] },
-        ],
+          type: "paragraph",
+          content: [
+            { type: "text", text: "R" },
+            { type: "text", text: "abc", marks: [{ type: "strong" }] },
+          ],
         },
       ],
     };
@@ -67,8 +68,8 @@ describe("logical rich content rebase", () => {
         applyOptions,
       ),
     ).toStrictEqual({
-        type: "doc",
-        content: [{ type: "paragraph", content: [{ type: "text", text: "R" }] }],
-      });
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "text", text: "R" }] }],
+    });
   });
 });

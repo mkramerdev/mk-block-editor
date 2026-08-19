@@ -107,9 +107,9 @@ describe("compiled editor keybindings", () => {
     const comments = documentCommand("comments.create");
     const commands = compileRegisteredEditorCommands([product, comments]);
     const bindings = [
-        { key: "Mod-p", commandId: product.id, scope: "document" },
-        { key: "Mod-k", commandId: comments.id, scope: "document" },
-      ] as const;
+      { key: "Mod-p", commandId: product.id, scope: "document" },
+      { key: "Mod-k", commandId: comments.id, scope: "document" },
+    ] as const;
 
     const compiled = compileEditorKeybindings(bindings, commands);
     expect(
@@ -123,11 +123,11 @@ describe("compiled editor keybindings", () => {
   it("rejects a block binding whose command lacks its executor", () => {
     expect(() =>
       compileRegisteredEditorCommands([
-          {
-            id: "product.malformed-block",
-            scope: "block",
-          } as EditorCommandDefinition,
-        ]),
+        {
+          id: "product.malformed-block",
+          scope: "block",
+        } as EditorCommandDefinition,
+      ]),
     ).toThrow(/include an executor/u);
   });
 });

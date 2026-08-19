@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { asBlockId } from "@repo/editor-core/kernel";
 import { createFirstDraftSnapshot } from "./first-draft-fixture.ts";
 
 describe("First Draft collaboration fixture", () => {
@@ -15,7 +16,7 @@ describe("First Draft collaboration fixture", () => {
     expect(Object.keys(second.opaqueContentCheckpoints)).toEqual(
       Object.keys(second.content),
     );
-    for (const blockId of Object.keys(first.content)) {
+    for (const blockId of Object.keys(first.content).map(asBlockId)) {
       expect(
         first.opaqueContentCheckpoints[blockId]?.payloadBase64,
         `checkpoint for ${blockId}`,

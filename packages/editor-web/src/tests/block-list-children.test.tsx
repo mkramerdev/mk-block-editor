@@ -1,14 +1,14 @@
 import { Children, useLayoutEffect, useState } from "react";
 import { act, render, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, type Mock } from "vitest";
 import { moveBlocks, removeBlocks } from "@repo/editor-core/editing";
 import { type BlockType } from "@repo/editor-core/document";
 import type { BlockId } from "@repo/editor-core/kernel";
 import { createBlockRecord } from "@repo/editor-core/metadata";
 import type { EditorImplementation } from "@repo/editor-react/editor";
 import type { BlockRendererProps } from "../api/block-renderer.ts";
-import type { EditorDefinition } from "../runtime/definition/contracts.ts";
+import type { EditableEditorDefinition } from "../runtime/definition/contracts.ts";
 import { EditorDocument } from "../runtime/document/editor-document-component.tsx";
 import { useTestEditor as useEditor } from "./test-editor-initializers.ts";
 import { createTestEditorSnapshot } from "./editor-snapshot-fixtures.ts";
@@ -22,7 +22,7 @@ const thirdChildId = "ordinary-children-third" as BlockId;
 const fourthChildId = "ordinary-children-fourth" as BlockId;
 
 let nextLeafInstance = 0;
-const leafRenderers = new Map<BlockId, ReturnType<typeof vi.fn>>();
+const leafRenderers = new Map<BlockId, Mock<() => void>>();
 
 function LeafRenderer({ block, children }: BlockRendererProps) {
   const renderSpy = leafRenderers.get(block.id) ?? vi.fn();
@@ -56,8 +56,7 @@ function AllChildrenWrapperRenderer({ block, children }: BlockRendererProps) {
   return <section data-testid={`wrapper-${block.id}`}>{children}</section>;
 }
 
-const definition: EditorDefinition = {
-  inlineAtoms: [],
+const definition: EditableEditorDefinition = {
   ...testEditableEditorDefinition,
   blocks: {
     ...testEditableEditorDefinition.blocks,
@@ -169,7 +168,7 @@ describe("recursive block traversal", () => {
     const view = render(
       <TestDocument captureEditor={(value) => (editor = value)} />,
     );
-    if (!editor) throw new Error("expected the editor to be captured");
+    const capturedEditor = requireEditor(editor);
 
     const roots = view.container.querySelector(".editor-web-block-list");
     expect(roots).not.toBeNull();
@@ -221,7 +220,7 @@ describe("recursive block traversal", () => {
       .getByTestId(`leaf-${thirdChildId}`)
       .getAttribute("data-instance");
     act(() => {
-      const result = editor!.executeStructuralTransaction({
+      const result = capturedEditor.executeStructuralTransaction({
         origin: "block-list-children/reorder",
         operations: [
           moveBlocks({
@@ -268,18 +267,23 @@ describe("recursive block traversal", () => {
     expect(
       within(secondWrapper).getAllByTestId(`leaf-${firstChildId}`),
     ).toHaveLength(1);
-    expect(editor.getRootBlockIds()).toEqual([firstWrapperId, secondWrapperId]);
-    expect(editor.getChildBlockIds(firstWrapperId)).toEqual([secondChildId]);
-    expect(editor.getChildBlockIds(secondWrapperId)).toEqual([
+    expect(capturedEditor.getRootBlockIds()).toEqual([
+      firstWrapperId,
+      secondWrapperId,
+    ]);
+    expect(capturedEditor.getChildBlockIds(firstWrapperId)).toEqual([
+      secondChildId,
+    ]);
+    expect(capturedEditor.getChildBlockIds(secondWrapperId)).toEqual([
       fourthChildId,
       thirdChildId,
       firstChildId,
     ]);
     expect(
       [
-        ...editor.getRootBlockIds(),
-        ...editor.getChildBlockIds(firstWrapperId),
-        ...editor.getChildBlockIds(secondWrapperId),
+        ...capturedEditor.getRootBlockIds(),
+        ...capturedEditor.getChildBlockIds(firstWrapperId),
+        ...capturedEditor.getChildBlockIds(secondWrapperId),
       ].sort(),
     ).toEqual(blockSpecs.map((block) => block.id).sort());
 
@@ -308,7 +312,7 @@ describe("recursive block traversal", () => {
     }
 
     const view = render(<LargeRootDocument />);
-    if (!editor) throw new Error("expected the editor to be captured");
+    const capturedEditor = requireEditor(editor);
     const removedId = rootIds[64]!;
     const unaffectedIds = rootIds.filter((blockId) => blockId !== removedId);
     const shellsBefore = new Map(
@@ -325,7 +329,7 @@ describe("recursive block traversal", () => {
     );
 
     act(() => {
-      const result = editor!.executeStructuralTransaction({
+      const result = capturedEditor.executeStructuralTransaction({
         origin: "block-list-children/remove-one-of-many",
         operations: [
           removeBlocks({
@@ -350,6 +354,14 @@ describe("recursive block traversal", () => {
       ).toBe(shellsBefore.get(blockId));
     }
     view.unmount();
-    editor.dispose();
+    capturedEditor.dispose();
   });
 });
+
+function requireEditor(
+  editor: EditorImplementation | null,
+): EditorImplementation {
+  expect(editor).not.toBeNull();
+  if (!editor) throw new Error("expected the editor to be captured");
+  return editor;
+}

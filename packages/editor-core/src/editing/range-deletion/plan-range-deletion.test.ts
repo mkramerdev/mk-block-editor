@@ -14,6 +14,7 @@ import type {
 } from "../../document/model/block.ts";
 import type { BlockId } from "../../kernel/identity/ids.ts";
 import { asBlockId } from "../../kernel/identity/uuid.ts";
+import { asContentVersion } from "../../kernel/versioning/versions.ts";
 import { createVersionedBlockRecord } from "../../metadata/block-record.ts";
 import { applyStructuralTransaction } from "../transactions/apply.ts";
 import type {
@@ -143,7 +144,8 @@ function block(
     parentId,
     version: {
       metadataVersion: "1",
-      contentVersion: definitions[type]?.kind === "text" ? "1" : null,
+      contentVersion:
+        definitions[type]?.kind === "text" ? asContentVersion("1") : null,
     },
   });
 }
@@ -181,8 +183,8 @@ function execute(input: {
   }) => readonly BlockId[];
 }) {
   const context: StructuralTransactionContext = {
-    graphRevision: 1,
     ...input.graph,
+    graphRevision: 1,
     blockDefinitions: definitions,
     readContent: (blockId) => {
       const value = input.values.get(blockId);
@@ -190,17 +192,18 @@ function execute(input: {
         ? {
             content: value,
             plainText: extractPlainTextFromRichTextDocument(value),
-            version: "1",
+            version: asContentVersion("1"),
           }
         : null;
     },
     validateContent: (_type, value) => isRichTextDocument(value),
-    nextContentVersion: "2",
+    nextContentVersion: asContentVersion("2"),
   };
   const planned = planStructuralRangeDeletion({
     intent: "cut",
     range: input.range,
     ...context,
+    graphRevision: context.graphRevision ?? 1,
     ...(input.visible ? { resolveVisibleChildBlockIds: input.visible } : {}),
   });
   if (!planned.ok) throw new Error(planned.message);

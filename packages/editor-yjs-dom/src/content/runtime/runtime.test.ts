@@ -19,7 +19,13 @@ import {
   writeCanonicalYjsBlockContent,
 } from "@repo/editor-yjs";
 import { readYjsBlockContentPlainText } from "../projection/block-content-mapping.ts";
-import { createYjsBlockContentRuntime } from "./runtime.ts";
+import {
+  createYjsBlockContentRuntime,
+  type BlockContentLease,
+  type EditorBlockContentLease,
+  type EditorContentRuntime,
+  type YjsBlockContentRuntime,
+} from "../../api/index.ts";
 
 const definitions = {
   paragraph: { kind: "text", type: "paragraph", rootLayout: "normal" },
@@ -31,6 +37,53 @@ const id = (suffix: number) =>
   asBlockId(`01890f07-1c00-7000-8000-${String(suffix).padStart(12, "0")}`);
 
 describe("independent encoded Yjs block content", () => {
+  it("is directly substitutable for the core runtime while retaining Yjs extensions", () => {
+    const runtime: YjsBlockContentRuntime = createYjsBlockContentRuntime(
+      sourceFor({ [id(1)]: "contract" }),
+    );
+    const canonical: EditorContentRuntime = runtime;
+    const lease: BlockContentLease = runtime.acquireBlockContent(
+      id(1),
+      "paragraph",
+      "active-editing",
+    );
+    const genericLease: EditorBlockContentLease = lease;
+
+    expect(canonical.readBlockPlainText(id(1), "paragraph")).toBe("contract");
+    expect(readYjsBlockContentPlainText(lease.context)).toBe("contract");
+    expect(genericLease).toBe(lease);
+    expect(runtime.getLiveBlockContentCount()).toBe(1);
+    expect(runtime.getConsistencyState()).toBe("healthy");
+
+    lease.release();
+    runtime.destroy();
+  });
+
+  it("rejects a generic lease owned by another runtime", () => {
+    const owner = createYjsBlockContentRuntime(sourceFor({ [id(1)]: "owner" }));
+    const other = createYjsBlockContentRuntime(sourceFor({ [id(1)]: "other" }));
+    const foreignLease: EditorBlockContentLease = owner.acquireBlockContent(
+      id(1),
+      "paragraph",
+      "active-editing",
+    );
+
+    expect(
+      other.createTextAnchorInContext(foreignLease, {
+        textOffset: 0,
+        affinity: null,
+      }),
+    ).toMatchObject({
+      ok: false,
+      reason: "missing-text",
+      message: "Block content lease is not owned by this runtime",
+    });
+
+    foreignLease.release();
+    owner.destroy();
+    other.destroy();
+  });
+
   it("keeps 100 checkpoints opaque and constructs no Y.Doc at startup", () => {
     const source = sourceFor(
       Object.fromEntries(

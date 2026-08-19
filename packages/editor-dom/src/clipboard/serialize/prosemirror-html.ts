@@ -110,7 +110,8 @@ function blockLocalProseMirrorDomParser(
       ...standard.rules,
     ]);
   }
-  if (schema !== blockLocalProseMirrorSchema) return PMDOMParser.fromSchema(schema);
+  if (schema !== blockLocalProseMirrorSchema)
+    return PMDOMParser.fromSchema(schema);
   blockLocalDomParser ??= PMDOMParser.fromSchema(blockLocalProseMirrorSchema);
   return blockLocalDomParser;
 }

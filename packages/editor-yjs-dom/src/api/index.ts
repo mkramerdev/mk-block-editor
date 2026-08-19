@@ -22,6 +22,13 @@ export {
   type EditorYjsCommitOrigin,
 } from "../content/runtime/runtime.ts";
 export type {
+  BlockContentLease,
+  BlockContentLeaseReason,
   EditorContentDataReconciliation,
   YjsBlockContentRuntime,
 } from "../content/runtime/runtime-types.ts";
+export type {
+  EditorBlockContentLease,
+  EditorContentRuntime,
+  EditorContentRuntimeSource,
+} from "@repo/editor-core/content";

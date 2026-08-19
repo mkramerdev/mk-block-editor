@@ -5,6 +5,7 @@ import type { BlockSelectionModel } from "@repo/editor-core/selection";
 import type {
   RichTextDocumentNodeJson,
   RichTextInlineNodeJson,
+  EditorContentOperationUpdate,
 } from "@repo/editor-core/content/rich-text";
 import type {
   BlockMetadataUpdate,
@@ -12,7 +13,6 @@ import type {
   EditorLogicalContentOperation,
 } from "@repo/editor-core/operations";
 import type {
-  EditorContentOperationUpdate,
   EditorBlockMetadataUpdateOptions,
   EditorBlockDeletion,
   EditorBlockDeletionResult,
@@ -211,6 +211,7 @@ export interface EditorBlockMetadataSemanticChange extends EditorGraphSemanticCh
 
 export interface EditorBlockGraphSemanticChange extends EditorGraphSemanticChangeBase<EditorBlockGraphChange> {
   readonly graphChanges: readonly CanonicalEditorBlockGraphChange[];
+  readonly metadataOperation?: EditorLogicalBlockMetadataOperation;
   readonly contentChanges: readonly EditorBlockContentChange<EditorContentOperationUpdate>[];
 }
 

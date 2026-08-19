@@ -6,10 +6,10 @@ const css = readFileSync(resolve(process.cwd(), "src/first-draft.css"), "utf8");
 
 describe("First Draft mention menu CSS", () => {
   it("uses fixed caret placement with independent design and viewport caps", () => {
-    expect(css).toMatch(/\.first-draft-mention-menu\s*\{[\s\S]*position:\s*fixed/u);
     expect(css).toMatch(
-      /--first-draft-mention-menu-max-block-size:\s*15rem/u,
+      /\.first-draft-mention-menu\s*\{[\s\S]*position:\s*fixed/u,
     );
+    expect(css).toMatch(/--first-draft-mention-menu-max-block-size:\s*15rem/u);
     expect(css).toMatch(
       /max-block-size:\s*min\(\s*var\(--first-draft-mention-menu-max-block-size,\s*15rem\),\s*var\(--first-draft-mention-menu-available-block-size,\s*100dvh\)\s*\)/u,
     );

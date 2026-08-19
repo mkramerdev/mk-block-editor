@@ -50,14 +50,12 @@ export interface FirstDraftSessionIdentity {
   readonly documentId: string;
 }
 
-export interface ConnectFirstDraftSessionMessage
-  extends FirstDraftSessionIdentity {
+export interface ConnectFirstDraftSessionMessage extends FirstDraftSessionIdentity {
   readonly type: "connect-first-draft-session";
   readonly authenticationToken: string;
 }
 
-export interface FirstDraftSessionConnectedMessage
-  extends FirstDraftSessionIdentity {
+export interface FirstDraftSessionConnectedMessage extends FirstDraftSessionIdentity {
   readonly type: "first-draft-session-connected";
 }
 
@@ -65,21 +63,18 @@ export interface FirstDraftDocumentIdentity {
   readonly documentId: string;
 }
 
-export interface SubscribeFirstDraftDocumentMessage
-  extends FirstDraftDocumentIdentity {
+export interface SubscribeFirstDraftDocumentMessage extends FirstDraftDocumentIdentity {
   readonly type: "subscribe-first-draft-document";
 }
 
-export interface FirstDraftDocumentLoadedMessage
-  extends FirstDraftDocumentIdentity {
+export interface FirstDraftDocumentLoadedMessage extends FirstDraftDocumentIdentity {
   readonly type: "first-draft-document-loaded";
   readonly revision: number;
   /** Decoded and validated exactly once by the WebSocket message boundary. */
   readonly bootstrap: ValidatedFirstDraftBootstrap;
 }
 
-export interface FirstDraftAcceptedTransactionReplayMessage
-  extends FirstDraftDocumentIdentity {
+export interface FirstDraftAcceptedTransactionReplayMessage extends FirstDraftDocumentIdentity {
   readonly type: "first-draft-accepted-transaction-replay";
   readonly transactionId: string;
   readonly baseRevision: number;
@@ -88,20 +83,17 @@ export interface FirstDraftAcceptedTransactionReplayMessage
   readonly transaction: EditorTransportTransaction;
 }
 
-export interface FirstDraftDocumentCaughtUpMessage
-  extends FirstDraftDocumentIdentity {
+export interface FirstDraftDocumentCaughtUpMessage extends FirstDraftDocumentIdentity {
   readonly type: "first-draft-document-caught-up";
   readonly requestedRevision: number;
   readonly revision: number;
 }
 
-export interface UnsubscribeFirstDraftDocumentMessage
-  extends FirstDraftDocumentIdentity {
+export interface UnsubscribeFirstDraftDocumentMessage extends FirstDraftDocumentIdentity {
   readonly type: "unsubscribe-first-draft-document";
 }
 
-export interface FirstDraftDocumentUnsubscribedMessage
-  extends FirstDraftDocumentIdentity {
+export interface FirstDraftDocumentUnsubscribedMessage extends FirstDraftDocumentIdentity {
   readonly type: "first-draft-document-unsubscribed";
 }
 
@@ -125,13 +117,11 @@ export interface FirstDraftParticipantPresence {
 }
 
 export interface FirstDraftParticipantUpdateMessage
-  extends FirstDraftDocumentIdentity,
-    FirstDraftParticipantPresence {
+  extends FirstDraftDocumentIdentity, FirstDraftParticipantPresence {
   readonly type: "first-draft-participant-update";
 }
 
-export interface FirstDraftParticipantSnapshotMessage
-  extends FirstDraftDocumentIdentity {
+export interface FirstDraftParticipantSnapshotMessage extends FirstDraftDocumentIdentity {
   readonly type: "first-draft-participant-snapshot";
   readonly participants: readonly FirstDraftParticipantPresence[];
 }
@@ -144,13 +134,11 @@ export interface FirstDraftSelectionPresence {
 }
 
 export interface FirstDraftSelectionUpdateMessage
-  extends FirstDraftDocumentIdentity,
-    FirstDraftSelectionPresence {
+  extends FirstDraftDocumentIdentity, FirstDraftSelectionPresence {
   readonly type: "first-draft-selection-update";
 }
 
-export interface FirstDraftSelectionSnapshotMessage
-  extends FirstDraftDocumentIdentity {
+export interface FirstDraftSelectionSnapshotMessage extends FirstDraftDocumentIdentity {
   readonly type: "first-draft-selection-snapshot";
   readonly selections: readonly FirstDraftSelectionPresence[];
 }
@@ -349,7 +337,9 @@ function validateMessageMetadata(
       };
     } catch (error) {
       return invalid(
-        error instanceof Error ? error.message : "First Draft initial document is invalid",
+        error instanceof Error
+          ? error.message
+          : "First Draft initial document is invalid",
       );
     }
   }
@@ -482,7 +472,8 @@ function validateTransportTransaction(
     Object.freeze({
       blockId: entry.blockId as BlockId,
       blockType: entry.blockType as BlockType,
-      readProjection: entry.readProjection as import("@repo/editor-core/codecs").EditorTextBlockContent,
+      readProjection:
+        entry.readProjection as import("@repo/editor-core/codecs").EditorTextBlockContent,
       update: Object.freeze({
         kind: "operation" as const,
         format: entry.update.format,
@@ -636,16 +627,22 @@ function validDocumentMessage(value: Record<string, unknown>): boolean {
   );
 }
 
-function validSubscribeDocumentMessage(value: Record<string, unknown>): boolean {
+function validSubscribeDocumentMessage(
+  value: Record<string, unknown>,
+): boolean {
   return (
-    hasExactKeys(value, ["type", "documentId"]) &&
-    validDocumentIdentity(value)
+    hasExactKeys(value, ["type", "documentId"]) && validDocumentIdentity(value)
   );
 }
 
 function validDocumentCaughtUpMessage(value: Record<string, unknown>): boolean {
   return (
-    hasExactKeys(value, ["type", "documentId", "requestedRevision", "revision"]) &&
+    hasExactKeys(value, [
+      "type",
+      "documentId",
+      "requestedRevision",
+      "revision",
+    ]) &&
     validDocumentIdentity(value) &&
     isLocalRevision(value.requestedRevision) &&
     isLocalRevision(value.revision) &&
@@ -805,7 +802,13 @@ function validStableSelectionPoint(value: unknown): boolean {
   }
   if (
     value.kind !== "text" ||
-    !hasExactKeys(value, ["kind", "blockId", "textOffset", "textAnchor", "affinity"]) ||
+    !hasExactKeys(value, [
+      "kind",
+      "blockId",
+      "textOffset",
+      "textAnchor",
+      "affinity",
+    ]) ||
     !Number.isSafeInteger(value.textOffset) ||
     Number(value.textOffset) < 0 ||
     (value.affinity !== null &&
@@ -869,7 +872,9 @@ function validAcceptedMessage(value: Record<string, unknown>): boolean {
   );
 }
 
-function validAcceptedTransactionFields(value: Record<string, unknown>): boolean {
+function validAcceptedTransactionFields(
+  value: Record<string, unknown>,
+): boolean {
   return (
     isValidFirstDraftDocumentId(value.documentId) &&
     isId(value.transactionId) &&
@@ -1023,7 +1028,12 @@ function validateContentDescriptors(
   for (const [index, entry] of value.entries()) {
     if (
       !isRecord(entry) ||
-      !hasExactKeys(entry, ["blockId", "blockType", "readProjection", "update"]) ||
+      !hasExactKeys(entry, [
+        "blockId",
+        "blockType",
+        "readProjection",
+        "update",
+      ]) ||
       !isId(entry.blockId) ||
       !isId(entry.blockType) ||
       blockIds.has(entry.blockId) ||

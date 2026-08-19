@@ -340,8 +340,8 @@ async function handleSocketMessage(input: {
     transaction: message.transaction,
     persistence: input.persistence,
     inFlightPersistence: input.inFlightPersistence,
-        persistenceTails: input.persistenceTails,
-        rooms: input.rooms,
+    persistenceTails: input.persistenceTails,
+    rooms: input.rooms,
     onPersistenceDiagnostic: input.onPersistenceDiagnostic,
   });
 }
@@ -547,7 +547,10 @@ async function subscribeToDocument(
     return;
   }
   const initialRevision = loaded.bootstrap.revision;
-  const replayByRevision = new Map<number, FirstDraftAcceptedTransactionReplayMessage>();
+  const replayByRevision = new Map<
+    number,
+    FirstDraftAcceptedTransactionReplayMessage
+  >();
   for (const accepted of state.acceptedReplayQueue) {
     if (accepted.revision <= initialRevision) continue;
     const existing = replayByRevision.get(accepted.revision);
@@ -563,10 +566,15 @@ async function subscribeToDocument(
     }
     replayByRevision.set(accepted.revision, accepted);
   }
-  const replay = [...replayByRevision.values()].sort((left, right) => left.revision - right.revision);
+  const replay = [...replayByRevision.values()].sort(
+    (left, right) => left.revision - right.revision,
+  );
   let replayRevision = initialRevision;
   for (const accepted of replay) {
-    if (accepted.baseRevision !== replayRevision || accepted.revision !== replayRevision + 1) {
+    if (
+      accepted.baseRevision !== replayRevision ||
+      accepted.revision !== replayRevision + 1
+    ) {
       reportProtocolError({
         state,
         code: "revision-replay-non-contiguous",
@@ -605,7 +613,10 @@ function broadcastAcceptedTransaction(
     if (client === sender) continue;
     if (client.subscriptionLoading) {
       client.acceptedReplayQueue.push(message);
-    } else if (client.subscribed && client.socket.readyState === WebSocket.OPEN) {
+    } else if (
+      client.subscribed &&
+      client.socket.readyState === WebSocket.OPEN
+    ) {
       sendFirstDraftMessage(client.socket, message);
     }
   }
@@ -701,7 +712,10 @@ function applySelectionUpdate(
     selectionRevision: message.selectionRevision,
     selection: message.selection,
   } satisfies FirstDraftSelectionPresence;
-  if (previous && isDeepStrictEqual(next.selection, previous.latest.selection)) {
+  if (
+    previous &&
+    isDeepStrictEqual(next.selection, previous.latest.selection)
+  ) {
     previous.latest = next;
     if (previous.active) broadcastMessage(room, state, message);
     return;
@@ -891,8 +905,7 @@ function removeSessionFromRoom(
     for (const peer of room.clients) sendFirstDraftMessage(peer.socket, leave);
   }
   broadcastSelectionSnapshot(room, session.documentId);
-  if (room.clients.size === 0)
-    deleteRoom(rooms, session.documentId, room);
+  if (room.clients.size === 0) deleteRoom(rooms, session.documentId, room);
 }
 
 async function handleHttpRequest(

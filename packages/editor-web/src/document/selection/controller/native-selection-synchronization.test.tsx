@@ -556,7 +556,14 @@ function presentation(composition: null): SelectionPresentationSnapshot {
 const selectionGraph: EditorSelectionGraphReader = {
   getBlock: (blockId) =>
     blockId === ("source" as BlockId)
-      ? { id: blockId, type: "textbox", tombstone: false }
+      ? {
+          id: blockId,
+          type: "textbox",
+          parentId: null,
+          tombstone: null,
+          metadataVersion: "1",
+          contentVersion: null,
+        }
       : null,
   readBlockSelectionModel: () => contentSelection(),
   getRootBlockIds: () => ["source" as BlockId],

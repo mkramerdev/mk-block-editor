@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  canonicalJsonValueKey,
   cloneJsonValue,
   jsonValuesEqual,
   validateJsonObject,
@@ -37,11 +38,29 @@ describe("JSON value helpers", () => {
       ),
     ).toBe(true);
     expect(jsonValuesEqual([1, 2], [2, 1])).toBe(false);
+    expect(jsonValuesEqual([1, 2], [1, 2, 3])).toBe(false);
     expect(jsonValuesEqual({ value: null }, {})).toBe(false);
     expect(jsonValuesEqual({ value: 1 }, { value: "1" })).toBe(false);
     expect(jsonValuesEqual([1, { a: "x" }], [1, { a: "y" }])).toBe(false);
     expect(jsonValuesEqual(null, null)).toBe(true);
     expect(jsonValuesEqual(null, {})).toBe(false);
+    expect(
+      jsonValuesEqual(
+        { rows: [{ cells: [{ value: 1 }, { value: 2 }] }] },
+        { rows: [{ cells: [{ value: 1 }, { value: 2 }] }] },
+      ),
+    ).toBe(true);
+  });
+
+  it("creates stable scalar keys only for valid JSON values", () => {
+    expect(canonicalJsonValueKey({ a: 1, nested: { x: true, y: false } })).toBe(
+      canonicalJsonValueKey({ nested: { y: false, x: true }, a: 1 }),
+    );
+    expect(canonicalJsonValueKey([1, 2])).not.toBe(
+      canonicalJsonValueKey([2, 1]),
+    );
+    expect(canonicalJsonValueKey(-0)).not.toBe(canonicalJsonValueKey(0));
+    expect(canonicalJsonValueKey(new Date(0))).toBeNull();
   });
 
   it("does not treat values outside the persisted JSON domain as equal", () => {

@@ -287,8 +287,9 @@ describe("canonical clipboard wire codec", () => {
 describe("clipboard format boundary", () => {
   it("negotiates canonical HTML before generic HTML and plain text", () => {
     const written = new MemoryDataTransfer();
-    boundary({ materializeSelection: () => textFragment("Canonical", "text") })
-      .writeSelection(written.asDataTransfer(), selection);
+    boundary({
+      materializeSelection: () => textFragment("Canonical", "text"),
+    }).writeSelection(written.asDataTransfer(), selection);
     const data = new MemoryDataTransfer({
       "text/html": written.values.get("text/html")!,
       "text/plain": "Plain",
@@ -306,8 +307,8 @@ describe("clipboard format boundary", () => {
       "text/plain": "Plain",
     });
     expect(
-      boundary().readClipboardBlocks(missingCanonical.asDataTransfer())?.blocks[0]
-        ?.plainText,
+      boundary().readClipboardBlocks(missingCanonical.asDataTransfer())
+        ?.blocks[0]?.plainText,
     ).toBe("HTML");
     expect(missingCanonical.reads).toEqual(["text/html", "text/plain"]);
 
@@ -316,8 +317,8 @@ describe("clipboard format boundary", () => {
       "text/plain": "Plain",
     });
     expect(
-      boundary().readClipboardBlocks(invalidCandidates.asDataTransfer())?.blocks[0]
-        ?.plainText,
+      boundary().readClipboardBlocks(invalidCandidates.asDataTransfer())
+        ?.blocks[0]?.plainText,
     ).toBe("Plain");
     expect(invalidCandidates.reads).toEqual(["text/html", "text/plain"]);
   });
@@ -438,10 +439,7 @@ describe("clipboard format boundary", () => {
     expect(result).toBe(true);
     expect(materializeSelection).toHaveBeenCalledTimes(1);
     expect(target.values.get("text/plain")).toBe("Hello");
-    expect(target.writes).toEqual([
-      "text/plain",
-      "text/html",
-    ]);
+    expect(target.writes).toEqual(["text/plain", "text/html"]);
     expect(target.values.get("text/html")).toContain("<p>");
     expect(target.values.get("text/html")).toContain(
       'data-editor-canonical-fragment="',
@@ -472,10 +470,7 @@ describe("clipboard format boundary", () => {
 
   it("uses plain text as the required write and treats HTML as optional", () => {
     const fragment = textFragment("A", "block");
-    const optionalFailure = new MemoryDataTransfer(
-      {},
-      new Set(["text/html"]),
-    );
+    const optionalFailure = new MemoryDataTransfer({}, new Set(["text/html"]));
     expect(
       boundary({
         materializeSelection: () => fragment,
@@ -511,34 +506,40 @@ describe("clipboard format boundary", () => {
 });
 
 describe("semantic HTML and plain text codecs", () => {
-  it.each([
-    "A\n\nB",
-    "\nleading",
-    "trailing\n",
-    "\n\n",
-    "café\n🙂\n👨‍👩‍👧‍👦",
-  ])("imports %j as one canonical text block with semantic hard breaks", (text) => {
-    const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-    const fragment = importCanonicalFragmentPlainText(text, {
-      blockDefinitions: definitions,
-      defaultTextBlockType: "paragraph",
-      importHandlers: [createSingleTextBlockPlainTextImportHandler()],
-    });
-    expect(fragment?.blocks).toHaveLength(1);
-    expect(fragment?.start).toEqual({ kind: "text", blockId: fragment?.blocks[0]?.id });
-    expect(fragment?.end).toEqual(fragment?.start);
-    expect(fragment?.blocks[0]?.plainText).toBe(normalized);
-    expect(extractPlainTextFromRichTextDocument(fragment!.blocks[0]!.content!)).toBe(normalized);
-    expect(fragment?.blocks[0]?.content?.content[0]?.content?.filter((node) => node.type === "hard_break")).toHaveLength(
-      Array.from(normalized).filter((value) => value === "\n").length,
-    );
-    expect(
-      exportCanonicalFragmentPlainText(fragment!, {
+  it.each(["A\n\nB", "\nleading", "trailing\n", "\n\n", "café\n🙂\n👨‍👩‍👧‍👦"])(
+    "imports %j as one canonical text block with semantic hard breaks",
+    (text) => {
+      const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+      const fragment = importCanonicalFragmentPlainText(text, {
         blockDefinitions: definitions,
         defaultTextBlockType: "paragraph",
-      }),
-    ).toBe(normalized);
-  });
+        importHandlers: [createSingleTextBlockPlainTextImportHandler()],
+      });
+      expect(fragment?.blocks).toHaveLength(1);
+      expect(fragment?.start).toEqual({
+        kind: "text",
+        blockId: fragment?.blocks[0]?.id,
+      });
+      expect(fragment?.end).toEqual(fragment?.start);
+      expect(fragment?.blocks[0]?.plainText).toBe(normalized);
+      expect(
+        extractPlainTextFromRichTextDocument(fragment!.blocks[0]!.content!),
+      ).toBe(normalized);
+      expect(
+        fragment?.blocks[0]?.content?.content[0]?.content?.filter(
+          (node) => node.type === "hard_break",
+        ),
+      ).toHaveLength(
+        Array.from(normalized).filter((value) => value === "\n").length,
+      );
+      expect(
+        exportCanonicalFragmentPlainText(fragment!, {
+          blockDefinitions: definitions,
+          defaultTextBlockType: "paragraph",
+        }),
+      ).toBe(normalized);
+    },
+  );
 
   it("normalizes CRLF and CR before creating semantic hard breaks", () => {
     const fragment = importCanonicalFragmentPlainText("A\r\n\rB", {

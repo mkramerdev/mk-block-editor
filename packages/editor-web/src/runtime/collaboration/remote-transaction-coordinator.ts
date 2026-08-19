@@ -23,7 +23,7 @@ import {
   type EditorSelectionGraphReader,
   type SelectionController,
 } from "@repo/editor-react/selection";
-import type { EditorContentRuntime } from "../content/content-runtime.ts";
+import type { EditorContentRuntime } from "@repo/editor-core/content";
 import type { EditorDefinition } from "../definition/contracts.ts";
 import type { AdditionalSelectionManager } from "./additional-selection-manager.ts";
 import type {
@@ -48,8 +48,7 @@ interface PreparedRemoteCanonicalTransaction {
   readonly contentChangedBlockIds: readonly BlockId[];
 }
 
-export interface RemoteTransactionCanonicalHost
-  extends EditorSelectionGraphReader {
+export interface RemoteTransactionCanonicalHost extends EditorSelectionGraphReader {
   readonly definition: EditorDefinition;
   readonly contentRuntime: EditorContentRuntime;
   readonly selectionController: SelectionController;
@@ -471,7 +470,10 @@ function decodeContentTransaction(
     value.historyAction !== "undo" &&
     value.historyAction !== "redo"
   ) {
-    return { ok: false, message: "Remote transaction history action is invalid" };
+    return {
+      ok: false,
+      message: "Remote transaction history action is invalid",
+    };
   }
   const graph = decodeStableGraph(value.graph, definition);
   if (!graph.ok) return graph;
@@ -492,8 +494,8 @@ function decodeContentTransaction(
       typeof candidate.blockId !== "string" ||
       !isStructuralKey(candidate.blockId) ||
       typeof candidate.blockType !== "string" ||
-      !definition.blocks[candidate.blockType as BlockType]
-      || !isRecord(candidate.readProjection)
+      !definition.blocks[candidate.blockType as BlockType] ||
+      !isRecord(candidate.readProjection)
     ) {
       return { ok: false, message: "Remote content update is malformed" };
     }
@@ -518,7 +520,8 @@ function decodeContentTransaction(
         version: contentVersion,
         payload: payload.payload,
       },
-      readProjection: candidate.readProjection as import("@repo/editor-core/content/rich-text").RichTextDocumentNodeJson,
+      readProjection:
+        candidate.readProjection as import("@repo/editor-core/content/rich-text").RichTextDocumentNodeJson,
     });
   }
   if (graph.value === null && metadata === null && content.length === 0)

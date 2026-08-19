@@ -15,7 +15,11 @@ describe("ordered-list numbering projection", () => {
     const itemIds = [id("one"), id("two"), id("three"), id("four")];
     const source = createChildSequenceSource({ [listId]: itemIds });
     const rendered = render(
-      <ProjectedList editor={source.editor} listId={listId} itemIds={itemIds} />,
+      <ProjectedList
+        editor={source.editor}
+        listId={listId}
+        itemIds={itemIds}
+      />,
     );
 
     expect(markerText()).toEqual(["1.", "2.", "3.", "4."]);
@@ -23,7 +27,11 @@ describe("ordered-list numbering projection", () => {
     expect(source.subscriptionCount(listId)).toBe(1);
 
     rendered.rerender(
-      <ProjectedList editor={source.editor} listId={listId} itemIds={itemIds} />,
+      <ProjectedList
+        editor={source.editor}
+        listId={listId}
+        itemIds={itemIds}
+      />,
     );
     expect(source.activeSubscriptions(listId)).toBe(1);
     expect(source.subscriptionCount(listId)).toBe(1);
@@ -53,8 +61,9 @@ describe("ordered-list numbering projection", () => {
         />,
       );
     });
-    expect(screen.getAllByTestId("marker").map((node) => node.dataset.itemId))
-      .toEqual(reordered);
+    expect(
+      screen.getAllByTestId("marker").map((node) => node.dataset.itemId),
+    ).toEqual(reordered);
     expect(markerText()).toEqual(["1.", "2.", "3."]);
     expect(source.activeSubscriptions(listId)).toBe(1);
     expect(source.subscriptionCount(listId)).toBe(1);
@@ -189,10 +198,9 @@ function markerText(testId = "marker") {
 function createChildSequenceSource(
   initial: Readonly<Record<BlockId, readonly BlockId[]>>,
 ) {
-  const sequences = new Map<BlockId, readonly BlockId[]>(Object.entries(initial) as [
-    BlockId,
-    readonly BlockId[],
-  ][]);
+  const sequences = new Map<BlockId, readonly BlockId[]>(
+    Object.entries(initial) as [BlockId, readonly BlockId[]][],
+  );
   const listeners = new Map<BlockId, Set<() => void>>();
   const subscriptions = new Map<BlockId, number>();
   const releases = new Map<BlockId, number>();

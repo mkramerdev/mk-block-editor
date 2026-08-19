@@ -81,6 +81,7 @@ export interface MaterializeCanonicalBlockCreationOptions extends CanonicalFragm
   readonly initialText?: string;
   readonly createBlockId?: () => BlockId;
   readonly reservedBlockIds?: ReadonlySet<BlockId>;
+  readonly isBlockIdReserved?: (blockId: BlockId) => boolean;
 }
 
 export interface MaterializedCanonicalBlockCreation {
@@ -151,6 +152,7 @@ export function materializeCanonicalBlockCreation(
     selection: true,
     createBlockId: options.createBlockId,
     reservedBlockIds: options.reservedBlockIds,
+    isBlockIdReserved: options.isBlockIdReserved,
   });
   const records = creation.nodes.map((node): CanonicalBlockRecord => {
     const definition = options.blockDefinitions![node.type];

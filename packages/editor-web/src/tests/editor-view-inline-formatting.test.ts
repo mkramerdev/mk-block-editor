@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";import type { BlockId } from "@repo/editor-core/kernel";
+import { describe, expect, it, vi } from "vitest";
+import type { BlockId } from "@repo/editor-core/kernel";
 import { createBlockLocalProseMirrorState } from "@repo/editor-dom/block-editor";
 import { EditorView } from "@repo/editor-dom/prosemirror";
 import { setEditorViewCaretSilently } from "../document/inline/editor-view-inline-formatting.ts";

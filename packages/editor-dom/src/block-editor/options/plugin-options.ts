@@ -38,14 +38,13 @@ export interface BlockPluginCompositionOptions {
 }
 
 export interface BlockLocalDomPrimitiveOptions
-  extends BlockPluginIdentityOptions,
+  extends
+    BlockPluginIdentityOptions,
     BlockPluginEditorOptions,
     BlockPluginExtensionOptions {}
 
 export interface BlockLocalDomHostPolicyOptions
-  extends BlockPluginKeyBehaviorOptions,
-    BlockPluginCompositionOptions {}
+  extends BlockPluginKeyBehaviorOptions, BlockPluginCompositionOptions {}
 
 export interface BlockLocalDomPluginOptions
-  extends BlockLocalDomPrimitiveOptions,
-    BlockLocalDomHostPolicyOptions {}
+  extends BlockLocalDomPrimitiveOptions, BlockLocalDomHostPolicyOptions {}

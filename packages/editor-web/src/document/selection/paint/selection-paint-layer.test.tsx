@@ -1,26 +1,32 @@
 import { act, render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { BlockId } from "@repo/editor-core/kernel";
+import { asContentVersion, type BlockId } from "@repo/editor-core/kernel";
+import type { VersionedBlock } from "@repo/editor-core/document";
 import { contentSelection, wholeSelection } from "@repo/editor-core/selection";
-import type {
-  CanonicalLocalSelection,
-  CommittedSelectionSnapshot,
-  EditorLogicalSelectionPoint,
+import {
+  createCommittedSelectionSnapshot,
+  type CanonicalLocalSelection,
+  type CommittedSelectionSnapshot,
+  type EditorLogicalSelectionPoint,
+  type EditorSelectionSnapshot,
 } from "@repo/editor-react/selection";
 import type { AdditionalSelectionRecord } from "../../../runtime/collaboration/contracts.ts";
-import type { Editor } from "../../../runtime/document/contracts.ts";
 import type {
   EditorDocumentGeometryReader,
   EditorDocumentRect,
 } from "../../geometry/editor-document-geometry.ts";
-import { SelectionPaintLayer } from "./selection-paint-layer.tsx";
+import {
+  SelectionPaintLayer,
+  type SelectionPaintEditor,
+} from "./selection-paint-layer.tsx";
+import { toCollaborationSubjectKey } from "../../../runtime/collaboration/subject.ts";
 
 const blockId = "block-a" as BlockId;
 
 describe("SelectionPaintLayer", () => {
   it("keeps canonical caret revisions current while the truthful paint model remains none", () => {
     let selection = rangeSelection(1, 1, null, 1);
-    let invalidate = () => undefined;
+    let invalidate: () => void = () => undefined;
     const noPaint = { kind: "none" as const };
     const editor = {
       editable: false,
@@ -36,7 +42,7 @@ describe("SelectionPaintLayer", () => {
         subscribe: () => () => undefined,
       },
       geometry: geometryReader(),
-    } as unknown as Editor;
+    } satisfies SelectionPaintEditor;
     const view = render(<SelectionPaintLayer editor={editor} />);
 
     selection = rangeSelection(2, 2, null, 2);
@@ -115,8 +121,10 @@ describe("SelectionPaintLayer", () => {
   });
 
   it("updates color-only changes immediately without remounting paint", () => {
-    let additional = [{ ...additionalSelection(1, 4), color: null }];
-    let notify = () => undefined;
+    let additional: AdditionalSelectionRecord[] = [
+      { ...additionalSelection(1, 4), color: null },
+    ];
+    let notify: () => void = () => undefined;
     const editor = editableEditor(noneSelection(), additional, {
       readTextRangeRects: () => [rect(10, 20, 30, 16)],
     });
@@ -153,12 +161,12 @@ describe("SelectionPaintLayer", () => {
   it("paints each additional selection with its own participant color", () => {
     const first = {
       ...additionalSelection(2, 2),
-      subject: "1:a|1:c|1:s" as never,
+      subject: subjectKey("a", "c", "s"),
       color: "#ef4444",
     };
     const second = {
       ...additionalSelection(5, 5),
-      subject: "1:b|1:d|1:t" as never,
+      subject: subjectKey("b", "d", "t"),
       color: "#22c55e",
     };
     const view = render(
@@ -216,7 +224,7 @@ describe("SelectionPaintLayer", () => {
       affinity: null,
     };
     const record: AdditionalSelectionRecord = {
-      subject: "1:a|1:c|1:s" as never,
+      subject: subjectKey("a", "c", "s"),
       watermark: 8,
       color: "#123abc",
       active: true,
@@ -298,7 +306,7 @@ describe("SelectionPaintLayer", () => {
   });
 
   it("remeasures through editor-owned geometry invalidation", () => {
-    let invalidate = () => undefined;
+    let invalidate: () => void = () => undefined;
     const unsubscribe = vi.fn();
     const readTextRangeRects = vi.fn(() => [rect(1, 2, 8, 10)]);
     const editor = readEditor(rangeSelection(0, 2), {
@@ -339,7 +347,7 @@ describe("SelectionPaintLayer", () => {
 
   it("does not rerender document paint when only the native caret moves", () => {
     let selection = rangeSelection(1, 1);
-    let invalidate = () => undefined;
+    let invalidate: () => void = () => undefined;
     const reader = {
       getSnapshot: () => selection,
       subscribe: (listener: () => void) => {
@@ -356,7 +364,7 @@ describe("SelectionPaintLayer", () => {
         subscribe: () => () => undefined,
       },
       geometry: geometryReader(),
-    } as unknown as Editor;
+    } satisfies SelectionPaintEditor;
     const view = render(<SelectionPaintLayer editor={editor} />);
     const layer = view.container.querySelector(
       "[data-editor-selection-paint-layer]",
@@ -407,20 +415,20 @@ describe("SelectionPaintLayer", () => {
 function readEditor(
   selection: CanonicalLocalSelection,
   geometryOverrides: Partial<EditorDocumentGeometryReader> = {},
-): Editor {
+): Extract<SelectionPaintEditor, { readonly editable: false }> {
   return {
     editable: false,
     selection: selectionReader(selection),
     selectionPaint: selectionPaintReader(selection),
     geometry: geometryReader(geometryOverrides),
-  } as unknown as Editor;
+  } satisfies SelectionPaintEditor;
 }
 
 function editableEditor(
   selection: CanonicalLocalSelection,
   additional: readonly AdditionalSelectionRecord[],
   geometryOverrides: Partial<EditorDocumentGeometryReader> = {},
-): Editor {
+): Extract<SelectionPaintEditor, { readonly editable: true }> {
   const resolvedDocumentSelection = additional.find(
     (record) => record.resolvedSelection?.kind === "document",
   )?.resolvedSelection;
@@ -433,18 +441,17 @@ function editableEditor(
     selection: selectionReader(selection),
     selectionPaint: selectionPaintReader(selection),
     geometry: geometryReader(geometryOverrides),
-    getBlock: (candidate: BlockId) =>
-      candidate === blockId
-        ? ({
-            id: blockId,
-            type: blockType,
-            parentId: null,
-            tombstone: null,
-            metadata: null,
-            metadataVersion: 0,
-            contentVersion: 0,
-          } as never)
-        : null,
+    getBlock: (candidate: BlockId) => {
+      if (candidate !== blockId) return null;
+      return {
+        id: blockId,
+        type: blockType,
+        parentId: null,
+        tombstone: null,
+        metadataVersion: "selection-paint-metadata",
+        contentVersion: asContentVersion("selection-paint-content"),
+      } satisfies VersionedBlock;
+    },
     getParentId: () => null,
     getRootBlockIds: () => [blockId],
     getChildBlockIds: () => [],
@@ -453,8 +460,12 @@ function editableEditor(
     additionalSelections: {
       getSnapshot: () => additional,
       subscribe: () => () => undefined,
+      getBlockSnapshot: () => additional,
+      subscribeBlock: () => () => undefined,
+      getBlockInternalSnapshot: () => additional,
+      subscribeBlockInternal: () => () => undefined,
     },
-  } as unknown as Editor;
+  } satisfies SelectionPaintEditor;
 }
 
 function selectionReader(selection: CanonicalLocalSelection) {
@@ -510,22 +521,16 @@ function rangeSelection(
     normalizedStart: point(from, affinity),
     normalizedEnd: point(to, affinity),
     rangeBlocks: [rangeBlock],
-  };
-  const snapshot = {
-    revision,
+  } satisfies EditorSelectionSnapshot;
+  const committed = createCommittedSelectionSnapshot({
     kind: "document",
-    owner,
-    blocks: [rangeBlock],
-    internal: null,
+    revision,
     documentSelection,
-    endpoints: {
-      anchor: documentSelection.anchor,
-      head: documentSelection.focus,
-    },
-    materialization: { owner },
-    edit: { owner },
-  } as unknown as CommittedSelectionSnapshot;
-  return { kind: "document", revision, snapshot };
+  });
+  if (!committed.ok) {
+    throw new Error(`invalid range selection fixture: ${committed.reason}`);
+  }
+  return { kind: "document", revision, snapshot: committed.snapshot };
 }
 
 function completeEmptySelection(): CanonicalLocalSelection {
@@ -559,7 +564,7 @@ function additionalSelection(
   affinity: EditorLogicalSelectionPoint["affinity"] = null,
 ): AdditionalSelectionRecord {
   return {
-    subject: "1:a|1:c|1:s" as never,
+    subject: subjectKey("a", "c", "s"),
     watermark: 7,
     color: "#123abc",
     active: true,
@@ -574,6 +579,12 @@ function additionalSelection(
       focusTarget: { kind: "text", blockId, point: point(to, affinity) },
     },
   };
+}
+
+function subjectKey(actorId: string, clientId: string, sessionId: string) {
+  const key = toCollaborationSubjectKey({ actorId, clientId, sessionId });
+  if (!key) throw new Error("Expected a valid collaboration subject");
+  return key;
 }
 
 function textRangeBlock(
@@ -633,6 +644,9 @@ function geometryReader(
     readViewportTextCaretRect: () => null,
     readTextRangeRects: () => [],
     readTextCanonicalLength: () => 5,
+    readTextVisualRowBoundary: () => null,
+    moveTextVertically: () => ({ kind: "unavailable", reason: "unavailable" }),
+    mapTextToVisualRow: () => ({ kind: "unavailable", reason: "unavailable" }),
     subscribe: () => () => undefined,
     ...overrides,
   };

@@ -1,5 +1,13 @@
-import type { EditorReadRuntime } from "./contracts.ts";
-import type { AnyEditorRuntimePort } from "./render-port.ts";
+import type {
+  EditableEditor,
+  EditorReadRuntime,
+  ReadEditor,
+} from "./contracts.ts";
+import type {
+  AnyEditorRuntimePort,
+  EditableEditorRuntimePort,
+  ReadEditorRuntimePort,
+} from "./render-port.ts";
 
 const runtimePorts = new WeakMap<EditorReadRuntime, AnyEditorRuntimePort>();
 
@@ -17,11 +25,27 @@ export function registerEditorRuntimePort(
 }
 
 export function resolveEditorRuntimePort(
+  editor: EditableEditor,
+): EditableEditorRuntimePort;
+export function resolveEditorRuntimePort(
+  editor: ReadEditor,
+): ReadEditorRuntimePort;
+export function resolveEditorRuntimePort(
+  editor: EditorReadRuntime,
+): AnyEditorRuntimePort;
+export function resolveEditorRuntimePort(
   editor: EditorReadRuntime,
 ): AnyEditorRuntimePort {
   const runtime = runtimePorts.get(editor);
   if (!runtime) {
-    throw new Error("Editor render runtime is unavailable or has been disposed.");
+    throw new Error(
+      "Editor render runtime is unavailable or has been disposed.",
+    );
+  }
+  if (!("editable" in editor) || runtime.editable !== editor.editable) {
+    throw new Error(
+      "Editor render runtime mutability does not match its editor.",
+    );
   }
   return runtime;
 }

@@ -9,6 +9,10 @@ import {
   type CollaborationSubject,
 } from "@repo/editor-web/editor";
 import { type EditableEditor } from "@repo/editor-web/editor";
+import {
+  createEditorSelectionTextAnchor,
+  type EditorLogicalSelectionPoint,
+} from "@repo/editor-react/selection";
 import { initializeTestEditableEditor as initializeEditableEditor } from "./test-editor.ts";
 import { describe, expect, it, vi } from "vitest";
 import { createFirstDraftViewStateStore } from "./blocks/view-state.tsx";
@@ -518,13 +522,18 @@ function point(
   blockId: BlockId,
   textOffset: number,
   affinity: "backward" | "forward" | null = null,
-) {
+): EditorLogicalSelectionPoint {
+  const anchor = createEditorSelectionTextAnchor({
+    codec: "first-draft-selection-badge-test",
+    payload: { encoded: btoa(String(textOffset)), assoc: 0 },
+  });
+  if (!anchor.ok) throw new Error(anchor.message);
   return {
     blockId,
     blockType: "paragraph",
     blockCategory: "text" as const,
     textOffset,
-    textAnchor: { codec: "test", payload: {} },
+    textAnchor: anchor.textAnchor,
     affinity,
   };
 }

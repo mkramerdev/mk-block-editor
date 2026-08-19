@@ -3,6 +3,10 @@ import type { BlockDefinition } from "../../definitions/block-definition.ts";
 import type { BlockType } from "../../document/model/block.ts";
 import { boldMarkDefinition, linkMarkDefinition } from "./schema.ts";
 import type { InlineMarkDefinition } from "./types.ts";
+import type {
+  RichTextDocumentNodeJson,
+  RichTextInlineNodeJson,
+} from "../rich-text/rich-inline-types.ts";
 import {
   createBlockRichTextContentFromPlainText,
   richTextBlockInlineContent,
@@ -24,7 +28,7 @@ const testInlineMarks = [boldMarkDefinition, linkMarkDefinition] as const;
 
 describe("rich text inline mark commands", () => {
   it("reads and applies boolean mark state with the same mixed-toggle semantics as commands", () => {
-    const content = {
+    const content: RichTextDocumentNodeJson = {
       type: "doc",
       content: [
         {
@@ -244,7 +248,7 @@ describe("rich text inline mark commands", () => {
   it("uses canonical inline markability for rich JSON command ranges", () => {
     const cases: readonly {
       name: string;
-      content: Record<string, unknown>;
+      content: RichTextDocumentNodeJson;
       range: { from: number; to: number };
       changed: boolean;
       firstTextMarked?: boolean;
@@ -469,14 +473,14 @@ describe("rich text inline mark commands", () => {
   });
 });
 
-function mentionDocument(): Record<string, unknown> {
+function mentionDocument(): RichTextDocumentNodeJson {
   return {
     type: "doc",
     content: [{ type: "paragraph", content: [mentionNode()] }],
   };
 }
 
-function mentionNode(): Record<string, unknown> {
+function mentionNode(): RichTextInlineNodeJson {
   return {
     type: "mention",
     metadata: { id: "u1" },
@@ -484,7 +488,7 @@ function mentionNode(): Record<string, unknown> {
 }
 
 function hasMark(
-  node: Record<string, unknown> | undefined,
+  node: RichTextInlineNodeJson | undefined,
   markName: string,
 ): boolean {
   return (

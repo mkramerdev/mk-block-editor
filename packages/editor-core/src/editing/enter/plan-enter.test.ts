@@ -11,6 +11,7 @@ import type {
 } from "../../document/model/block.ts";
 import type { BlockId } from "../../kernel/identity/ids.ts";
 import { asBlockId } from "../../kernel/identity/uuid.ts";
+import { asContentVersion } from "../../kernel/versioning/versions.ts";
 import { applyStructuralTransaction } from "../transactions/apply.ts";
 import type { TransactionReadableContent } from "../transactions/types.ts";
 import { planGenericEnter, planTextSplitAtPlacement } from "./plan-enter.ts";
@@ -19,6 +20,7 @@ const renderer = () => null;
 const blockDefinitions: Readonly<Record<BlockType, BlockDefinition>> = {
   textLeaf: {
     kind: "text",
+    rootLayout: "normal",
     type: "textLeaf",
     renderer,
     split: {
@@ -30,18 +32,21 @@ const blockDefinitions: Readonly<Record<BlockType, BlockDefinition>> = {
   },
   otherText: {
     kind: "text",
+    rootLayout: "normal",
     type: "otherText",
     renderer,
     split: { default: "textLeaf" },
   },
   atomLeaf: {
     kind: "atomic",
+    rootLayout: "normal",
     type: "atomLeaf",
     renderer,
     replaceWith: "textLeaf",
   },
   oneShell: {
     kind: "wrapper",
+    rootLayout: "normal",
     type: "oneShell",
     renderer,
     content: { required: ["textLeaf"] },
@@ -49,6 +54,7 @@ const blockDefinitions: Readonly<Record<BlockType, BlockDefinition>> = {
   },
   itemShell: {
     kind: "wrapper",
+    rootLayout: "normal",
     type: "itemShell",
     renderer,
     content: { required: ["textLeaf"] },
@@ -56,6 +62,7 @@ const blockDefinitions: Readonly<Record<BlockType, BlockDefinition>> = {
   },
   flowShell: {
     kind: "wrapper",
+    rootLayout: "normal",
     type: "flowShell",
     renderer,
     content: { required: ["block"], additional: "block" },
@@ -64,6 +71,7 @@ const blockDefinitions: Readonly<Record<BlockType, BlockDefinition>> = {
   },
   bodyShell: {
     kind: "wrapper",
+    rootLayout: "normal",
     type: "bodyShell",
     renderer,
     content: { required: ["block"], additional: "block" },
@@ -72,6 +80,7 @@ const blockDefinitions: Readonly<Record<BlockType, BlockDefinition>> = {
   },
   compoundItem: {
     kind: "wrapper",
+    rootLayout: "normal",
     type: "compoundItem",
     renderer,
     content: { required: ["textLeaf", "bodyShell"] },
@@ -79,6 +88,7 @@ const blockDefinitions: Readonly<Record<BlockType, BlockDefinition>> = {
   },
   boundaryFlow: {
     kind: "wrapper",
+    rootLayout: "normal",
     type: "boundaryFlow",
     renderer,
     content: { required: ["block"], additional: "block" },
@@ -87,6 +97,7 @@ const blockDefinitions: Readonly<Record<BlockType, BlockDefinition>> = {
   },
   constrainedFlow: {
     kind: "wrapper",
+    rootLayout: "normal",
     type: "constrainedFlow",
     renderer,
     content: { required: ["otherText"], additional: "otherText" },
@@ -95,6 +106,7 @@ const blockDefinitions: Readonly<Record<BlockType, BlockDefinition>> = {
   },
   parallelShell: {
     kind: "wrapper",
+    rootLayout: "normal",
     type: "parallelShell",
     renderer,
     content: {
@@ -105,6 +117,7 @@ const blockDefinitions: Readonly<Record<BlockType, BlockDefinition>> = {
   },
   parallelPane: {
     kind: "wrapper",
+    rootLayout: "normal",
     type: "parallelPane",
     renderer,
     content: { required: ["block"], additional: "block" },
@@ -113,6 +126,7 @@ const blockDefinitions: Readonly<Record<BlockType, BlockDefinition>> = {
   },
   listContainer: {
     kind: "wrapper",
+    rootLayout: "normal",
     type: "listContainer",
     renderer,
     content: { required: ["listItem"], additional: "listItem" },
@@ -122,6 +136,7 @@ const blockDefinitions: Readonly<Record<BlockType, BlockDefinition>> = {
   },
   listItem: {
     kind: "wrapper",
+    rootLayout: "normal",
     type: "listItem",
     renderer,
     content: { required: ["textLeaf"], additional: "block" },
@@ -441,7 +456,7 @@ describe("generic Enter planning", () => {
     const first = block(2, "textLeaf", "a1", flow.id, "1");
     const focused = block(3, "textLeaf", "a2", flow.id, "1");
     const blocks = [flow, first, focused];
-    const result = plan(blocks, focused, "", { from: 0, to: 0 }, undefined);
+    const result = plan(blocks, focused, "", { from: 0, to: 0 });
     expect(result).toMatchObject({ ok: false, reason: "no-destination" });
   });
 
@@ -450,7 +465,10 @@ describe("generic Enter planning", () => {
     const planned = plan([source], source, "x", { from: 1, to: 1 });
     expect(planned.ok).toBe(true);
     if (!planned.ok) return;
-    const changedSource = { ...source, contentVersion: "3" };
+    const changedSource = {
+      ...source,
+      contentVersion: asContentVersion("3"),
+    };
     const context = contextFor([changedSource], changedSource, "x");
     expect(applyStructuralTransaction(planned.plan, context).ok).toBe(false);
   });
@@ -536,12 +554,10 @@ describe("generic Enter planning", () => {
     const nestedText = block(6, "textLeaf", "a5", nestedItem.id, "1");
 
     expect(
-      plan(
-        [list, item, text, nestedList, nestedItem, nestedText],
-        text,
-        "",
-        { from: 0, to: 0 },
-      ),
+      plan([list, item, text, nestedList, nestedItem, nestedText], text, "", {
+        from: 0,
+        to: 0,
+      }),
     ).toMatchObject({
       ok: false,
       handled: true,

@@ -5,19 +5,21 @@ import { renderToString } from "react-dom/server";
 import type { BlockId } from "@repo/editor-core/kernel";
 import { describe, expect, it, vi } from "vitest";
 import { EditorDocument } from "../runtime/document/editor-document-component.tsx";
-import { useTestEditor as useEditor } from "./test-editor-initializers.ts";
-import type { Editor } from "../runtime/document/contracts.ts";
-import type { EditableEditorRuntimePort } from "../runtime/document/render-port.ts";
+import {
+  type TestEditableEditor,
+  useTestEditor as useEditor,
+} from "./test-editor-initializers.ts";
 import { createTestEditorSnapshot } from "./editor-snapshot-fixtures.ts";
 import { testEditableEditorDefinition } from "./test-editor-definition.ts";
+import { resolveEditorRuntimePort } from "../runtime/document/runtime-port-registry.ts";
 
 const blockId = "concurrent-hydration-textbox" as BlockId;
 
 describe("concurrent editor hydration", () => {
   it("keeps a suspended hydration editor valid until its generation commits", async () => {
-    const serverEditors: Editor[] = [];
-    const clientEditors: Editor[] = [];
-    let committedEditor: Editor | null = null;
+    const serverEditors: TestEditableEditor[] = [];
+    const clientEditors: TestEditableEditor[] = [];
+    let committedEditor: TestEditableEditor | null = null;
     let autofocusCount = 0;
     const serverGate = createHydrationGate(true);
     const clientGate = createHydrationGate(false);
@@ -103,9 +105,8 @@ describe("concurrent editor hydration", () => {
         await Promise.resolve();
       });
 
-      const committed = committedEditor as Editor | null;
+      const committed = requireCommittedEditor(committedEditor);
       expect(committed).not.toBeNull();
-      if (committed === null) throw new Error("hydration did not commit");
       expect(committed.getBlock(blockId)?.type).toBe("paragraph");
       expect("selectionController" in committed).toBe(true);
       const activeRoot = container.querySelector<HTMLElement>(
@@ -125,7 +126,7 @@ describe("concurrent editor hydration", () => {
         },
       });
       expect(
-        (committed as EditableEditorRuntimePort).readActiveTextView()?.dom,
+        resolveEditorRuntimePort(committed).readActiveTextView()?.dom,
       ).toBe(activeRoot);
       expect(autofocusCount).toBeGreaterThan(0);
       // The explicit compound focus action settled the canonical caret once;
@@ -175,8 +176,8 @@ function HydrationEditor({
 }: {
   readonly gate: HydrationGate;
   readonly snapshot: Parameters<typeof useEditor>[0]["snapshot"];
-  readonly onConstructed: (editor: Editor) => void;
-  readonly onCommitted?: (editor: Editor) => void;
+  readonly onConstructed: (editor: TestEditableEditor) => void;
+  readonly onCommitted?: (editor: TestEditableEditor) => void;
   readonly onAutofocus?: () => void;
 }) {
   const editor = useEditor({
@@ -202,9 +203,9 @@ function CommittedEditor({
   onCommitted,
   onAutofocus,
 }: {
-  readonly editor: Editor;
+  readonly editor: TestEditableEditor;
   readonly gate: HydrationGate;
-  readonly onCommitted?: (editor: Editor) => void;
+  readonly onCommitted?: (editor: TestEditableEditor) => void;
   readonly onAutofocus?: () => void;
 }) {
   gate.read();
@@ -241,6 +242,15 @@ function createHydrationGate(initiallyResolved: boolean): HydrationGate {
   };
 }
 
-function distinctEditors(editors: readonly Editor[]): readonly Editor[] {
+function distinctEditors(
+  editors: readonly TestEditableEditor[],
+): readonly TestEditableEditor[] {
   return [...new Set(editors)];
+}
+
+function requireCommittedEditor(
+  editor: TestEditableEditor | null,
+): TestEditableEditor {
+  if (!editor) throw new Error("hydration did not commit");
+  return editor;
 }

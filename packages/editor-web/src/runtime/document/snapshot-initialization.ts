@@ -4,16 +4,15 @@ import {
   type ValidatedEditorInstanceSnapshot,
 } from "@repo/editor-core/codecs";
 import {
+  blocksHaveEqualCanonicalState,
   getCanonicalBlockOrder,
   type Block,
   type BlockType,
   type VersionedBlock,
 } from "@repo/editor-core/document";
-import { jsonValuesEqual, type BlockId } from "@repo/editor-core/kernel";
+import type { BlockId } from "@repo/editor-core/kernel";
 import { validateStructuralDocument } from "@repo/editor-core/editing";
-import type {
-  EditorContentRuntimeSource,
-} from "../content/content-runtime.ts";
+import type { EditorContentRuntimeSource } from "@repo/editor-core/content";
 import { validateEditorInlineAtomOccurrence } from "../definition/inline-atoms.ts";
 import type { EditorDefinition } from "../definition/contracts.ts";
 import type { CompiledCanonicalEditorDefinition } from "../definition/compiled-editor-definition.ts";
@@ -24,7 +23,9 @@ export function createEditorContentStartup(
   validatedSnapshot?: ValidatedEditorInstanceSnapshot,
 ): EditorContentRuntimeSource {
   if (validatedSnapshot && validatedSnapshot.snapshot !== snapshot) {
-    throw new Error("Validated editor snapshot evidence does not match its snapshot");
+    throw new Error(
+      "Validated editor snapshot evidence does not match its snapshot",
+    );
   }
   return {
     blockDefinitions: definition.blocks,
@@ -52,7 +53,7 @@ export function materializeVersionedEditorBlocks(
       const previous = previousBlocks[blockId as BlockId];
       const unchanged =
         previous !== undefined &&
-        blocksMatchRecoveredVisibleState(previous, block);
+        blocksHaveEqualCanonicalState(previous, block);
       return [
         blockId,
         {
@@ -107,19 +108,6 @@ export function assertValidEditorSnapshotForStartupOrRecovery(
   }
   assertSnapshotInlineAtomsSupported(snapshot, compiledDefinition);
   assertSnapshotInlineMarksSupported(snapshot, definition);
-}
-
-function blocksMatchRecoveredVisibleState(
-  previous: VersionedBlock,
-  next: Block,
-): boolean {
-  return (
-    previous.id === next.id &&
-    previous.type === next.type &&
-    previous.parentId === next.parentId &&
-    jsonValuesEqual(previous.metadata ?? {}, next.metadata ?? {}) &&
-    jsonValuesEqual(previous.tombstone, next.tombstone)
-  );
 }
 
 function blockTypesForSnapshot(
@@ -185,7 +173,11 @@ function validateSnapshotInlineAtoms(
         entry.type !== "text" &&
         entry.type !== "hard_break"
       ) {
-        validateEditorInlineAtomOccurrence(compiledDefinition, entry, childLabel);
+        validateEditorInlineAtomOccurrence(
+          compiledDefinition,
+          entry,
+          childLabel,
+        );
       }
       validateSnapshotInlineAtoms(entry, compiledDefinition, childLabel);
     });

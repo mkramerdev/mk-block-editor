@@ -63,10 +63,9 @@ export function createYjsRelativeTextPointCodec(
       // contains surrogate pairs. Most typing is at the end of ordinary BMP
       // text, so avoid materializing and scanning the complete Yjs delta.
       const value = text.toString();
-      const index =
-        !hasHighSurrogate(value)
-          ? point.offset
-          : canonicalOffsetToYjsIndexFromText(value, point.offset);
+      const index = !hasHighSurrogate(value)
+        ? point.offset
+        : canonicalOffsetToYjsIndexFromText(value, point.offset);
       if (index === null)
         return { ok: false, reason: "unmapped-position", point };
       return {

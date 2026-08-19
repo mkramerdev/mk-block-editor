@@ -10,11 +10,10 @@ import type { BlockLocalDocumentMappingOptions } from "../../schema/block-local/
 import type { BlockLocalDomPluginOptions } from "./plugin-options.ts";
 import type { ProseMirrorProposalAdapter } from "../transactions/proposal.ts";
 
-export interface CreateBlockLocalProseMirrorViewOptions
-  extends Omit<
-    DirectEditorProps,
-    "state" | "dispatchTransaction" | "nodeViews" | "attributes"
-  > {
+export interface CreateBlockLocalProseMirrorViewOptions extends Omit<
+  DirectEditorProps,
+  "state" | "dispatchTransaction" | "nodeViews" | "attributes"
+> {
   mount: HTMLElement;
   blockId: BlockId;
   blockType: BlockType;

@@ -180,7 +180,8 @@ export class SharedTextEditor {
       !wasFocused && !canonicalRange
         ? projectActivationNativeCaret(view.dom, obligation)
         : { status: "rejected" as const };
-    if (!wasFocused) view.dom.focus({ preventScroll: obligation.preventScroll });
+    if (!wasFocused)
+      view.dom.focus({ preventScroll: obligation.preventScroll });
     if (
       projectedBeforeFocus.status === "projected" &&
       view.dom.ownerDocument.activeElement === view.dom &&
@@ -437,7 +438,10 @@ export class SharedTextEditor {
     } else {
       this.view.setProps(createBlockLocalProseMirrorViewProps(options));
     }
-    if (active.captureBeforeInput && active.beforeInputTarget !== this.view.dom) {
+    if (
+      active.captureBeforeInput &&
+      active.beforeInputTarget !== this.view.dom
+    ) {
       if (active.beforeInputTarget) {
         active.beforeInputTarget.removeEventListener(
           "beforeinput",
@@ -589,8 +593,8 @@ function nativeSelectionMatches(
   const selection = document.getSelection();
   return Boolean(
     selection?.isCollapsed &&
-      selection.focusNode === point.node &&
-      selection.focusOffset === point.offset,
+    selection.focusNode === point.node &&
+    selection.focusOffset === point.offset,
   );
 }
 

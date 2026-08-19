@@ -28,9 +28,7 @@ export {
   validateRichTextInlineNodeJson,
   validateRichTextMarkJson,
 } from "../content/rich-text/rich-inline-content.ts";
-export type {
-  RichInlineContentNormalizationOptions,
-} from "../content/rich-text/rich-inline-content.ts";
+export type { RichInlineContentNormalizationOptions } from "../content/rich-text/rich-inline-content.ts";
 export type {
   RichTextAttrsJson,
   RichTextAtomNodeJson,

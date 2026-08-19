@@ -7,10 +7,16 @@ import { findAdjacentValidInsertionPlacement } from "./navigation.ts";
 
 const renderer = () => null;
 const definitions: Readonly<Record<BlockType, BlockDefinition>> = {
-  textLeaf: { kind: "text", type: "textLeaf", renderer },
-  atomLeaf: { kind: "atomic", type: "atomLeaf", renderer },
+  textLeaf: { kind: "text", rootLayout: "normal", type: "textLeaf", renderer },
+  atomLeaf: {
+    kind: "atomic",
+    rootLayout: "normal",
+    type: "atomLeaf",
+    renderer,
+  },
   flowShell: {
     kind: "wrapper",
+    rootLayout: "normal",
     type: "flowShell",
     renderer,
     content: { required: ["block"], additional: "block" },
@@ -19,6 +25,7 @@ const definitions: Readonly<Record<BlockType, BlockDefinition>> = {
   },
   singleShell: {
     kind: "wrapper",
+    rootLayout: "normal",
     type: "singleShell",
     renderer,
     content: { required: ["textLeaf"] },
@@ -26,6 +33,7 @@ const definitions: Readonly<Record<BlockType, BlockDefinition>> = {
   },
   bodyShell: {
     kind: "wrapper",
+    rootLayout: "normal",
     type: "bodyShell",
     renderer,
     content: { required: ["block"], additional: "block" },
@@ -34,6 +42,7 @@ const definitions: Readonly<Record<BlockType, BlockDefinition>> = {
   },
   compoundShell: {
     kind: "wrapper",
+    rootLayout: "normal",
     type: "compoundShell",
     renderer,
     content: { required: ["textLeaf", "bodyShell"] },
@@ -41,6 +50,7 @@ const definitions: Readonly<Record<BlockType, BlockDefinition>> = {
   },
   innerShell: {
     kind: "wrapper",
+    rootLayout: "normal",
     type: "innerShell",
     renderer,
     content: { required: ["textLeaf"] },
@@ -48,6 +58,7 @@ const definitions: Readonly<Record<BlockType, BlockDefinition>> = {
   },
   outerShell: {
     kind: "wrapper",
+    rootLayout: "normal",
     type: "outerShell",
     renderer,
     content: { required: ["innerShell"] },
@@ -55,6 +66,7 @@ const definitions: Readonly<Record<BlockType, BlockDefinition>> = {
   },
   boundaryShell: {
     kind: "wrapper",
+    rootLayout: "normal",
     type: "boundaryShell",
     renderer,
     content: { required: ["innerShell"] },
@@ -62,6 +74,7 @@ const definitions: Readonly<Record<BlockType, BlockDefinition>> = {
   },
   boundaryFlow: {
     kind: "wrapper",
+    rootLayout: "normal",
     type: "boundaryFlow",
     renderer,
     content: { required: ["block"], additional: "block" },

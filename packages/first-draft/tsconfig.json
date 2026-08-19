@@ -18,6 +18,7 @@
   "exclude": [
     "node_modules",
     "dist",
+    "src/test-editor.ts",
     "src/**/*.test.ts",
     "src/**/*.test.tsx"
   ]

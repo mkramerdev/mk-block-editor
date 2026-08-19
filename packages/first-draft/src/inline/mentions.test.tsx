@@ -6,7 +6,7 @@ describe("First Draft mention renderer", () => {
   afterEach(cleanup);
 
   it("resolves a known stable ID through the current people catalog", () => {
-    render(firstDraftMentionDefinition.render({ id: "person-001" }, {} as never));
+    render(firstDraftMentionDefinition.render({ id: "person-001" }));
     const mention = screen.getByLabelText("person mention Maya Chen");
     expect(mention.textContent).toBe("@Maya Chen");
     expect(mention.getAttribute("data-mention-id")).toBe("person-001");
@@ -14,10 +14,9 @@ describe("First Draft mention renderer", () => {
 
   it("renders unknown IDs with an explicit safe fallback", () => {
     render(
-      firstDraftMentionDefinition.render(
-        { id: "<img src=x onerror=alert(1)>" },
-        {} as never,
-      ),
+      firstDraftMentionDefinition.render({
+        id: "<img src=x onerror=alert(1)>",
+      }),
     );
     const mention = screen.getByLabelText("person mention Unknown person");
     expect(mention.textContent).toBe("@Unknown person");

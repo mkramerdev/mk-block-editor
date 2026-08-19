@@ -20,9 +20,6 @@ importers:
 
   apps/playground:
     dependencies:
-      '@repo/ui':
-        specifier: workspace:*
-        version: link:../../packages/ui
       next:
         specifier: 16.3.0
         version: 16.3.0(@types/node@22.15.3)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
@@ -63,9 +60,6 @@ importers:
       '@repo/editor-web':
         specifier: workspace:*
         version: link:../../packages/editor-web
-      '@repo/ui':
-        specifier: workspace:*
-        version: link:../../packages/ui
       react:
         specifier: ^19.2.0
         version: 19.2.0
@@ -444,37 +438,6 @@ importers:
         version: 4.1.10(@types/node@22.15.3)(@vitest/coverage-v8@4.1.10)(jsdom@27.4.0(supports-color@7.2.0))(vite@8.2.1(@types/node@22.15.3)(esbuild@0.28.2)(tsx@4.23.12))
 
   packages/typescript-config: {}
-
-  packages/ui:
-    dependencies:
-      react:
-        specifier: ^19.2.0
-        version: 19.2.0
-      react-dom:
-        specifier: ^19.2.0
-        version: 19.2.0(react@19.2.0)
-    devDependencies:
-      '@repo/eslint-config':
-        specifier: workspace:*
-        version: link:../eslint-config
-      '@repo/typescript-config':
-        specifier: workspace:*
-        version: link:../typescript-config
-      '@types/node':
-        specifier: ^22.15.3
-        version: 22.15.3
-      '@types/react':
-        specifier: 19.2.2
-        version: 19.2.2
-      '@types/react-dom':
-        specifier: 19.2.2
-        version: 19.2.2(@types/react@19.2.2)
-      eslint:
-        specifier: ^9.39.1
-        version: 9.39.1(supports-color@7.2.0)
-      typescript:
-        specifier: 5.9.2
-        version: 5.9.2
 
   services/editor-realtime:
     dependencies:

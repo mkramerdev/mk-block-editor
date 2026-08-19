@@ -10,7 +10,7 @@ import type {
   EditorContentDataReconciliation,
   EditorContentRuntimeSource,
   EditorRawBlockContent,
-} from "../../runtime/content/content-runtime.ts";
+} from "@repo/editor-core/content";
 
 export function readSourceBlockTypes(
   source: EditorContentRuntimeSource,
@@ -44,9 +44,7 @@ export function defaultContentForBlockType(
   return createBlockRichTextContentFromPlainText(blockType, "");
 }
 
-export function plainTextForContent(
-  content: EditorRawBlockContent,
-): string {
+export function plainTextForContent(content: EditorRawBlockContent): string {
   return isRichTextDocument(content)
     ? extractPlainTextFromRichTextDocument(content)
     : "";

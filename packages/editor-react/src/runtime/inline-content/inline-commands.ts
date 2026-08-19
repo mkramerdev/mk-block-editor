@@ -1,7 +1,8 @@
 import type {
   InlineMarkDefinition,
   InlineMarkName,
-} from "@repo/editor-core/content/marks";import type {
+} from "@repo/editor-core/content/marks";
+import type {
   InlineMarkCommandAction,
   InlineMarkCommandReason,
   InlineMarkCommandState,
@@ -15,13 +16,18 @@ export interface EditorInlineMarkCommandOptions {
   focus?: boolean;
 }
 
-export type EditorInlineCommandAvailability = "available" | "unavailable" | "partial";
+export type EditorInlineCommandAvailability =
+  | "available"
+  | "unavailable"
+  | "partial";
 
 export type EditorInlineMarkCommandState = InlineMarkCommandState & {
   availability: EditorInlineCommandAvailability;
 };
 
-export type EditorInlineMarkCommandStateMap = Readonly<Partial<Record<InlineMarkName, EditorInlineMarkCommandState>>>;
+export type EditorInlineMarkCommandStateMap = Readonly<
+  Partial<Record<InlineMarkName, EditorInlineMarkCommandState>>
+>;
 
 export type EditorInlineCommandId = string;
 
@@ -34,7 +40,10 @@ export interface EditorInlineCommandDescriptor {
   valueKind: InlineMarkDefinition["valueKind"];
 }
 
-export type EditorInlineCommandStateMap = Record<EditorInlineCommandId, EditorInlineMarkCommandState>;
+export type EditorInlineCommandStateMap = Record<
+  EditorInlineCommandId,
+  EditorInlineMarkCommandState
+>;
 
 export function createEditorInlineCommandDescriptors(
   inlineMarks: readonly InlineMarkDefinition[],
@@ -51,7 +60,11 @@ export function getEditorInlineCommandDescriptor(
   inlineMarks: readonly InlineMarkDefinition[],
   commandId: string,
 ): EditorInlineCommandDescriptor | null {
-  return createEditorInlineCommandDescriptors(inlineMarks).find((definition) => definition.id === commandId) ?? null;
+  return (
+    createEditorInlineCommandDescriptors(inlineMarks).find(
+      (definition) => definition.id === commandId,
+    ) ?? null
+  );
 }
 
 export function unavailableInlineMarkCommandState(
@@ -77,8 +90,15 @@ export function unavailableInlineMarkCommandStateMap(
   reason: InlineMarkCommandReason,
   availability: EditorInlineCommandAvailability = "unavailable",
 ): EditorInlineMarkCommandStateMap {
-  return Object.fromEntries(inlineMarks.map((definition) => [
-    definition.name,
-    unavailableInlineMarkCommandState(definition.name, definition.command.id, reason, availability),
-  ]));
+  return Object.fromEntries(
+    inlineMarks.map((definition) => [
+      definition.name,
+      unavailableInlineMarkCommandState(
+        definition.name,
+        definition.command.id,
+        reason,
+        availability,
+      ),
+    ]),
+  );
 }

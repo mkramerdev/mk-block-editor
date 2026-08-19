@@ -17,8 +17,10 @@ describe("editor store ownership split", () => {
   });
 
   it("contains no native-focus or semantic-selection state", () => {
-    const store = createEditorExternalStore(createInitialEditorSessionState({}));
-    const snapshot = store.getSnapshot() as Record<string, unknown>;
+    const store = createEditorExternalStore(
+      createInitialEditorSessionState({}),
+    );
+    const snapshot = store.getSnapshot();
 
     expect(snapshot).not.toHaveProperty(["native", "Focus"].join(""));
     expect(snapshot).not.toHaveProperty(["canonical", "Selection"].join(""));

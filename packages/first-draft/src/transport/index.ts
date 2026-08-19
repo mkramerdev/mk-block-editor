@@ -36,16 +36,17 @@ export {
   type SubscribeFirstDraftDocumentMessage,
   type UnsubscribeFirstDraftDocumentMessage,
 } from "./message-protocol.ts";
-export {
-  convertEditorTransactionToTransport,
-} from "./editor-transaction-to-transport.ts";
+export { convertEditorTransactionToTransport } from "./editor-transaction-to-transport.ts";
 export type {
   EditorTransportBlockGraphChange,
   EditorTransportBlockPlacement,
   EditorTransportContentUpdate,
   EditorTransportTransaction,
 } from "./transport-types.ts";
-export { handleTransaction, type EditorTransactionWebSocket } from "./handle-transaction.ts";
+export {
+  handleTransaction,
+  type EditorTransactionWebSocket,
+} from "./handle-transaction.ts";
 export {
   attachFirstDraftRemoteTransactions,
   type FirstDraftRemoteTransactionClientOptions,

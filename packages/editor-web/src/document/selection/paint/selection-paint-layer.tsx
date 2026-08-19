@@ -12,13 +12,17 @@ import {
 import type { BlockId } from "@repo/editor-core/kernel";
 import {
   normalizeNewSelection,
+  type EditorSelectionGraphReader,
   type LocalSelectionPaintModel,
 } from "@repo/editor-react/selection";
 import type {
   AdditionalSelectionRecord,
   CollaborationSubjectKey,
 } from "../../../runtime/collaboration/contracts.ts";
-import type { Editor } from "../../../runtime/document/contracts.ts";
+import type {
+  EditableEditor,
+  ReadEditor,
+} from "../../../runtime/document/contracts.ts";
 import type {
   EditorDocumentGeometryReader,
   EditorDocumentRect,
@@ -32,9 +36,21 @@ import {
 } from "./selection-paint-plan.ts";
 
 export interface SelectionPaintLayerProps {
-  readonly editor: Editor;
+  readonly editor: SelectionPaintEditor;
   readonly transientPointerPaint?: TransientPointerSelectionPaint | null;
 }
+
+export type SelectionPaintEditor =
+  | Pick<ReadEditor, "editable" | "selection" | "selectionPaint" | "geometry">
+  | (Pick<
+      EditableEditor,
+      | "editable"
+      | "selection"
+      | "selectionPaint"
+      | "geometry"
+      | "additionalSelections"
+    > &
+      EditorSelectionGraphReader);
 
 /** Web-local derivative paint; it contains no logical or stable selection. */
 export interface TransientPointerSelectionPaint {
@@ -248,7 +264,7 @@ function SelectionPaintBand({
 function createSelectionPaintModel(
   localPaint: LocalSelectionPaintModel,
   additionalSelections: readonly AdditionalSelectionRecord[],
-  editor: Editor,
+  editor: SelectionPaintEditor,
   transientPointerPaint: TransientPointerSelectionPaint | null,
 ): {
   readonly subjects: readonly SelectionPaintSubject[];
@@ -279,6 +295,7 @@ function createSelectionPaintModel(
     });
   }
   for (const record of additionalSelections) {
+    if (!editor.editable) continue;
     if (!record.active || record.resolution !== "resolved") continue;
     const selection = record.resolvedSelection;
     if (!selection || selection.kind !== "document") continue;

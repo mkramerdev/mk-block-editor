@@ -10,6 +10,12 @@ import {
 import type { BlockType } from "@repo/editor-core/document";
 import { assertValidBlockGraphVersion } from "@repo/editor-core/document";
 import type { BlockId } from "@repo/editor-core/kernel";
+import type {
+  EditorBlockContentLease,
+  EditorContentRuntimeSource,
+  EditorContentStoreSlot,
+  EditorRawBlockContent,
+} from "@repo/editor-core/content";
 import { jsonValuesEqual } from "@repo/editor-core/kernel";
 import type { EditorLogicalContentOperation } from "@repo/editor-core/operations";
 import {
@@ -51,14 +57,9 @@ import {
   type PreparedLogicalContentTransition,
 } from "@repo/editor-core/operations";
 import { createYjsRelativeTextPointCodec } from "../../text-points/relative-text-point-codec.ts";
-import {
-  readYjsBlockContentDocument,
-} from "../projection/block-content-mapping.ts";
+import { readYjsBlockContentDocument } from "../projection/block-content-mapping.ts";
 import { ensureYjsBlockContent } from "../seed/ensure-yjs-block-content.ts";
 import type {
-  EditorContentRuntimeSource,
-  EditorContentStoreSlot,
-  EditorRawBlockContent,
   YjsBlockContentRuntime,
   BlockContentLease,
 } from "./runtime-types.ts";
@@ -179,7 +180,10 @@ export function createYjsBlockContentRuntime(
   const validatedStates = new WeakMap<ValidatedContentCommit, ValidatedState>();
   const appliedStates = new WeakMap<AppliedContentCommit, AppliedState>();
   const permittedInternalOrigins = new WeakSet<object>();
-  const activeLeases = new WeakSet<BlockContentLease>();
+  const leaseContexts = new WeakMap<
+    EditorBlockContentLease,
+    BlockContentDocContext
+  >();
   permittedInternalOrigins.add(HYDRATION_ORIGIN);
 
   for (const [blockId, blockType] of readSourceBlockTypes(source)) {
@@ -194,9 +198,14 @@ export function createYjsBlockContentRuntime(
       continue;
     }
     if (!checkpoint || projection === undefined) {
-      throw new Error(`Text block ${blockId} requires projection and checkpoint`);
+      throw new Error(
+        `Text block ${blockId} requires projection and checkpoint`,
+      );
     }
-    blocks.set(blockId, createOpaqueBlockState(blockId, blockType, checkpoint, projection));
+    blocks.set(
+      blockId,
+      createOpaqueBlockState(blockId, blockType, checkpoint, projection),
+    );
   }
 
   const runtime: YjsBlockContentRuntime = {
@@ -215,11 +224,12 @@ export function createYjsBlockContentRuntime(
         release() {
           if (released) return;
           released = true;
+          leaseContexts.delete(lease);
           state.leaseCount -= 1;
           if (state.leaseCount === 0) state.releaseContext();
         },
       });
-      activeLeases.add(lease);
+      leaseContexts.set(lease, context);
       return lease;
     },
     readOpaqueBlockState(blockId) {
@@ -259,7 +269,9 @@ export function createYjsBlockContentRuntime(
           continue;
         }
         if (!checkpoint || projection === undefined) {
-          throw new Error(`Text block ${blockId} requires projection and checkpoint`);
+          throw new Error(
+            `Text block ${blockId} requires projection and checkpoint`,
+          );
         }
         const nextProjection = projection;
         const current = blocks.get(blockId);
@@ -276,7 +288,10 @@ export function createYjsBlockContentRuntime(
           continue;
         }
         const before = current.projectionSnapshot;
-        if (current.blockType === blockType && contentEqual(before, nextProjection)) {
+        if (
+          current.blockType === blockType &&
+          contentEqual(before, nextProjection)
+        ) {
           current.opaqueCheckpoint = checkpoint;
           continue;
         }
@@ -305,11 +320,16 @@ export function createYjsBlockContentRuntime(
         input.update,
       );
       if (context) {
-        const origin = typeof input.origin === "object" && input.origin
-          ? input.origin
-          : HYDRATION_ORIGIN;
+        const origin =
+          typeof input.origin === "object" && input.origin
+            ? input.origin
+            : HYDRATION_ORIGIN;
         permittedInternalOrigins.add(origin);
-        applyYjsBlockContentUpdate(context, input.update.payload.copy(), origin);
+        applyYjsBlockContentUpdate(
+          context,
+          input.update.payload.copy(),
+          origin,
+        );
       }
       state.opaqueCheckpoint = nextCheckpoint;
       state.acceptedRevision = input.revision;
@@ -392,7 +412,7 @@ export function createYjsBlockContentRuntime(
               blockType,
               baseToken: change.baseToken,
               before: live.projectionSnapshot,
-               after: ownProjection(prepared.content),
+              after: ownProjection(prepared.content),
               mutationEpoch: live.mutationEpoch,
               contentOperations: prepared.operations,
               inverseContentOperations: prepared.inverseOperations,
@@ -523,7 +543,7 @@ export function createYjsBlockContentRuntime(
         const before = live
           ? live.projectionSnapshot
           : defaultProjection(baseToken.blockType);
-         const after = ownProjection(working.get(blockId)!);
+        const after = ownProjection(working.get(blockId)!);
         if (!introduced && before === after) continue;
         const preparedOperations = preparedOperationsByBlock.get(blockId);
         const contentOperations = preparedOperations?.operations ?? [];
@@ -678,16 +698,17 @@ export function createYjsBlockContentRuntime(
           assertOperationEnvelope(proposal.update);
           const live = blocks.get(blockId);
           const liveContext = live?.peekContext() ?? null;
-          const currentUpdate = live && !liveContext
-            ? decodeOpaqueCheckpoint(live.opaqueCheckpoint)
-            : new Uint8Array();
+          const currentUpdate =
+            live && !liveContext
+              ? decodeOpaqueCheckpoint(live.opaqueCheckpoint)
+              : new Uint8Array();
           const missingUpdate = diffUpdate(
             proposal.update.payload.copy(),
             liveContext
               ? encodeStateVector(liveContext.doc)
               : currentUpdate.byteLength > 0
-              ? encodeStateVectorFromUpdate(currentUpdate)
-              : new Uint8Array([0]),
+                ? encodeStateVectorFromUpdate(currentUpdate)
+                : new Uint8Array([0]),
           );
           if (missingUpdate.byteLength <= 2) {
             return rejection(
@@ -824,9 +845,7 @@ export function createYjsBlockContentRuntime(
       }
       const changed = state.blocks.find((block) => block.blockId === blockId);
       if (changed) {
-        return changed.blockType === blockType
-          ? changed.after
-          : null;
+        return changed.blockType === blockType ? changed.after : null;
       }
       return runtime.readBlockProjection(blockId, blockType);
     },
@@ -933,9 +952,10 @@ export function createYjsBlockContentRuntime(
               }
             }, origin);
           }
-          const nextProjection = block.remoteUpdate && live.peekContext()
-            ? readAppliedRemoteProjection(live)
-            : block.after;
+          const nextProjection =
+            block.remoteUpdate && live.peekContext()
+              ? readAppliedRemoteProjection(live)
+              : block.after;
           const captured = mergeCapturedUpdates(block.blockId);
           const operationUpdate = block.remoteUpdate
             ? ownOperationUpdate(block.remoteUpdate)
@@ -1013,7 +1033,11 @@ export function createYjsBlockContentRuntime(
       // Removed content has no projection phase. Its mounted view is released
       // by the finalized graph-removal notification exactly once.
       for (const block of [...applied.blocks].sort((left, right) =>
-        left.blockId < right.blockId ? -1 : left.blockId > right.blockId ? 1 : 0,
+        left.blockId < right.blockId
+          ? -1
+          : left.blockId > right.blockId
+            ? 1
+            : 0,
       )) {
         notifyBlock(block.blockId, applied);
       }
@@ -1058,8 +1082,8 @@ export function createYjsBlockContentRuntime(
     },
     createTextAnchorInContext(lease, input) {
       try {
-        assertOwnedLease(lease);
-        return createAnchorInContext(lease.context, lease.blockId, input);
+        const context = requireOwnedLeaseContext(lease);
+        return createAnchorInContext(context, lease.blockId, input);
       } catch (error) {
         return {
           ok: false,
@@ -1084,8 +1108,8 @@ export function createYjsBlockContentRuntime(
         return { ok: false, reason: "invalid" };
       }
       try {
-        assertOwnedLease(lease);
-        const decoded = createYjsRelativeTextPointCodec(lease.context).decode({
+        const context = requireOwnedLeaseContext(lease);
+        const decoded = createYjsRelativeTextPointCodec(context).decode({
           blockId: lease.blockId,
           offset: 0,
           relative: input.payload,
@@ -1277,7 +1301,9 @@ export function createYjsBlockContentRuntime(
         if (context) return context;
         const doc = new Doc();
         try {
-          const decodedCheckpoint = decodeOpaqueCheckpoint(state.opaqueCheckpoint);
+          const decodedCheckpoint = decodeOpaqueCheckpoint(
+            state.opaqueCheckpoint,
+          );
           applyUpdate(doc, decodedCheckpoint, HYDRATION_ORIGIN);
           context = createBlockContentDocContext({
             blockId,
@@ -1320,8 +1346,11 @@ export function createYjsBlockContentRuntime(
     return state;
   }
 
-  function assertOwnedLease(lease: BlockContentLease): void {
-    if (!activeLeases.has(lease)) {
+  function requireOwnedLeaseContext(
+    lease: EditorBlockContentLease,
+  ): BlockContentDocContext {
+    const context = leaseContexts.get(lease);
+    if (!context) {
       throw new Error("Block content lease is not owned by this runtime");
     }
     const state = blocks.get(lease.blockId);
@@ -1329,16 +1358,22 @@ export function createYjsBlockContentRuntime(
       !state ||
       state.blockType !== lease.blockType ||
       state.leaseCount < 1 ||
-      state.peekContext() !== lease.context
+      state.peekContext() !== context
     ) {
-      throw new Error(`Block content lease for ${lease.blockId} is no longer active`);
+      throw new Error(
+        `Block content lease for ${lease.blockId} is no longer active`,
+      );
     }
+    return context;
   }
 
   function createAnchorInContext(
     context: BlockContentDocContext,
     blockId: BlockId,
-    input: { readonly textOffset: number; readonly affinity: "forward" | "backward" | null },
+    input: {
+      readonly textOffset: number;
+      readonly affinity: "forward" | "backward" | null;
+    },
   ) {
     const encoded = createYjsRelativeTextPointCodec(context).encode(
       { blockId, offset: input.textOffset },
@@ -1354,7 +1389,9 @@ export function createYjsBlockContentRuntime(
       : { ok: false as const, reason: "invalid" as const };
   }
 
-  function readAppliedRemoteProjection(live: BlockState): EditorRawBlockContent {
+  function readAppliedRemoteProjection(
+    live: BlockState,
+  ): EditorRawBlockContent {
     // A live block may already contain an unaccepted local change. Applying an
     // accepted concurrent peer update therefore legitimately produces a state
     // beyond the server's projection at that accepted revision. The inactive
@@ -1423,10 +1460,10 @@ export function createYjsBlockContentRuntime(
       const active = activeCommit;
       return Boolean(
         active &&
-          ((typeof origin === "object" &&
-            origin !== null &&
-            active.origins.has(origin)) ||
-            (origin === null && active.updatesByBlockId.has(blockId))),
+        ((typeof origin === "object" &&
+          origin !== null &&
+          active.origins.has(origin)) ||
+          (origin === null && active.updatesByBlockId.has(blockId))),
       );
     };
     const beforeTransaction = (transaction: { readonly origin: unknown }) => {
@@ -1621,12 +1658,13 @@ function notifyProjectionSubscriber(listener: () => void): void {
   }
 }
 
-export const yjsBlockContentStore: EditorContentStoreSlot = {
-  format: EDITOR_YJS_CONTENT_FORMAT,
-  createRuntime({ source }) {
-    return createYjsBlockContentRuntime(source);
-  },
-};
+export const yjsBlockContentStore: EditorContentStoreSlot<YjsBlockContentRuntime> =
+  {
+    format: EDITOR_YJS_CONTENT_FORMAT,
+    createRuntime({ source }) {
+      return createYjsBlockContentRuntime(source);
+    },
+  };
 
 function readSourceBlockTypes(
   source: EditorContentRuntimeSource,

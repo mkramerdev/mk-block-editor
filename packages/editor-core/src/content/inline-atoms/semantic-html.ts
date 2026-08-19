@@ -2,8 +2,7 @@ import type { JsonObject } from "../../kernel/json/json-value.ts";
 import { validateAndCloneInlineAtomMetadata } from "./schema.ts";
 import type { InlineMetadataFieldDefinition } from "./types.ts";
 
-export const INLINE_ATOM_SEMANTIC_HTML_ATTRIBUTE =
-  "data-editor-inline-atom";
+export const INLINE_ATOM_SEMANTIC_HTML_ATTRIBUTE = "data-editor-inline-atom";
 
 interface InlineAtomSemanticHtmlEnvelope {
   readonly version: 1;
@@ -34,14 +33,16 @@ export function parseInlineAtomSemanticHtmlEnvelope(input: {
   readonly payload: string;
   readonly definitions: readonly {
     readonly type: string;
-    readonly metadata: Readonly<
-      Record<string, InlineMetadataFieldDefinition>
-    >;
+    readonly metadata: Readonly<Record<string, InlineMetadataFieldDefinition>>;
   }[];
 }): { readonly type: string; readonly metadata: JsonObject } | null {
   try {
     const value = JSON.parse(decodeURIComponent(input.payload)) as unknown;
-    if (!isRecord(value) || value.version !== 1 || typeof value.type !== "string")
+    if (
+      !isRecord(value) ||
+      value.version !== 1 ||
+      typeof value.type !== "string"
+    )
       return null;
     const definition = input.definitions.find(
       (candidate) => candidate.type === value.type,

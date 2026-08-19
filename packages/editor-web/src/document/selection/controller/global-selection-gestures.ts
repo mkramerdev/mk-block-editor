@@ -29,8 +29,8 @@ import {
 } from "@repo/editor-react/selection";
 import type {
   EditorBlockContentLease,
-  EditorWebContentRuntime,
-} from "../../../runtime/content/content-runtime.ts";
+  EditorContentRuntime,
+} from "@repo/editor-core/content";
 import type { AnyEditorRuntimePort } from "../../../runtime/document/render-port.ts";
 import type { EditorDocumentLayerKeyboardDispatcher } from "../../../runtime/document/document-layer-interactions.ts";
 import { createEditorDocumentInputRouting } from "../../../runtime/keybindings/document-input-routing.ts";
@@ -105,7 +105,7 @@ export interface UseGlobalSelectionGesturesOptions {
   readonly listElement: HTMLElement | null;
   readonly blockDom: EditorBlockDomRegistryReader;
   readonly editor: AnyEditorRuntimePort;
-  readonly contentRuntime: EditorWebContentRuntime;
+  readonly contentRuntime: EditorContentRuntime;
   readonly selectionController: SelectionController;
   readonly captureStructuralSelection: CaptureStructuralSelection;
   readonly documentLayerKeyboard: EditorDocumentLayerKeyboardDispatcher;
@@ -1049,7 +1049,7 @@ function pointerEventPathMatches(event: Event, selector: string): boolean {
 function materializeSelectionDragSnapshot(
   resource: BrowserPointerResource,
   editor: AnyEditorRuntimePort,
-  contentRuntime: EditorWebContentRuntime,
+  contentRuntime: EditorContentRuntime,
 ): EditorSelectionDragSnapshot | null {
   const points = materializePointerSettlement(resource, editor, contentRuntime);
   if (!points) return null;
@@ -1070,7 +1070,7 @@ function materializeSelectionDragSnapshot(
 }
 
 function readCanonicalKeyboardNavigationText(
-  contentRuntime: EditorWebContentRuntime,
+  contentRuntime: EditorContentRuntime,
   blockId: BlockId,
   blockType: BlockType,
 ): string | null {
@@ -1178,7 +1178,7 @@ function sameLogicalSelectionPoint(
 function createKeyboardSelectionPoint(
   list: HTMLElement,
   editor: AnyEditorRuntimePort,
-  contentRuntime: EditorWebContentRuntime,
+  contentRuntime: EditorContentRuntime,
   target: EditorBlockSelectionTarget,
   textOffset: number,
   affinity: EditorLogicalSelectionPoint["affinity"],
@@ -1236,7 +1236,7 @@ function normalizeMountedTextAffinity(
 function resolveCanonicalSelectAllRange(
   list: HTMLElement,
   editor: AnyEditorRuntimePort,
-  contentRuntime: EditorWebContentRuntime,
+  contentRuntime: EditorContentRuntime,
   leases: EditorBlockContentLease[],
 ): {
   readonly anchor: EditorLogicalSelectionPoint;
@@ -1513,7 +1513,7 @@ function pointerCandidateFromHit(
 function materializePointerSettlement(
   resource: BrowserPointerResource,
   editor: AnyEditorRuntimePort,
-  contentRuntime: EditorWebContentRuntime,
+  contentRuntime: EditorContentRuntime,
 ): {
   readonly direction: "forward" | "backward";
   readonly anchor: EditorLogicalSelectionPoint;
@@ -1564,7 +1564,7 @@ function materializePointerSettlement(
 function materializePointerCandidate(
   candidate: PointerSelectionCandidate,
   editor: AnyEditorRuntimePort,
-  contentRuntime: EditorWebContentRuntime,
+  contentRuntime: EditorContentRuntime,
   leases: EditorBlockContentLease[],
 ): EditorLogicalSelectionPoint | null {
   if (candidate.graphRevision !== editor.getSelectionGraphRevision())

@@ -1,11 +1,5 @@
-import {
-  validateAndCloneInlineAtomMetadata,
-} from "@repo/editor-core/content/inline-atoms";
-import type {
-  NodeView,
-  NodeViewConstructor,
-  PMNode,
-} from "@repo/editor-dom/prosemirror";
+import { validateAndCloneInlineAtomMetadata } from "@repo/editor-core/content/inline-atoms";
+import type { NodeView, PMNode } from "@repo/editor-dom/prosemirror";
 import type { InlineAtomDefinition } from "../definition/contracts.ts";
 import type {
   InlineAtomPortalRegistration,
@@ -15,14 +9,14 @@ import type {
 export function createInlineAtomNodeView(
   definition: InlineAtomDefinition,
   portals: InlineAtomPortalRegistry,
-): NodeViewConstructor {
+): (node: PMNode) => InlineAtomNodeView {
   return (node) => new PortalInlineAtomNodeView(definition, portals, node);
 }
 
 export function createInlineAtomNodeViews(
   definitions: readonly InlineAtomDefinition[],
   portals: InlineAtomPortalRegistry,
-): Readonly<Record<string, NodeViewConstructor>> {
+): Readonly<Record<string, (node: PMNode) => InlineAtomNodeView>> {
   return Object.freeze(
     Object.fromEntries(
       definitions.map((definition) => [
@@ -33,7 +27,11 @@ export function createInlineAtomNodeViews(
   );
 }
 
-class PortalInlineAtomNodeView implements NodeView {
+export interface InlineAtomNodeView extends NodeView {
+  update(nextNode: PMNode): boolean;
+}
+
+class PortalInlineAtomNodeView implements InlineAtomNodeView {
   readonly dom: HTMLElement;
   private portal: InlineAtomPortalRegistration | null = null;
   private node: PMNode;

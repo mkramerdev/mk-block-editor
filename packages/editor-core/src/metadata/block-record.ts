@@ -28,8 +28,7 @@ export function createBlockRecord(options: CreateBlockRecordOptions): Block {
   };
 }
 
-export interface CreateVersionedBlockRecordOptions
-  extends CreateBlockRecordOptions {
+export interface CreateVersionedBlockRecordOptions extends CreateBlockRecordOptions {
   readonly metadataVersion?: BlockVersionMetadata["metadataVersion"];
   readonly contentVersion?: BlockVersionMetadata["contentVersion"];
   readonly version?: Partial<BlockVersionMetadata>;

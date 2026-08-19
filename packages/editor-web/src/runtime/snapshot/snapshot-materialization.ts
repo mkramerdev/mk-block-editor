@@ -8,7 +8,7 @@ import type {
 } from "@repo/editor-core/codecs";
 import { assertValidEditorInstanceBlockSlice } from "@repo/editor-core/codecs";
 import { isRichTextDocument } from "@repo/editor-core/content/rich-text";
-import type { EditorContentRuntime } from "../content/content-runtime.ts";
+import type { EditorContentRuntime } from "@repo/editor-core/content";
 import type { EditorImplementation } from "@repo/editor-react/editor";
 
 export function createEditorBlockSliceFromEditor(

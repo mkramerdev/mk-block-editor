@@ -26,7 +26,10 @@ import {
 import type { BlockType } from "../../document/model/block.ts";
 import type { InlineTextContext } from "../rich-text/inline-attributes.ts";
 import type { InlineMarkDefinition, InlineMarkName } from "./types.ts";
-import { cloneJsonValue, jsonValuesEqual } from "../../kernel/json/json-value.ts";
+import {
+  cloneJsonValue,
+  jsonValuesEqual,
+} from "../../kernel/json/json-value.ts";
 import {
   createInlineMarkCommandStateFromRange,
   createInlineMarkCursorCommandState,

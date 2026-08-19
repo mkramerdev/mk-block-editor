@@ -9,10 +9,7 @@ import {
 } from "../boundary/canonical-navigation.ts";
 
 export type PreviousMergeTargetResult = CanonicalMergeTargetResult;
-export type {
-  CanonicalSelectionNavigationResult,
-  CanonicalNavigationInput,
-};
+export type { CanonicalSelectionNavigationResult, CanonicalNavigationInput };
 
 export function findPreviousMergeTarget(
   input: CanonicalNavigationInput,

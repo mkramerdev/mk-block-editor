@@ -23,9 +23,9 @@ export function executeCoreBlockKeyBehavior(
 ): BlockDomKeyBehaviorResult {
   if (
     input.isComposing ||
-    input.key !== "enter" &&
-    input.key !== "backspace" &&
-    input.key !== "delete"
+    (input.key !== "enter" &&
+      input.key !== "backspace" &&
+      input.key !== "delete")
   ) {
     return { ok: false, handled: false, reason: "unhandled" };
   }

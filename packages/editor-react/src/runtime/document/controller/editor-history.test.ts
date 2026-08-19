@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import type { BlockDefinition } from "@repo/editor-core/definitions";
 import type { BlockType } from "@repo/editor-core/document";
-import { asBlockId, type JsonValue } from "@repo/editor-core/kernel";
+import {
+  asBlockId,
+  asContentVersion,
+  type JsonValue,
+} from "@repo/editor-core/kernel";
 import type { UpdateBlockMetadataOperation } from "@repo/editor-core/operations";
 import { createVersionedBlockRecord } from "@repo/editor-core/metadata";
 import { createEditorExternalStore } from "../../../store/external-store.ts";
@@ -76,14 +80,20 @@ function createTestEditor(
     id: blockId,
     type: "paragraph",
     parentId: null,
-    version: { metadataVersion: "1", contentVersion: "1" },
+    version: {
+      metadataVersion: "1",
+      contentVersion: asContentVersion("1"),
+    },
   });
   const secondBlock = createVersionedBlockRecord({
     id: secondBlockId,
     type: "callout",
     parentId: null,
     metadata: { existing: "kept", nested: { width: 100, height: 80 } },
-    version: { metadataVersion: "1", contentVersion: "1" },
+    version: {
+      metadataVersion: "1",
+      contentVersion: asContentVersion("1"),
+    },
   });
   const editor = new EditorImplementation({
     store: createEditorExternalStore(createInitialEditorSessionState({})),
@@ -136,7 +146,10 @@ function removeTestBlock(editor: EditorImplementation): void {
     id: missingBlockId,
     type: "paragraph",
     parentId: null,
-    version: { metadataVersion: "1", contentVersion: "1" },
+    version: {
+      metadataVersion: "1",
+      contentVersion: asContentVersion("1"),
+    },
   });
   editor.reconcileEditorSnapshotForRecovery({
     origin: "external-snapshot",
@@ -697,7 +710,10 @@ describe("EditorImplementation linear history", () => {
       type: "paragraph",
       parentId: null,
       metadata: { remote: true },
-      version: { metadataVersion: "2", contentVersion: "1" },
+      version: {
+        metadataVersion: "2",
+        contentVersion: asContentVersion("1"),
+      },
     });
 
     editor.reconcileEditorSnapshotForRecovery({

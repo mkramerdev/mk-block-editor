@@ -77,7 +77,8 @@ export function createEditorCopyEventHandler(
     if (ownership.kind !== "selection" || !event.clipboardData) return false;
     const snapshot = context.captureSelectionSnapshot(ownership);
     if (!snapshot) return false;
-    if (!context.boundary.writeSelection(event.clipboardData, snapshot)) return false;
+    if (!context.boundary.writeSelection(event.clipboardData, snapshot))
+      return false;
     if (!claimEditorClipboardEvent(event, context.editorIdentity)) return false;
     event.preventDefault();
     event.stopPropagation();
@@ -140,7 +141,9 @@ export function createEditorClipboardEventHandlers(
       if (!target) return false;
 
       const isCurrent = () => target.capture.isCurrent();
-      const fragment = context.boundary.readClipboardBlocks(event.clipboardData);
+      const fragment = context.boundary.readClipboardBlocks(
+        event.clipboardData,
+      );
       if (!fragment || !isCurrent() || !claim(event)) return false;
       const result = context.commands.paste(target, fragment);
       return result.ok && result.changed !== false;

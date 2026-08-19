@@ -22,7 +22,7 @@ import { useGlobalSelection } from "../selection/controller/use-global-selection
 import type { TransientPointerSelectionPaint } from "../selection/paint/selection-paint-layer.tsx";
 import type { EditorBlockDomRegistryRegistrar } from "../blocks/block-dom-registry.ts";
 import type { EditorDefinition } from "../../runtime/definition/contracts.ts";
-import type { EditorWebContentRuntime } from "../../runtime/content/content-runtime.ts";
+import type { EditorContentRuntime } from "@repo/editor-core/content";
 import type {
   Editor,
   EditorDocumentLayerRenderContext,
@@ -33,7 +33,7 @@ import { createEditorDocumentLayerInteractionController } from "../../runtime/do
 
 export interface BlockListProps<TEditor extends Editor = Editor> {
   definition: EditorDefinition;
-  contentRuntime: EditorWebContentRuntime;
+  contentRuntime: EditorContentRuntime;
   editor: EditorRuntimePort<TEditor>;
   renderDocumentLayers: EditorDocumentProps<TEditor>["renderDocumentLayers"];
   onSelectionDragStart: EditorDocumentProps<TEditor>["onSelectionDragStart"];

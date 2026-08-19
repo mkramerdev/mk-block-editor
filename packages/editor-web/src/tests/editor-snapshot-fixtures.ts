@@ -9,9 +9,7 @@ import type {
   EditorTextBlockContent,
   EditorInstanceSnapshot,
 } from "@repo/editor-core/codecs";
-import {
-  createBlockId,
-} from "@repo/editor-core/kernel";
+import { createBlockId } from "@repo/editor-core/kernel";
 import { createBlockRecord } from "@repo/editor-core/metadata";
 import { encodeLocalContentCheckpoint } from "../content/local/runtime.ts";
 

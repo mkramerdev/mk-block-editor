@@ -1,5 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
-import type { BlockId } from "@repo/editor-core/kernel";
+import { asContentVersion, type BlockId } from "@repo/editor-core/kernel";
 import { contentSelection } from "@repo/editor-core/selection";
 import {
   createEditorLogicalSelectionPoint,
@@ -64,8 +64,9 @@ describe("global selection gesture ownership", () => {
               id: blockId,
               type: "paragraph",
               parentId: null,
+              tombstone: null,
               metadataVersion: "1",
-              contentVersion: "1",
+              contentVersion: asContentVersion("1"),
             }
           : null,
       getParentId: () => null,
@@ -1458,8 +1459,9 @@ describe("global selection gesture ownership", () => {
               id: blockId,
               type: "paragraph",
               parentId: null,
+              tombstone: null,
               metadataVersion: "1",
-              contentVersion: "1",
+              contentVersion: asContentVersion("1"),
             }
           : null,
       getParentId: () => null,
@@ -1675,8 +1677,9 @@ function pointerGestureFixture(affinity: "backward" | "forward" | null = null) {
             id: "text" as BlockId,
             type: "paragraph",
             parentId: null,
+            tombstone: null,
             metadataVersion: "1",
-            contentVersion: "1",
+            contentVersion: asContentVersion("1"),
           }
         : null,
     getParentId: () => null,

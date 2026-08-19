@@ -2,6 +2,13 @@ export { EditorDocument } from "../runtime/document/editor-document-component.ts
 export { projectTransactionSelectionToStable } from "@repo/editor-react/selection";
 export type { EditorStableSelection } from "@repo/editor-react/selection";
 export type {
+  EditorBlockContentLease,
+  EditorContentDataReconciliation,
+  EditorContentRuntime,
+  EditorContentRuntimeSource,
+} from "@repo/editor-core/content";
+export type { EditorWebContentRuntime } from "../runtime/content/content-runtime.ts";
+export type {
   Editor,
   EditableEditor,
   EditorReadRuntime,

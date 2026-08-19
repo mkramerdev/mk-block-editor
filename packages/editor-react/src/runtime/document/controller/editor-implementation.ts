@@ -1,4 +1,8 @@
-import { cloneJsonValue, jsonValuesEqual } from "@repo/editor-core/kernel";
+import {
+  cloneJsonValue,
+  jsonValuesEqual,
+  type MutableJsonObject,
+} from "@repo/editor-core/kernel";
 import {
   assertValidBlockGraphVersion,
   getCanonicalBlockOrder,
@@ -68,6 +72,7 @@ import type {
   TransformBlocksPayload,
 } from "@repo/editor-core/operations";
 import type {
+  BlockMetadataDeletion,
   BlockMetadataUpdate,
   EditorLogicalBlockMetadataOperation,
   EditorLogicalContentOperation,
@@ -158,6 +163,7 @@ import type {
   EditorTextInsertion,
   CanonicalEditorBlockPlacement,
   CanonicalEditorBlockGraphChange,
+  CanonicalEditorCommit,
 } from "../api/contracts.ts";
 import type {
   EditorHistoryEntry,
@@ -293,6 +299,86 @@ type PreparedContentEditorTransactionResult =
         | "no-change";
       readonly message: string;
     };
+
+type PreparedCanonicalHistoryOperations = Pick<
+  EditorHistoryEntry,
+  "forward" | "inverse"
+>;
+
+type PreparedGraphCommitReceipt =
+  | {
+      readonly kind: "structural-state";
+      readonly candidateBlockIds: readonly BlockId[];
+    }
+  | {
+      readonly kind: "prepared-graph";
+      readonly operation: EditorBlockGraphOperation;
+    }
+  | {
+      readonly kind: "metadata";
+      readonly operation: UpdateBlockMetadataOperation;
+    };
+
+type PreparedCanonicalCommit =
+  | {
+      readonly kind: "content-only";
+      readonly validatedContent: ValidatedContentCommit;
+      readonly preparedSelection:
+        | EditorPreparedContentSelection
+        | null
+        | undefined;
+      readonly requestedSelectionEffect: EditorCanonicalSelectionEffect;
+      readonly editorSuggestion?: EditorOperationSuggestion | null;
+      readonly origin: PreparedContentEditorTransactionOrigin;
+      readonly selectionPresentation: ContentSelectionPresentation;
+      readonly historyOperations: PreparedCanonicalHistoryOperations | null;
+      readonly historyAction: "command" | "undo" | "redo";
+      readonly provenance: EditorLocalMutationProvenance | null;
+      readonly publication: "immediate" | "delayed-content-release";
+    }
+  | {
+      readonly kind: "graph";
+      readonly previousState: EditorCommandState;
+      readonly nextState: EditorCommandState;
+      readonly update: EditorDocumentUpdate;
+      readonly validatedContent: ValidatedContentCommit | null;
+      readonly requestedSelectionEffect?: EditorCanonicalSelectionEffect;
+      readonly editorSuggestion?: EditorOperationSuggestion | null;
+      readonly suggestionContentAccess: "live-only" | "prepared-graph-content";
+      readonly origin: EditorOperationRequest["origin"];
+      readonly selectionPresentation:
+        | "canonical-only"
+        | "native-before-removal";
+      readonly historyOperations: PreparedCanonicalHistoryOperations | null;
+      readonly historyAction: "command" | "undo" | "redo";
+      readonly provenance: EditorLocalMutationProvenance | null;
+      readonly structuralDraftAlreadyValidated: boolean;
+      readonly receipt: PreparedGraphCommitReceipt;
+    };
+
+type CanonicalCommitPhase =
+  | "history-selection-before"
+  | "content-commit"
+  | "selection-resolution"
+  | "history-selection-after"
+  | "canonical-installation";
+
+interface PreparedCanonicalCommitFailure {
+  readonly ok: false;
+  readonly phase: CanonicalCommitPhase;
+  readonly reason: "application-failed" | "content-operations-rejected";
+  readonly message: string;
+  readonly cause?: unknown;
+  readonly contentApplied: boolean;
+}
+
+type PreparedCanonicalCommitResult =
+  | {
+      readonly ok: true;
+      readonly appliedContent: AppliedContentCommit | null;
+      readonly release: (() => void) | null;
+    }
+  | PreparedCanonicalCommitFailure;
 
 class ActiveEditorMutationFailure extends Error {}
 
@@ -1837,6 +1923,23 @@ export class EditorImplementation {
     if (!editorDocumentUpdateHasChanges(update)) {
       throw new Error("Remote transaction contains no canonical changes");
     }
+    this.commitPreparedRemoteGraphMutation({
+      nextState: input.nextState,
+      update,
+      validatedContent: input.validatedContent,
+      afterCanonicalStateInstalled: input.afterCanonicalStateInstalled,
+      selectionCause: "remote-transaction",
+    });
+    return { update, documentRevision: this.documentRevision };
+  }
+
+  private commitPreparedRemoteGraphMutation(input: {
+    readonly nextState: EditorCommandState;
+    readonly update: EditorDocumentUpdate;
+    readonly validatedContent: ValidatedContentCommit | null;
+    readonly afterCanonicalStateInstalled: () => void;
+    readonly selectionCause: "remote-transaction" | "canonical-rebase";
+  }): void {
     let appliedContent: AppliedContentCommit | null = null;
     try {
       appliedContent = input.validatedContent
@@ -1844,13 +1947,13 @@ export class EditorImplementation {
         : null;
       const notify = this.commitCanonicalGraphMutation(
         input.nextState,
-        update,
+        input.update,
         false,
         undefined,
         true,
         {
           publication: { kind: "silent" },
-          cause: "remote-transaction",
+          cause: input.selectionCause,
         },
       );
       input.afterCanonicalStateInstalled();
@@ -1858,11 +1961,11 @@ export class EditorImplementation {
         this.options.contentCommit!.publishContentCommit(appliedContent);
       }
       notify();
-      return { update, documentRevision: this.documentRevision };
     } catch (error) {
       if (appliedContent) {
-        this.options.contentCommit!.markInconsistent(
-          `Canonical state installation failed after live content mutation: ${error instanceof Error ? error.message : String(error)}`,
+        this.markInconsistentAfterAppliedContent(
+          "Canonical state installation failed after live content mutation",
+          error,
         );
       }
       throw error;
@@ -1948,28 +2051,21 @@ export class EditorImplementation {
     if (preparedContent && !("kind" in preparedContent)) {
       throw new Error(preparedContent.message);
     }
-    const appliedContent = preparedContent
-      ? this.options.contentCommit!.commitContent(preparedContent)
-      : null;
-    try {
-      const committed = this.commitInitialBootstrap(nextState, {
-        candidateBlockIds: blockGraphPatchCandidateIds(mutation.patch),
-        contentChangedBlockIds: mutation.contentOperations.map(
-          (batch) => batch.blockId,
-        ),
-      });
-      if (appliedContent) {
-        this.options.contentCommit!.publishContentCommit(appliedContent);
-      }
-      return committed;
-    } catch (error) {
-      if (appliedContent) {
-        this.options.contentCommit!.markInconsistent(
-          `Canonical commit failed after live content mutation: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-      throw error;
-    }
+    this.assertValidBootstrapState(nextState);
+    const update = this.classifyDocumentUpdate(current, nextState, {
+      candidateBlockIds: blockGraphPatchCandidateIds(mutation.patch),
+      contentChangedBlockIds: mutation.contentOperations.map(
+        (batch) => batch.blockId,
+      ),
+    });
+    this.commitPreparedRemoteGraphMutation({
+      nextState,
+      update,
+      validatedContent: preparedContent,
+      afterCanonicalStateInstalled: noop,
+      selectionCause: "canonical-rebase",
+    });
+    return nextState;
   }
 
   applyEditorBlockGraphPatch(
@@ -2030,26 +2126,18 @@ export class EditorImplementation {
     if (preparedContent && !("kind" in preparedContent)) {
       throw new Error(preparedContent.message);
     }
-    const appliedContent = preparedContent
-      ? this.options.contentCommit!.commitContent(preparedContent)
-      : null;
-    try {
-      const committed = this.commitInitialBootstrap(nextState, {
-        candidateBlockIds: applied.affectedBlockIds,
-      });
-      if (appliedContent) {
-        this.options.contentCommit!.publishContentCommit(appliedContent);
-      }
-      return committed;
-    } catch (error) {
-      // The canonical commit is already durable; observer failures are isolated.
-      if (appliedContent) {
-        this.options.contentCommit!.markInconsistent(
-          `Canonical observer failed after live content mutation: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-      throw error;
-    }
+    this.assertValidBootstrapState(nextState);
+    const update = this.classifyDocumentUpdate(current, nextState, {
+      candidateBlockIds: applied.affectedBlockIds,
+    });
+    this.commitPreparedRemoteGraphMutation({
+      nextState,
+      update,
+      validatedContent: preparedContent,
+      afterCanonicalStateInstalled: noop,
+      selectionCause: "canonical-rebase",
+    });
+    return nextState;
   }
 
   private metadataEditorRequestMatchesCurrentState(
@@ -3112,16 +3200,6 @@ export class EditorImplementation {
   private commitPreparedContentTransaction(
     input: PreparedContentEditorTransaction,
   ): PreparedContentEditorTransactionResult {
-    const baseDocumentRevision = this.documentRevision;
-    const canonicalSelectionBefore =
-      this.selectionController.getCanonicalSnapshot();
-    let historySelectionBefore: EditorHistorySelection | null = null;
-    const readHistorySelectionBefore = (): EditorHistorySelection => {
-      historySelectionBefore ??= this.captureHistorySelection(
-        canonicalSelectionBefore,
-      );
-      return historySelectionBefore;
-    };
     if (input.changes.length === 0) {
       return {
         ok: false,
@@ -3180,158 +3258,457 @@ export class EditorImplementation {
         message: "Content transaction produced no authoritative change",
       };
     }
-    const historyForwardOperation =
+    const historyOperations =
       input.history === "record"
-        ? composePreparedContentOperations(prepared.blocks, "contentOperations")
+        ? {
+            forward: composePreparedContentOperations(
+              prepared.blocks,
+              "contentOperations",
+            ),
+            inverse: composePreparedContentOperations(
+              [...prepared.blocks].reverse(),
+              "inverseContentOperations",
+            ),
+          }
         : null;
-    const historyInverseOperation =
-      input.history === "record"
-        ? composePreparedContentOperations(
-            [...prepared.blocks].reverse(),
-            "inverseContentOperations",
-          )
-        : null;
-    const preparedHistorySelectionBefore = historyInverseOperation
-      ? this.prepareReplayHistorySelection(
+    const committed = this.commitPreparedCanonicalTransaction({
+      kind: "content-only",
+      validatedContent: prepared,
+      preparedSelection: preparedSelection?.selection,
+      requestedSelectionEffect: input.selectionEffect,
+      editorSuggestion: input.editorSuggestion,
+      origin: input.origin,
+      selectionPresentation: input.selectionPresentation,
+      historyOperations,
+      historyAction: input.historyAction,
+      provenance: input.provenance,
+      publication: input.releaseAfterProposedStateInstalled
+        ? "delayed-content-release"
+        : "immediate",
+    });
+    if (!committed.ok) {
+      return {
+        ok: false,
+        reason: "application-failed",
+        message: committed.message,
+      };
+    }
+    if (!committed.appliedContent) {
+      throw new Error("A content-only transaction must apply content");
+    }
+    return {
+      ok: true,
+      commit: committed.appliedContent,
+      release: committed.release,
+    };
+  }
+
+  private commitPreparedCanonicalTransaction(
+    prepared: PreparedCanonicalCommit,
+  ): PreparedCanonicalCommitResult {
+    const baseDocumentRevision = this.documentRevision;
+    const canonicalSelectionBefore =
+      this.selectionController.getCanonicalSnapshot();
+    let historySelectionBefore: EditorHistorySelection | null = null;
+    const readHistorySelectionBefore = (): EditorHistorySelection => {
+      historySelectionBefore ??= this.captureHistorySelection(
+        canonicalSelectionBefore,
+      );
+      return historySelectionBefore;
+    };
+    const failure = (
+      phase: CanonicalCommitPhase,
+      error: unknown,
+      appliedContent: AppliedContentCommit | null = null,
+    ): PreparedCanonicalCommitFailure => {
+      const message = error instanceof Error ? error.message : String(error);
+      return appliedContent
+        ? this.failAfterAppliedContent(prepared, appliedContent, phase, error)
+        : {
+            ok: false,
+            phase,
+            reason: canonicalCommitFailureReason(prepared),
+            message,
+            cause: error,
+            contentApplied: false,
+          };
+    };
+
+    let preparedHistorySelectionBefore: {
+      readonly ok: true;
+      readonly selection: EditorHistorySelection;
+    } | null = null;
+    if (prepared.historyOperations) {
+      try {
+        const graph =
+          prepared.kind === "graph"
+            ? selectionGraphReaderForCommandState(
+                prepared.previousState,
+                this.blockDefinitions,
+              )
+            : this;
+        const result = this.prepareReplayHistorySelection(
           readHistorySelectionBefore(),
-          historyInverseOperation,
+          prepared.historyOperations.inverse,
           "replay-result",
-        )
-      : null;
-    if (preparedHistorySelectionBefore && !preparedHistorySelectionBefore.ok) {
-      return {
-        ok: false,
-        reason: "application-failed",
-        message: preparedHistorySelectionBefore.message,
-      };
+          graph,
+        );
+        if (!result.ok) {
+          return failure("history-selection-before", result.message);
+        }
+        preparedHistorySelectionBefore = result;
+      } catch (error) {
+        return failure("history-selection-before", error);
+      }
     }
-    let applied: AppliedContentCommit;
+
+    let appliedContent: AppliedContentCommit | null = null;
+    if (prepared.validatedContent) {
+      try {
+        appliedContent = this.options.contentCommit!.commitContent(
+          prepared.validatedContent,
+        );
+      } catch (error) {
+        return failure("content-commit", error);
+      }
+    }
+
+    let resolvedSelection: ReturnType<
+      EditorImplementation["resolvePreparedCanonicalSelection"]
+    >;
     try {
-      applied = contentCommit.commitContent(prepared);
+      resolvedSelection = this.resolvePreparedCanonicalSelection(
+        prepared,
+        canonicalSelectionBefore,
+        readHistorySelectionBefore,
+      );
     } catch (error) {
-      return {
-        ok: false,
-        reason: "application-failed",
-        message: error instanceof Error ? error.message : String(error),
-      };
+      return failure("selection-resolution", error, appliedContent);
     }
-    const preparedSelectionEffect =
-      preparedSelection === undefined
-        ? undefined
-        : preparedSelection.selection === null
-          ? ({ kind: "clear" } as const)
-          : this.createSelectionEffectFromPreparedContentSelection(
-              preparedSelection.selection,
-            );
-    if (preparedSelection !== undefined && !preparedSelectionEffect) {
-      contentCommit.markInconsistent(
-        "The accepted content selection could not be anchored after live content mutation",
+    if (!resolvedSelection.ok) {
+      return failure(
+        "selection-resolution",
+        resolvedSelection.message,
+        appliedContent,
       );
     }
-    const requestedContentSelectionEffect =
-      preparedSelectionEffect ??
-      (input.selectionEffect.kind === "preserve"
-        ? (this.createSelectionEffectFromSuggestion(input.editorSuggestion) ??
-          input.selectionEffect)
-        : input.selectionEffect);
-    let selectionEffect = requestedContentSelectionEffect;
-    if (selectionEffect.kind === "preserve") {
-      if (canonicalSelectionBefore.kind === "block-internal") {
-        selectionEffect = this.historySelectionEffect(
-          readHistorySelectionBefore(),
+
+    let preparedHistorySelectionAfter: {
+      readonly ok: true;
+      readonly selection: EditorHistorySelection;
+    } | null = null;
+    if (prepared.historyOperations) {
+      try {
+        const graph =
+          prepared.kind === "graph"
+            ? selectionGraphReaderForCommandState(
+                prepared.nextState,
+                this.blockDefinitions,
+              )
+            : this;
+        const selection =
+          resolvedSelection.effect.kind === "preserve"
+            ? readHistorySelectionBefore()
+            : this.captureHistorySelectionEffect(resolvedSelection.effect);
+        const result = this.prepareReplayHistorySelection(
+          selection,
+          prepared.historyOperations.forward,
+          "replay-result",
+          graph,
+        );
+        if (!result.ok) {
+          return failure(
+            "history-selection-after",
+            result.message,
+            appliedContent,
+          );
+        }
+        preparedHistorySelectionAfter = result;
+      } catch (error) {
+        return failure("history-selection-after", error, appliedContent);
+      }
+    }
+
+    let transactionId: string;
+    let notifyDocumentSubscribers = noop;
+    try {
+      transactionId = this.createTransactionId();
+      if (prepared.kind === "content-only") {
+        this.documentRevision += 1;
+        this.applyCanonicalSelectionEffect(
+          resolvedSelection.effect,
+          prepared.selectionPresentation,
+          {
+            publication: { kind: "transaction", transactionId },
+            cause: contentTransactionSelectionCause(prepared.origin),
+          },
         );
       } else {
-        const selectionBefore = this.readCanonicalEditorSelection(
-          canonicalSelectionBefore,
+        notifyDocumentSubscribers = this.commitCanonicalGraphMutation(
+          prepared.nextState,
+          prepared.update,
+          prepared.structuralDraftAlreadyValidated,
+          resolvedSelection.effect,
+          appliedContent !== null,
+          {
+            publication: { kind: "transaction", transactionId },
+            cause: graphTransactionSelectionCause(prepared.origin),
+          },
         );
-        selectionEffect = selectionBefore
-          ? { kind: "selection", selection: selectionBefore }
-          : { kind: "clear" };
       }
+      if (
+        prepared.historyOperations &&
+        preparedHistorySelectionBefore &&
+        preparedHistorySelectionAfter
+      ) {
+        this.recordHistoryEntry({
+          ...prepared.historyOperations,
+          selectionBefore: preparedHistorySelectionBefore.selection,
+          selectionAfter: preparedHistorySelectionAfter.selection,
+        });
+      }
+    } catch (error) {
+      return failure("canonical-installation", error, appliedContent);
     }
-    const preparedHistorySelectionAfter = historyForwardOperation
-      ? this.prepareReplayHistorySelection(
-          this.captureHistorySelectionEffect(selectionEffect),
-          historyForwardOperation,
-          "replay-result",
-        )
-      : null;
-    if (preparedHistorySelectionAfter && !preparedHistorySelectionAfter.ok) {
-      contentCommit.markInconsistent(
-        `${preparedHistorySelectionAfter.message} after live content mutation`,
-      );
-    }
-    const transactionId = this.createTransactionId();
-    this.documentRevision += 1;
-    this.applyCanonicalSelectionEffect(
-      selectionEffect,
-      input.selectionPresentation,
-      {
-        publication: { kind: "transaction", transactionId },
-        cause: contentTransactionSelectionCause(input.origin),
-      },
-    );
+
     const canonicalSelectionAfter =
       this.selectionController.getCanonicalSnapshot();
-    if (
-      historyForwardOperation &&
-      historyInverseOperation &&
-      preparedHistorySelectionBefore?.ok &&
-      preparedHistorySelectionAfter?.ok
-    ) {
-      this.recordHistoryEntry({
-        forward: historyForwardOperation,
-        inverse: historyInverseOperation,
-        selectionBefore: preparedHistorySelectionBefore.selection,
-        selectionAfter: preparedHistorySelectionAfter.selection,
-      });
-    }
-    const publishedSelectionBefore = projectCanonicalSelectionToTransaction(
+    const receipt = this.createPreparedCanonicalCommitReceipt({
+      prepared,
+      transactionId,
+      baseDocumentRevision,
+      documentRevision: this.documentRevision,
       canonicalSelectionBefore,
-    );
-    const publishedSelectionAfter = projectCanonicalSelectionToTransaction(
       canonicalSelectionAfter,
-    );
-    const release = () => {
-      try {
-        const publishedBlock = applied.blocks[0];
-        if (!publishedBlock || applied.blocks.length !== 1) {
-          throw new Error("A content receipt must affect exactly one block");
-        }
-        this.options.onCanonicalCommit?.({
-          kind: "content",
-          transactionId,
-          baseDocumentRevision,
-          documentRevision: this.documentRevision,
-          selectionBefore: publishedSelectionBefore,
-          selectionAfter: publishedSelectionAfter,
-          historyAction: input.historyAction,
-          provenance: input.provenance,
-          blockId: publishedBlock.blockId,
-          blockType: publishedBlock.blockType,
-          operations: publishedBlock.contentOperations,
-          inverseOperations: publishedBlock.inverseContentOperations,
-          yjsUpdate: publishedBlock.operationUpdate,
-        });
-      } catch {
-        // The canonical commit is durable; observer failures are isolated.
-      }
-      contentCommit.publishContentCommit(applied);
-    };
-    if (input.releaseAfterProposedStateInstalled) {
+      appliedContent,
+    });
+    const completePublication = () =>
+      this.completePreparedCanonicalPublication(
+        receipt,
+        appliedContent,
+        prepared.kind === "graph" &&
+          prepared.selectionPresentation === "native-before-removal",
+        notifyDocumentSubscribers,
+      );
+    if (
+      prepared.kind === "content-only" &&
+      prepared.publication === "delayed-content-release"
+    ) {
       let released = false;
       return {
         ok: true,
-        commit: applied,
+        appliedContent,
         release: () => {
           if (released) return;
           released = true;
-          release();
+          completePublication();
         },
       };
     }
-    release();
-    return { ok: true, commit: applied, release: null };
+    completePublication();
+    return { ok: true, appliedContent, release: null };
+  }
+
+  private resolvePreparedCanonicalSelection(
+    prepared: PreparedCanonicalCommit,
+    canonicalSelectionBefore: CanonicalLocalSelection,
+    readHistorySelectionBefore: () => EditorHistorySelection,
+  ):
+    | { readonly ok: true; readonly effect: EditorCanonicalSelectionEffect }
+    | { readonly ok: false; readonly message: string } {
+    if (prepared.kind === "content-only") {
+      const preparedSelectionEffect =
+        prepared.preparedSelection === undefined
+          ? undefined
+          : prepared.preparedSelection === null
+            ? ({ kind: "clear" } as const)
+            : this.createSelectionEffectFromPreparedContentSelection(
+                prepared.preparedSelection,
+              );
+      if (
+        prepared.preparedSelection !== undefined &&
+        !preparedSelectionEffect
+      ) {
+        return {
+          ok: false,
+          message:
+            "The accepted content selection could not be anchored after live content mutation",
+        };
+      }
+      let effect =
+        preparedSelectionEffect ??
+        (prepared.requestedSelectionEffect.kind === "preserve"
+          ? (this.createSelectionEffectFromSuggestion(
+              prepared.editorSuggestion,
+            ) ?? prepared.requestedSelectionEffect)
+          : prepared.requestedSelectionEffect);
+      if (effect.kind === "preserve") {
+        if (canonicalSelectionBefore.kind === "block-internal") {
+          effect = this.historySelectionEffect(readHistorySelectionBefore());
+        } else {
+          const selectionBefore = this.readCanonicalEditorSelection(
+            canonicalSelectionBefore,
+          );
+          effect = selectionBefore
+            ? { kind: "selection", selection: selectionBefore }
+            : { kind: "clear" };
+        }
+      }
+      return { ok: true, effect };
+    }
+
+    const suggestedSelectionEffect = prepared.requestedSelectionEffect
+      ? null
+      : prepared.suggestionContentAccess === "prepared-graph-content"
+        ? this.createSelectionEffectFromSuggestionWithContentAccess(
+            prepared.editorSuggestion,
+            prepared.nextState.blocks,
+          )
+        : this.createSelectionEffectFromSuggestion(
+            prepared.editorSuggestion,
+            prepared.nextState.blocks,
+          );
+    let effect: EditorCanonicalSelectionEffect =
+      prepared.requestedSelectionEffect ??
+        suggestedSelectionEffect ?? { kind: "preserve" };
+    if (effect.kind === "history-selection") {
+      const materialized = this.materializeHistorySelectionEffect(
+        effect.selection,
+        selectionGraphReaderForCommandState(
+          prepared.nextState,
+          this.blockDefinitions,
+        ),
+      );
+      if (!materialized) {
+        return {
+          ok: false,
+          message: `history ${prepared.origin ?? "command"} selection could not be resolved`,
+        };
+      }
+      effect = materialized;
+    }
+    return { ok: true, effect };
+  }
+
+  private failAfterAppliedContent(
+    _prepared: PreparedCanonicalCommit,
+    _appliedContent: AppliedContentCommit,
+    phase: CanonicalCommitPhase,
+    error: unknown,
+  ): PreparedCanonicalCommitFailure {
+    return this.markInconsistentAfterAppliedContent(
+      `Canonical ${phase} failed after live content mutation`,
+      error,
+    );
+  }
+
+  private markInconsistentAfterAppliedContent(
+    context: string,
+    error: unknown,
+  ): never {
+    const message = error instanceof Error ? error.message : String(error);
+    return this.options.contentCommit!.markInconsistent(
+      `${context}: ${message}`,
+    );
+  }
+
+  private createPreparedCanonicalCommitReceipt(input: {
+    readonly prepared: PreparedCanonicalCommit;
+    readonly transactionId: string;
+    readonly baseDocumentRevision: number;
+    readonly documentRevision: number;
+    readonly canonicalSelectionBefore: CanonicalLocalSelection;
+    readonly canonicalSelectionAfter: CanonicalLocalSelection;
+    readonly appliedContent: AppliedContentCommit | null;
+  }): CanonicalEditorCommit | null {
+    const receiptBase = {
+      transactionId: input.transactionId,
+      baseDocumentRevision: input.baseDocumentRevision,
+      documentRevision: input.documentRevision,
+      selectionBefore: projectCanonicalSelectionToTransaction(
+        input.canonicalSelectionBefore,
+      ),
+      selectionAfter: projectCanonicalSelectionToTransaction(
+        input.canonicalSelectionAfter,
+      ),
+      historyAction: input.prepared.historyAction,
+      provenance: input.prepared.provenance,
+    } as const;
+    if (input.prepared.kind === "content-only") {
+      const publishedBlock = input.appliedContent?.blocks[0];
+      if (!publishedBlock || input.appliedContent?.blocks.length !== 1) {
+        return null;
+      }
+      return {
+        ...receiptBase,
+        kind: "content",
+        blockId: publishedBlock.blockId,
+        blockType: publishedBlock.blockType,
+        operations: publishedBlock.contentOperations,
+        inverseOperations: publishedBlock.inverseContentOperations,
+        yjsUpdate: publishedBlock.operationUpdate,
+      };
+    }
+    switch (input.prepared.receipt.kind) {
+      case "metadata":
+        return {
+          ...receiptBase,
+          kind: "block-metadata",
+          operation: input.prepared.receipt.operation,
+        };
+      case "prepared-graph":
+        return {
+          ...receiptBase,
+          kind: "block-graph",
+          graphChanges: createCanonicalGraphChanges(
+            input.prepared.previousState,
+            input.prepared.receipt.operation.body.payload,
+            input.prepared.historyAction,
+          ),
+          ...(input.appliedContent
+            ? { contentCommit: input.appliedContent }
+            : {}),
+        };
+      case "structural-state": {
+        const metadataOperation = createCanonicalMetadataChangesFromStates(
+          input.prepared.previousState,
+          input.prepared.nextState,
+          input.prepared.receipt.candidateBlockIds,
+        );
+        return {
+          ...receiptBase,
+          kind: "block-graph",
+          graphChanges: createCanonicalGraphChangesFromStates(
+            input.prepared.previousState,
+            input.prepared.nextState,
+            input.prepared.receipt.candidateBlockIds,
+            input.prepared.historyAction,
+          ),
+          ...(metadataOperation ? { metadataOperation } : {}),
+          ...(input.appliedContent
+            ? { contentCommit: input.appliedContent }
+            : {}),
+        };
+      }
+    }
+  }
+
+  private completePreparedCanonicalPublication(
+    receipt: CanonicalEditorCommit | null,
+    appliedContent: AppliedContentCommit | null,
+    presentNativeSelection: boolean,
+    notifyDocumentSubscribers: () => void,
+  ): void {
+    try {
+      if (receipt) this.options.onCanonicalCommit?.(receipt);
+    } catch {
+      // The canonical commit is durable; observer failures are isolated.
+    }
+    if (appliedContent) {
+      this.options.contentCommit!.publishContentCommit(appliedContent);
+    }
+    if (presentNativeSelection) this.presentCanonicalTextSelection();
+    if (appliedContent) notifyDocumentSubscribers();
   }
 
   private readCanonicalEditorSelection(
@@ -3587,6 +3964,16 @@ export class EditorImplementation {
       rootBlockIds,
       childIdsByParentId,
     };
+    this.assertValidBootstrapState(next);
+    if (Object.is(next, current)) return current;
+    this.commitCanonicalGraphMutation(
+      next,
+      this.classifyDocumentUpdate(current, next, classification),
+    );
+    return next;
+  }
+
+  private assertValidBootstrapState(next: EditorCommandState): void {
     const structuralValidation = validateStructuralDocument({
       blocks: next.blocks,
       rootBlockIds: next.rootBlockIds,
@@ -3601,12 +3988,6 @@ export class EditorImplementation {
           .join("; ")}`,
       );
     }
-    if (Object.is(next, current)) return current;
-    this.commitCanonicalGraphMutation(
-      next,
-      this.classifyDocumentUpdate(current, next, classification),
-    );
-    return next;
   }
 
   getCommandState(): EditorCommandState {
@@ -3644,15 +4025,6 @@ export class EditorImplementation {
         contentResult: { ok: false, applied: 0, failures: [] },
       };
     }
-    const baseDocumentRevision = this.documentRevision;
-    const canonicalSelectionBefore =
-      this.selectionController.getCanonicalSnapshot();
-    const publishedSelectionBefore = projectCanonicalSelectionToTransaction(
-      canonicalSelectionBefore,
-    );
-    const historySelectionBefore = options.historyOperations
-      ? this.captureHistorySelection(canonicalSelectionBefore)
-      : null;
     const preparedContent = this.prepareDocumentContentCommit(
       request.contentOperations,
       previousState,
@@ -3661,10 +4033,19 @@ export class EditorImplementation {
       request.candidateBlockIds,
     );
     if (preparedContent && !("kind" in preparedContent)) {
+      const failure = createEditorOperationFailure({
+        request,
+        previousState,
+        message: preparedContent.message,
+      });
       return {
         ok: false,
         reason: "content-operations-rejected",
-        contentResult: { ok: false, applied: 0, failures: [] },
+        contentResult: {
+          ok: false,
+          applied: 0,
+          failures: failure ? [failure] : [],
+        },
         update,
       };
     }
@@ -3704,10 +4085,19 @@ export class EditorImplementation {
       },
     );
     if (policyFailures?.length) {
+      const failure = createEditorOperationFailure({
+        request,
+        previousState,
+        message: policyFailures.join(", "),
+      });
       return {
         ok: false,
         reason: "content-operations-rejected",
-        contentResult: { ok: false, applied: 0, failures: [] },
+        contentResult: {
+          ok: false,
+          applied: 0,
+          failures: failure ? [failure] : [],
+        },
         update,
       };
     }
@@ -3719,46 +4109,22 @@ export class EditorImplementation {
           )
         : (options.historyOperations ?? null);
     if (options.historyOperations && !historyOperations) {
+      const failure = createEditorOperationFailure({
+        request,
+        previousState,
+        message:
+          "Content-bearing structural history requires reversible content operations",
+      });
       return {
         ok: false,
         reason: "content-operations-rejected",
-        contentResult: { ok: false, applied: 0, failures: [] },
-        update,
-      };
-    }
-    const preparedHistorySelectionBefore =
-      historyOperations && historySelectionBefore
-        ? this.prepareReplayHistorySelection(
-            historySelectionBefore,
-            historyOperations.inverse,
-            "replay-result",
-            selectionGraphReaderForCommandState(
-              previousState,
-              this.blockDefinitions,
-            ),
-          )
-        : null;
-    if (preparedHistorySelectionBefore && !preparedHistorySelectionBefore.ok) {
-      return {
-        ok: false,
-        reason: "content-operations-rejected",
-        contentResult: { ok: false, applied: 0, failures: [] },
-        update,
-      };
-    }
-    let appliedContent: AppliedContentCommit | null = null;
-    if (preparedContent) {
-      try {
-        appliedContent =
-          this.options.contentCommit!.commitContent(preparedContent);
-      } catch {
-        return {
+        contentResult: {
           ok: false,
-          reason: "content-operations-rejected",
-          contentResult: { ok: false, applied: 0, failures: [] },
-          update,
-        };
-      }
+          applied: 0,
+          failures: failure ? [failure] : [],
+        },
+        update,
+      };
     }
     const contentResult: EditorContentOperationApplyResult = {
       ok: true,
@@ -3768,137 +4134,44 @@ export class EditorImplementation {
       ),
       failures: [],
     };
-    const explicitSelectionEffect =
-      options.selectionEffect ?? request.selectionEffect;
-    const suggestedSelectionEffect = explicitSelectionEffect
-      ? null
-      : this.createSelectionEffectFromSuggestionWithContentAccess(
-          request.editorSuggestion,
-          request.nextState.blocks,
-        );
-    let canonicalSelectionEffect: EditorCanonicalSelectionEffect =
-      explicitSelectionEffect ??
-        suggestedSelectionEffect ?? { kind: "preserve" as const };
-    if (canonicalSelectionEffect.kind === "history-selection") {
-      const materialized = this.materializeHistorySelectionEffect(
-        canonicalSelectionEffect.selection,
-        selectionGraphReaderForCommandState(
-          request.nextState,
-          this.blockDefinitions,
-        ),
-      );
-      if (!materialized) {
-        if (appliedContent) {
-          this.options.contentCommit!.markInconsistent(
-            `history ${request.origin ?? "command"} selection could not be resolved after live content mutation`,
-          );
-        }
-        return {
+    const committed = this.commitPreparedCanonicalTransaction({
+      kind: "graph",
+      previousState,
+      nextState: request.nextState,
+      update,
+      validatedContent: preparedContent,
+      requestedSelectionEffect:
+        options.selectionEffect ?? request.selectionEffect,
+      editorSuggestion: request.editorSuggestion,
+      suggestionContentAccess: "prepared-graph-content",
+      origin: request.origin,
+      selectionPresentation: options.selectionPresentation,
+      historyOperations,
+      historyAction: graphTransactionHistoryAction(request.origin),
+      provenance: request.provenance,
+      structuralDraftAlreadyValidated: true,
+      receipt: {
+        kind: "structural-state",
+        candidateBlockIds: request.candidateBlockIds ?? [],
+      },
+    });
+    if (!committed.ok) {
+      const failure = createEditorOperationFailure({
+        request,
+        previousState,
+        message: committed.message,
+      });
+      return {
+        ok: false,
+        reason: "content-operations-rejected",
+        contentResult: {
           ok: false,
-          reason: "content-operations-rejected",
-          contentResult: { ok: false, applied: 0, failures: [] },
-          update,
-        };
-      }
-      canonicalSelectionEffect = materialized;
-    }
-    const preparedHistorySelectionAfter = historyOperations
-      ? this.prepareReplayHistorySelection(
-          canonicalSelectionEffect.kind === "preserve"
-            ? (historySelectionBefore ?? Object.freeze({ kind: "none" }))
-            : this.captureHistorySelectionEffect(canonicalSelectionEffect),
-          historyOperations.forward,
-          "replay-result",
-          selectionGraphReaderForCommandState(
-            request.nextState,
-            this.blockDefinitions,
-          ),
-        )
-      : null;
-    if (preparedHistorySelectionAfter && !preparedHistorySelectionAfter.ok) {
-      if (appliedContent) {
-        this.options.contentCommit!.markInconsistent(
-          `${preparedHistorySelectionAfter.message} after live content mutation`,
-        );
-      }
-      return {
-        ok: false,
-        reason: "content-operations-rejected",
-        contentResult: { ok: false, applied: 0, failures: [] },
-        update,
-      };
-    }
-    const transactionId = this.createTransactionId();
-    let notifyDocumentSubscribers: () => void;
-    try {
-      notifyDocumentSubscribers = this.commitCanonicalGraphMutation(
-        request.nextState,
-        update,
-        true,
-        canonicalSelectionEffect,
-        appliedContent !== null,
-        {
-          publication: { kind: "transaction", transactionId },
-          cause: graphTransactionSelectionCause(request.origin),
+          applied: 0,
+          failures: failure ? [failure] : [],
         },
-      );
-    } catch (error) {
-      if (appliedContent) {
-        this.options.contentCommit!.markInconsistent(
-          `Graph commit failed after live content mutation: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-      return {
-        ok: false,
-        reason: "content-operations-rejected",
-        contentResult: { ok: false, applied: 0, failures: [] },
         update,
       };
     }
-    const canonicalSelectionAfter =
-      this.selectionController.getCanonicalSnapshot();
-    if (
-      historyOperations &&
-      preparedHistorySelectionBefore?.ok &&
-      preparedHistorySelectionAfter?.ok
-    ) {
-      this.recordHistoryEntry({
-        ...historyOperations,
-        selectionBefore: preparedHistorySelectionBefore.selection,
-        selectionAfter: preparedHistorySelectionAfter.selection,
-      });
-    }
-    const publishedSelectionAfter = projectCanonicalSelectionToTransaction(
-      canonicalSelectionAfter,
-    );
-    try {
-      this.options.onCanonicalCommit?.({
-        kind: "block-graph",
-        transactionId,
-        baseDocumentRevision,
-        documentRevision: this.documentRevision,
-        selectionBefore: publishedSelectionBefore,
-        selectionAfter: publishedSelectionAfter,
-        historyAction: graphTransactionHistoryAction(request.origin),
-        provenance: request.provenance,
-        graphChanges: createCanonicalGraphChangesFromStates(
-          previousState,
-          request.nextState,
-          request.candidateBlockIds ?? [],
-          graphTransactionHistoryAction(request.origin),
-        ),
-        ...(appliedContent === null ? {} : { contentCommit: appliedContent }),
-      });
-    } catch {
-      // Observer failures cannot invalidate the finalized local transaction.
-    }
-    if (appliedContent) {
-      this.options.contentCommit!.publishContentCommit(appliedContent);
-    }
-    if (options.selectionPresentation === "native-before-removal") {
-      this.presentCanonicalTextSelection();
-    }
-    if (appliedContent) notifyDocumentSubscribers();
     return { ok: true, contentResult, update };
   }
 
@@ -4043,15 +4316,6 @@ export class EditorImplementation {
       operation,
       durableOperation,
     );
-    const baseDocumentRevision = this.documentRevision;
-    const canonicalSelectionBefore =
-      this.selectionController.getCanonicalSnapshot();
-    const publishedSelectionBefore = projectCanonicalSelectionToTransaction(
-      canonicalSelectionBefore,
-    );
-    const historySelectionBefore = options.historyOperations
-      ? this.captureHistorySelection(canonicalSelectionBefore)
-      : null;
     const preparedContent = this.prepareDocumentContentCommit(
       request.contentOperations,
       previousState,
@@ -4112,60 +4376,6 @@ export class EditorImplementation {
     const effectiveOperation = preparedContent
       ? graphOperationFromPreparedContent(operation, preparedContent, "forward")
       : operation;
-    const preparedHistorySelectionBefore =
-      historyOperations && historySelectionBefore
-        ? this.prepareReplayHistorySelection(
-            historySelectionBefore,
-            historyOperations.inverse,
-            "replay-result",
-            selectionGraphReaderForCommandState(
-              previousState,
-              this.blockDefinitions,
-            ),
-          )
-        : null;
-    if (preparedHistorySelectionBefore && !preparedHistorySelectionBefore.ok) {
-      const failure = createEditorOperationFailure({
-        request,
-        previousState,
-        message: preparedHistorySelectionBefore.message,
-      });
-      return {
-        ok: false,
-        reason: "content-operations-rejected",
-        operation,
-        update: durableOperation.update,
-        contentResult: {
-          ok: false,
-          applied: 0,
-          failures: failure ? [failure] : [],
-        },
-      };
-    }
-    let appliedContent: AppliedContentCommit | null = null;
-    if (preparedContent) {
-      try {
-        appliedContent =
-          this.options.contentCommit!.commitContent(preparedContent);
-      } catch (error) {
-        const failure = createEditorOperationFailure({
-          request,
-          previousState,
-          message: error instanceof Error ? error.message : String(error),
-        });
-        return {
-          ok: false,
-          reason: "content-operations-rejected",
-          operation,
-          update: durableOperation.update,
-          contentResult: {
-            ok: false,
-            applied: 0,
-            failures: failure ? [failure] : [],
-          },
-        };
-      }
-    }
     const contentResult: EditorContentOperationApplyResult = {
       ok: true,
       applied: request.contentOperations.reduce(
@@ -4174,75 +4384,34 @@ export class EditorImplementation {
       ),
       failures: [],
     };
-    let notifyDocumentSubscribers: () => void;
-    const explicitSelectionEffect =
-      options.selectionEffect ?? request.selectionEffect;
-    const suggestedSelectionEffect = explicitSelectionEffect
-      ? null
-      : this.createSelectionEffectFromSuggestion(
-          request.editorSuggestion,
-          optimisticState.blocks,
-        );
-    let canonicalSelectionEffect: EditorCanonicalSelectionEffect =
-      explicitSelectionEffect ??
-        suggestedSelectionEffect ?? { kind: "preserve" as const };
-    if (canonicalSelectionEffect.kind === "history-selection") {
-      const materializedHistorySelection =
-        this.materializeHistorySelectionEffect(
-          canonicalSelectionEffect.selection,
-          selectionGraphReaderForCommandState(
-            optimisticState,
-            this.blockDefinitions,
-          ),
-        );
-      if (!materializedHistorySelection) {
-        if (appliedContent) {
-          this.options.contentCommit!.markInconsistent(
-            `history ${request.origin ?? "command"} selection could not be resolved after live content mutation`,
-          );
-        }
-        const failure = createEditorOperationFailure({
-          request,
-          previousState,
-          message: `history ${request.origin ?? "command"} selection could not be resolved`,
-        });
-        return {
-          ok: false,
-          reason: "content-operations-rejected",
-          operation,
-          update: durableOperation.update,
-          contentResult: {
-            ok: false,
-            applied: 0,
-            failures: failure ? [failure] : [],
-          },
-        };
-      }
-      canonicalSelectionEffect = materializedHistorySelection;
-    }
-    const preparedHistorySelectionAfter = historyOperations
-      ? this.prepareReplayHistorySelection(
-          canonicalSelectionEffect.kind === "preserve"
-            ? (historySelectionBefore ?? Object.freeze({ kind: "none" }))
-            : this.captureHistorySelectionEffect(canonicalSelectionEffect),
-          historyOperations.forward,
-          "replay-result",
-          selectionGraphReaderForCommandState(
-            optimisticState,
-            this.blockDefinitions,
-          ),
-        )
-      : null;
-    if (preparedHistorySelectionAfter && !preparedHistorySelectionAfter.ok) {
-      if (appliedContent) {
-        this.options.contentCommit!.markInconsistent(
-          `${preparedHistorySelectionAfter.message} after live content mutation`,
-        );
-      }
+    const receipt: PreparedGraphCommitReceipt =
+      request.canonicalOperation?.kind === "updateBlockMetadata"
+        ? { kind: "metadata", operation: request.canonicalOperation }
+        : { kind: "prepared-graph", operation: effectiveOperation };
+    const committed = this.commitPreparedCanonicalTransaction({
+      kind: "graph",
+      previousState,
+      nextState: optimisticState,
+      update: durableOperation.update,
+      validatedContent: preparedContent,
+      requestedSelectionEffect:
+        options.selectionEffect ?? request.selectionEffect,
+      editorSuggestion: request.editorSuggestion,
+      suggestionContentAccess: "live-only",
+      origin: request.origin,
+      selectionPresentation: options.selectionPresentation ?? "canonical-only",
+      historyOperations,
+      historyAction: graphTransactionHistoryAction(request.origin),
+      provenance: request.provenance,
+      structuralDraftAlreadyValidated:
+        options.structuralDraftAlreadyValidated ?? false,
+      receipt,
+    });
+    if (!committed.ok) {
       const failure = createEditorOperationFailure({
         request,
         previousState,
-        message: preparedHistorySelectionAfter.message,
+        message: committed.message,
       });
       return {
         ok: false,
@@ -4256,98 +4425,6 @@ export class EditorImplementation {
         },
       };
     }
-    const transactionId = this.createTransactionId();
-    try {
-      notifyDocumentSubscribers = this.commitCanonicalGraphMutation(
-        optimisticState,
-        durableOperation.update,
-        options.structuralDraftAlreadyValidated,
-        canonicalSelectionEffect,
-        appliedContent !== null,
-        {
-          publication: { kind: "transaction", transactionId },
-          cause: graphTransactionSelectionCause(request.origin),
-        },
-      );
-    } catch (error) {
-      if (appliedContent) {
-        this.options.contentCommit!.markInconsistent(
-          `Graph commit failed after live content mutation: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-      const failure = createEditorOperationFailure({
-        request,
-        previousState,
-        message: error instanceof Error ? error.message : String(error),
-      });
-      return {
-        ok: false,
-        reason: "content-operations-rejected",
-        operation,
-        update: durableOperation.update,
-        contentResult: {
-          ok: false,
-          applied: 0,
-          failures: failure ? [failure] : [],
-        },
-      };
-    }
-    const canonicalSelectionAfter =
-      this.selectionController.getCanonicalSnapshot();
-    if (
-      historyOperations &&
-      preparedHistorySelectionBefore?.ok &&
-      preparedHistorySelectionAfter?.ok
-    ) {
-      this.recordHistoryEntry({
-        ...historyOperations,
-        selectionBefore: preparedHistorySelectionBefore.selection,
-        selectionAfter: preparedHistorySelectionAfter.selection,
-      });
-    }
-    const publishedSelectionAfter = projectCanonicalSelectionToTransaction(
-      canonicalSelectionAfter,
-    );
-    try {
-      const receiptBase = {
-        transactionId,
-        baseDocumentRevision,
-        documentRevision: this.documentRevision,
-        selectionBefore: publishedSelectionBefore,
-        selectionAfter: publishedSelectionAfter,
-        historyAction: graphTransactionHistoryAction(request.origin),
-        provenance: request.provenance,
-      } as const;
-      this.options.onCanonicalCommit?.(
-        request.canonicalOperation?.kind === "updateBlockMetadata"
-          ? {
-              ...receiptBase,
-              kind: "block-metadata",
-              operation: request.canonicalOperation,
-            }
-          : {
-              ...receiptBase,
-              kind: "block-graph",
-              graphChanges: createCanonicalGraphChanges(
-                previousState,
-                effectiveOperation.body.payload,
-                graphTransactionHistoryAction(request.origin),
-              ),
-              ...(appliedContent === null
-                ? {}
-                : { contentCommit: appliedContent }),
-            },
-      );
-    } catch {
-      // The canonical state is committed even when a receipt observer fails.
-    }
-    if (appliedContent) {
-      this.options.contentCommit!.publishContentCommit(appliedContent);
-    }
-    if (options.selectionPresentation === "native-before-removal") {
-      this.presentCanonicalTextSelection();
-    }
-    if (appliedContent) notifyDocumentSubscribers();
     return {
       ok: true,
       operation: effectiveOperation,
@@ -5350,6 +5427,52 @@ function createCanonicalGraphChangesFromStates(
     }
   }
   return Object.freeze(changes);
+}
+
+function createCanonicalMetadataChangesFromStates(
+  previousState: EditorCommandState,
+  nextState: EditorCommandState,
+  affectedBlockIds: readonly BlockId[],
+): UpdateBlockMetadataOperation | null {
+  const updates: BlockMetadataUpdate[] = [];
+  const deletions: BlockMetadataDeletion[] = [];
+  for (const blockId of uniqueEditorBlockIds(affectedBlockIds)) {
+    const before = previousState.blocks[blockId];
+    const after = nextState.blocks[blockId];
+    if (!before || before.tombstone || !after || after.tombstone) continue;
+    const beforeMetadata = before.metadata ?? {};
+    const afterMetadata = after.metadata ?? {};
+    const fields = new Set([
+      ...Object.keys(beforeMetadata),
+      ...Object.keys(afterMetadata),
+    ]);
+    const values: MutableJsonObject = {};
+    const removedFields: string[] = [];
+    for (const field of fields) {
+      const existedBefore = Object.hasOwn(beforeMetadata, field);
+      const existsAfter = Object.hasOwn(afterMetadata, field);
+      if (
+        existedBefore === existsAfter &&
+        (!existsAfter ||
+          jsonValuesEqual(beforeMetadata[field]!, afterMetadata[field]!))
+      ) {
+        continue;
+      }
+      if (existsAfter) values[field] = cloneJsonValue(afterMetadata[field]!);
+      else removedFields.push(field);
+    }
+    if (Object.keys(values).length > 0) updates.push({ blockId, values });
+    if (removedFields.length > 0) {
+      deletions.push({ blockId, fields: removedFields });
+    }
+  }
+  return updates.length === 0 && deletions.length === 0
+    ? null
+    : {
+        kind: "updateBlockMetadata",
+        updates,
+        ...(deletions.length === 0 ? {} : { deletions }),
+      };
 }
 
 function canonicalReceiptPlacementFromState(
@@ -6446,6 +6569,14 @@ function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
     value !== null &&
     typeof (value as { then?: unknown }).then === "function"
   );
+}
+
+function canonicalCommitFailureReason(
+  prepared: PreparedCanonicalCommit,
+): PreparedCanonicalCommitFailure["reason"] {
+  return prepared.kind === "content-only"
+    ? "application-failed"
+    : "content-operations-rejected";
 }
 
 function normalizeMaximumHistoryEntries(value: number | undefined): number {

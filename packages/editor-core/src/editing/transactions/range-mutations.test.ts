@@ -7,6 +7,7 @@ import type {
 } from "../../document/model/block.ts";
 import type { BlockId } from "../../kernel/identity/ids.ts";
 import { asBlockId } from "../../kernel/identity/uuid.ts";
+import { asContentVersion } from "../../kernel/versioning/versions.ts";
 import { createVersionedBlockRecord } from "../../metadata/block-record.ts";
 import {
   createBlockRichTextContentFromPlainText,
@@ -130,7 +131,8 @@ function block(
     parentId,
     version: {
       metadataVersion: "1",
-      contentVersion: definitions[type]?.kind === "text" ? "1" : null,
+      contentVersion:
+        definitions[type]?.kind === "text" ? asContentVersion("1") : null,
     },
   });
 }

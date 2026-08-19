@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { EditorState, Schema, type NodeSpec } from "../../prosemirror/index.ts";
+import {
+  EditorState,
+  EditorView,
+  Plugin,
+  Schema,
+  type DecorationSet,
+  type NodeSpec,
+} from "../../prosemirror/index.ts";
 import {
   buildPlaceholderDecorations,
   createPlaceholderPlugin,
@@ -26,9 +33,14 @@ describe("placeholder decorations", () => {
     );
 
     expect(decorations.find()).toHaveLength(1);
-    expect(decorations.find()[0]?.type.attrs).toEqual({
-      "data-editor-placeholder": placeholder.text,
-    });
+    const view = renderDecorations(createTextState(nodeName, ""), decorations);
+    try {
+      expect(
+        view.dom.firstElementChild?.getAttribute("data-editor-placeholder"),
+      ).toBe(placeholder.text);
+    } finally {
+      view.destroy();
+    }
   });
 
   it.each([
@@ -83,7 +95,11 @@ describe("placeholder decorations", () => {
 });
 
 function createTextState(nodeName: string, text: string): EditorState {
-  const textBlock: NodeSpec = { content: "inline*", group: "block" };
+  const textBlock: NodeSpec = {
+    content: "inline*",
+    group: "block",
+    toDOM: () => ["div", 0],
+  };
   const schema = new Schema({
     nodes: {
       doc: { content: nodeName },
@@ -95,5 +111,23 @@ function createTextState(nodeName: string, text: string): EditorState {
   return EditorState.create({
     schema,
     doc: schema.node("doc", null, [schema.node(nodeName, null, content)]),
+  });
+}
+
+function renderDecorations(
+  state: EditorState,
+  decorations: DecorationSet,
+): EditorView {
+  const plugin = new Plugin({
+    props: {
+      decorations: () => decorations,
+    },
+  });
+  return new EditorView(null, {
+    state: EditorState.create({
+      schema: state.schema,
+      doc: state.doc,
+      plugins: [plugin],
+    }),
   });
 }

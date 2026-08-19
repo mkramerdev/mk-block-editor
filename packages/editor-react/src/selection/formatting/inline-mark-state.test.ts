@@ -1,9 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  primitiveInlineMarkDefinitions,
-} from "@repo/editor-core/content/marks";
+import { primitiveInlineMarkDefinitions } from "@repo/editor-core/content/marks";
 import { createBlockRichTextContentFromPlainText } from "@repo/editor-core/content/rich-text";
-import type { BlockId } from "@repo/editor-core/kernel";
+import { asBlockId, type BlockId } from "@repo/editor-core/kernel";
 import type { CommittedSelectionSnapshot } from "../model/committed-selection-snapshot.ts";
 import type { EditorSelectionGraphReader } from "../graph/reader.ts";
 import { readCurrentSelectionInlineMarkFormatStates } from "./inline-mark-state.ts";
@@ -63,8 +61,9 @@ describe("current selection inline mark state", () => {
 
   it("reads each selected canonical projection once and ignores 100 unrelated blocks", () => {
     const selected = ["selected-a", "selected-b"] as const;
-    const unrelated = Array.from({ length: 100 }, (_, index) =>
-      `unrelated-${index}`,
+    const unrelated = Array.from(
+      { length: 100 },
+      (_, index) => `unrelated-${index}`,
     );
     const blockIds = [...selected, ...unrelated] as BlockId[];
     const graph = selectionGraph(blockIds);
@@ -99,17 +98,26 @@ describe("current selection inline mark state", () => {
   });
 });
 
-function selectionGraph(blockIds: readonly string[]): EditorSelectionGraphReader {
+function selectionGraph(
+  blockIds: readonly string[],
+): EditorSelectionGraphReader {
   return {
     getBlock: (blockId: BlockId) =>
       blockIds.includes(blockId)
-        ? { id: blockId, type: "paragraph", tombstone: false }
+        ? {
+            id: blockId,
+            type: "paragraph",
+            parentId: null,
+            tombstone: null,
+            metadataVersion: "1",
+            contentVersion: null,
+          }
         : null,
     readBlockSelectionModel: () => null,
     getRootBlockIds: () => blockIds as readonly BlockId[],
     getParentId: () => null,
     getChildBlockIds: () => [],
-  } as EditorSelectionGraphReader;
+  };
 }
 
 function committedSelection(
@@ -118,10 +126,7 @@ function committedSelection(
 ): CommittedSelectionSnapshot {
   const anchor = point(first, 1);
   const head = point(second, 4);
-  const rangeBlocks = [
-    range(first, 1, 5),
-    range(second, 0, 4),
-  ];
+  const rangeBlocks = [range(first, 1, 5), range(second, 0, 4)];
   const documentSelection = {
     phase: "committed",
     selectionRevision: 9,
@@ -168,12 +173,12 @@ function committedSelection(
     documentSelection,
     documentProjection: null,
     internal: null,
-  } as CommittedSelectionSnapshot;
+  };
 }
 
 function point(blockId: string, textOffset: number) {
   return {
-    blockId: blockId as BlockId,
+    blockId: asBlockId(blockId),
     blockType: "paragraph",
     blockCategory: "text",
     textOffset,
@@ -188,12 +193,17 @@ function point(blockId: string, textOffset: number) {
 }
 
 function range(blockId: string, startOffset: number, endOffset: number) {
+  const id = asBlockId(blockId);
   return {
-    blockId: blockId as BlockId,
+    blockId: id,
     blockType: "paragraph",
     category: "text",
     coverage: "partial",
     coverageResult: {
+      blockId: id,
+      blockType: "paragraph",
+      modelId: "content",
+      coverage: "partial",
       selected: "partial",
       paint: { kind: "content" },
       fragment: { kind: "content" },

@@ -6,10 +6,7 @@ import type { BlockId } from "@repo/editor-core/kernel";
 import { EditorDocument } from "../runtime/document/editor-document-component.tsx";
 import { useTestEditor as useEditor } from "./test-editor-initializers.ts";
 import type { EditorDocumentLayerRenderContext } from "../runtime/document/contracts.ts";
-import type {
-  EditableEditor,
-  Editor,
-} from "../runtime/document/contracts.ts";
+import type { EditableEditor, Editor } from "../runtime/document/contracts.ts";
 import { createTestEditorSnapshot } from "./editor-snapshot-fixtures.ts";
 import { testEditableEditorDefinition } from "./test-editor-definition.ts";
 import { resolveEditorRuntimePort } from "../runtime/document/runtime-port-registry.ts";

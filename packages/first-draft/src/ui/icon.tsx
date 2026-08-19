@@ -1,8 +1,10 @@
 import { createElement, type SVGProps } from "react";
 import type { FirstDraftIconData } from "./icons.ts";
 
-export interface FirstDraftIconProps
-  extends Omit<SVGProps<SVGSVGElement>, "children"> {
+export interface FirstDraftIconProps extends Omit<
+  SVGProps<SVGSVGElement>,
+  "children"
+> {
   readonly icon: FirstDraftIconData;
   readonly size?: number | string;
 }

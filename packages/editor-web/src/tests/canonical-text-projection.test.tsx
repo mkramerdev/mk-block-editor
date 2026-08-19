@@ -1,13 +1,17 @@
 import { act, render } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { createBlockRichTextContentFromPlainText } from "@repo/editor-core/content/rich-text";
+import {
+  createBlockRichTextContentFromPlainText,
+  type RichTextInlineNodeJson,
+} from "@repo/editor-core/content/rich-text";
 import type { EditorImplementation } from "@repo/editor-react/editor";
 import type { Block, VersionedBlock } from "@repo/editor-core/document";
 import {
   blockDataFromBlockGraph,
   createEditorDocumentOrderData,
   createBlockGraphFromTypes,
+  createTestContentOperationUpdate,
   documentDataFromBlockGraph,
   materializeEditorDocumentData,
   testBlockId,
@@ -15,8 +19,9 @@ import {
 import {
   createEditorContentRuntime as createEditorContentRuntimeWithSchemaInput,
   type EditorContentRuntime,
+  type EditorContentRuntimeSource,
 } from "../runtime/content/content-runtime.ts";
-import { type EditorDefinition } from "../api/document-runtime.ts";
+import { type EditableEditorDefinition } from "../api/editor-definition.ts";
 import { testEditableEditorDefinition } from "./test-editor-definition.ts";
 import { ReadTextBlockPrimitive as TextBlockPrimitive } from "../document/blocks/read-text-block-primitive.tsx";
 import type { EditorRuntimePort } from "../runtime/document/render-port.ts";
@@ -25,8 +30,17 @@ import { compileCanonicalEditorDefinition } from "../runtime/definition/compiled
 import type { TextPlaceholder } from "@repo/editor-dom/block-editor";
 
 function createEditorContentRuntime(
-  source: Parameters<typeof createEditorContentRuntimeWithSchemaInput>[0],
-  definition: EditorDefinition = testEditableEditorDefinition,
+  source: Omit<
+    EditorContentRuntimeSource,
+    "blockDefinitions" | "inlineMarks" | "inlineAtoms"
+  > &
+    Partial<
+      Pick<
+        EditorContentRuntimeSource,
+        "blockDefinitions" | "inlineMarks" | "inlineAtoms"
+      >
+    >,
+  definition: EditableEditorDefinition = testEditableEditorDefinition,
 ): EditorContentRuntime {
   return createEditorContentRuntimeWithSchemaInput({
     ...source,
@@ -573,7 +587,7 @@ const mentionCases = [
   },
 ] as const;
 
-const testMentionDefinition: EditorDefinition = {
+const testMentionDefinition: EditableEditorDefinition = {
   blocks: testEditableEditorDefinition.blocks,
   defaultRoot: "paragraph",
   inlineMarks: testEditableEditorDefinition.inlineMarks,
@@ -602,7 +616,7 @@ const testMentionDefinition: EditorDefinition = {
 
 type MentionCase = (typeof mentionCases)[number];
 
-function mentionNode(mention: MentionCase): Record<string, unknown> {
+function mentionNode(mention: MentionCase): RichTextInlineNodeJson {
   return {
     type: "mention",
     metadata: { id: mention.id },
@@ -611,13 +625,14 @@ function mentionNode(mention: MentionCase): Record<string, unknown> {
 
 function reconcileReadProjection(
   rendered: ReturnType<typeof renderReadBlock>,
-  inlineContent: readonly Record<string, unknown>[],
+  inlineContent: readonly RichTextInlineNodeJson[],
 ): void {
   act(() => {
     rendered.contentRuntime.applyExternalContentUpdate({
       blockGraphVersion: 1,
       blockId: rendered.blockId,
       blockType: rendered.block.type,
+      update: createTestContentOperationUpdate(rendered.contentRuntime),
       readProjection: {
         type: "doc",
         content: [
@@ -628,6 +643,7 @@ function reconcileReadProjection(
         ],
       },
       origin: "test-read-projection",
+      revision: 1,
     });
   });
 }
@@ -638,7 +654,7 @@ function renderReadBlock(
   options: {
     focusBlock?: ReturnType<typeof vi.fn>;
     placeholder?: TextPlaceholder;
-    definition?: EditorDefinition;
+    definition?: EditableEditorDefinition;
     editor?: EditorImplementation;
   } = {},
 ) {
@@ -652,7 +668,15 @@ function renderReadBlock(
       blocks: blockDataFromBlockGraph(blockGraph, { [blockId]: text }),
     },
   );
-  const contentRuntime = createEditorContentRuntime(documentData, definition);
+  const contentRuntime = createEditorContentRuntime(
+    {
+      blockGraphVersion: documentData.blockGraphVersion,
+      blockTypesById: { [blockId]: type },
+      opaqueContentCheckpoints: documentData.opaqueContentCheckpoints,
+      contentById: documentData.contentById,
+    },
+    definition,
+  );
   contentRuntime.reconcileContentData({
     blockGraphVersion: documentData.blockGraphVersion,
     blockIds: documentData.blockIds,
@@ -685,7 +709,7 @@ function createReadRuntime(
 }
 
 function createReadBlock(
-  block: Block,
+  block: VersionedBlock,
   id: VersionedBlock["id"],
 ): VersionedBlock {
   return {
@@ -702,7 +726,7 @@ function createReadBlock(
 function createReadRenderPort(
   editor: EditorImplementation,
   contentRuntime: EditorContentRuntime,
-  definition: EditorDefinition,
+  definition: EditableEditorDefinition,
 ): EditorRuntimePort {
   const compiledDefinition = compileCanonicalEditorDefinition(definition);
   const runtime = {
@@ -711,9 +735,22 @@ function createReadRenderPort(
     definition,
     compiledDefinition,
     contentRuntime,
-  } as EditorRuntimePort;
+  };
+  assertReadRenderPort(runtime);
   registerEditorRuntimePort(runtime, runtime);
   return runtime;
+}
+
+function assertReadRenderPort(
+  value: object,
+): asserts value is EditorRuntimePort {
+  if (
+    !("definition" in value) ||
+    !("compiledDefinition" in value) ||
+    !("contentRuntime" in value)
+  ) {
+    throw new Error("read render-port fixture is incomplete");
+  }
 }
 
 function readRenderedText(root: Element): string {

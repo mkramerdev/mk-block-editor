@@ -139,12 +139,16 @@ export class NativeFocusCoordinator {
   }
 
   ownsTarget(target: EventTarget | null): boolean {
-    return isHTMLElement(target) && this.findOwningRegistration(target) !== null;
+    return (
+      isHTMLElement(target) && this.findOwningRegistration(target) !== null
+    );
   }
 
   ownsActiveElement(document: Document): boolean {
     const active = document.activeElement;
-    return isHTMLElement(active) && this.findOwningRegistration(active) !== null;
+    return (
+      isHTMLElement(active) && this.findOwningRegistration(active) !== null
+    );
   }
 
   ownsRegisteredTarget(
@@ -155,8 +159,11 @@ export class NativeFocusCoordinator {
     const registration = this.registrations[kind].get(blockId);
     return Boolean(
       registration &&
-        (!target || registration.target === target) &&
-        ownsElement(registration.target, registration.target.ownerDocument.activeElement),
+      (!target || registration.target === target) &&
+      ownsElement(
+        registration.target,
+        registration.target.ownerDocument.activeElement,
+      ),
     );
   }
 
@@ -168,15 +175,16 @@ export class NativeFocusCoordinator {
     const registration = this.registrations[kind].get(blockId);
     return Boolean(
       registration &&
-        registration.target.isConnected &&
-        (!target || registration.target === target),
+      registration.target.isConnected &&
+      (!target || registration.target === target),
     );
   }
 
   release(blockId: BlockId, kind: NativeFocusTargetKind): void {
     const target = this.registrations[kind].get(blockId)?.target;
     const active = target?.ownerDocument.activeElement ?? null;
-    if (target && ownsElement(target, active) && isHTMLElement(active)) active.blur();
+    if (target && ownsElement(target, active) && isHTMLElement(active))
+      active.blur();
   }
 
   blurEditor(): boolean {
@@ -305,7 +313,6 @@ export class NativeFocusCoordinator {
     }
     return null;
   }
-
 }
 
 function ownsElement(owner: HTMLElement, candidate: Element | null): boolean {

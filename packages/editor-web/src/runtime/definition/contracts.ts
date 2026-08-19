@@ -23,9 +23,9 @@ import type {
 import type { EditorWebBlockRenderer } from "../../document/blocks/block-renderer-contracts.ts";
 import type { EditorExternalStore } from "@repo/editor-react/store";
 import type {
+  EditorContentRuntime,
   EditorContentRuntimeSource,
-  EditorWebContentRuntime,
-} from "../content/content-runtime.ts";
+} from "@repo/editor-core/content";
 import type {
   EditorHtmlExportHandler,
   EditorHtmlImportHandler,
@@ -63,8 +63,7 @@ interface EditorDefinitionBase<TEditor extends EditorReadRuntime> {
 
 export type ReadEditorDefinition = EditorDefinitionBase<ReadEditor>;
 
-export interface EditableEditorDefinition
-  extends EditorDefinitionBase<EditableEditor> {
+export interface EditableEditorDefinition extends EditorDefinitionBase<EditableEditor> {
   readonly commands?: readonly EditorCommandDefinition[];
   readonly keybindings?: readonly EditorKeyBinding[];
 }
@@ -130,7 +129,7 @@ export interface EditorContentImportDefinition {
 export interface EditorContentRuntimeDefinition {
   readonly createRuntime: (
     source: EditorContentRuntimeSource,
-  ) => EditorWebContentRuntime;
+  ) => EditorContentRuntime;
 }
 
 export interface EditorTypingTriggerDefinition {

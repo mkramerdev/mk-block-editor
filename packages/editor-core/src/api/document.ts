@@ -6,6 +6,7 @@ export type {
   OrderedBlockGraph,
   VersionedBlock,
 } from "../document/model/block.ts";
+export { blocksHaveEqualCanonicalState } from "../document/model/block.ts";
 export type { RelativeTextPoint, TextPoint } from "../document/model/points.ts";
 export {
   DEFAULT_HEADING_LEVEL,

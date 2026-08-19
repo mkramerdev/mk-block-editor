@@ -98,7 +98,10 @@ export function projectNativeCaret(
   }
 
   const node = selection.anchorNode;
-  if (!node || !selectionMatchesCanonicalOffset(selection, root, layout, offset)) {
+  if (
+    !node ||
+    !selectionMatchesCanonicalOffset(selection, root, layout, offset)
+  ) {
     return { status: "rejected" };
   }
   if (
@@ -121,8 +124,8 @@ function selectionMatchesCanonicalOffset(
   const node = selection.anchorNode;
   return Boolean(
     selection.isCollapsed &&
-      node &&
-      (node === root || root.contains(node)) &&
-      layout.canonicalOffsetFromPoint(node, selection.anchorOffset) === offset,
+    node &&
+    (node === root || root.contains(node)) &&
+    layout.canonicalOffsetFromPoint(node, selection.anchorOffset) === offset,
   );
 }

@@ -14,8 +14,9 @@ interface EditorOwnedDeletionMeta {
   readonly inputType: EditorOwnedDeletionInputType;
 }
 
-export const editorOwnedDeletionPluginKey =
-  new PluginKey<null>("blockEditorOwnedDeletion");
+export const editorOwnedDeletionPluginKey = new PluginKey<null>(
+  "blockEditorOwnedDeletion",
+);
 
 /**
  * Claims browser-resolved ordinary deletion ranges before contenteditable is

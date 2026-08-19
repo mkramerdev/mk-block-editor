@@ -7,7 +7,7 @@ import {
   type EditorSelectionTextAnchorResolver,
   type SelectionController,
 } from "@repo/editor-react/selection";
-import type { EditorWebContentRuntime } from "../../../runtime/content/content-runtime.ts";
+import type { EditorContentRuntime } from "@repo/editor-core/content";
 import type { EditorDefinition } from "../../../runtime/definition/contracts.ts";
 import type { AnyEditorRuntimePort } from "../../../runtime/document/render-port.ts";
 import type { EditorBlockDomRegistryReader } from "../../blocks/block-dom-registry.ts";
@@ -26,7 +26,7 @@ export interface UseGlobalSelectionOptions {
   readonly listElement: HTMLDivElement | null;
   readonly blockDom: EditorBlockDomRegistryReader;
   readonly editor: AnyEditorRuntimePort;
-  readonly contentRuntime: EditorWebContentRuntime;
+  readonly contentRuntime: EditorContentRuntime;
   readonly selectionController: SelectionController;
 }
 

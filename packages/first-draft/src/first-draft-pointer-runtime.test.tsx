@@ -3,10 +3,7 @@ import type { EditorInstanceSnapshot } from "@repo/editor-core/codecs";
 import type { BlockId } from "@repo/editor-core/kernel";
 import { EditorDocument } from "@repo/editor-web/document-runtime";
 import { compileCanonicalEditorDefinition } from "@repo/editor-web/editor-definition";
-import {
-  initializeEditableEditor,
-  type EditableEditorDefinition,
-} from "@repo/editor-web/editor";
+import { type EditableEditorDefinition } from "@repo/editor-web/editor";
 import type { EditorImplementation } from "@repo/editor-react/editor";
 import {
   createYjsBlockContentRuntime,
@@ -22,6 +19,7 @@ import { createFirstDraftEditorDefinition } from "./first-draft-definition.tsx";
 import { createFirstDraftSnapshot } from "./first-draft-fixture.ts";
 import { createFirstDraftBootstrapFromSnapshot } from "./read-model/bootstrap.ts";
 import { FirstDraftSelectionMenu } from "./selection-menu/index.ts";
+import { initializeCompiledTestEditableEditor as initializeEditableEditor } from "./test-editor.ts";
 
 const allocations = vi.hoisted(() => ({
   yDocs: 0,
@@ -350,9 +348,7 @@ describe("First Draft real pointer activation allocation contract", () => {
       }
       expect(
         committed?.blocks
-          .filter(
-            ({ coverageResult }) => coverageResult.paint?.kind === "content",
-          )
+          .filter(({ coverageResult }) => isContentPaint(coverageResult.paint))
           .map(({ blockId }) => blockId),
       ).toEqual([beforeList, bulletTextA, bulletTextB, afterList]);
       expectNoListItemSurfacePaint(rendered.container);
@@ -442,7 +438,8 @@ describe("First Draft real pointer activation allocation contract", () => {
     const list = rendered.container.querySelector<HTMLElement>(
       '[data-editor-block-list-root="true"]',
     );
-    if (!list || !runtime) throw new Error("Missing pointer deletion runtime");
+    if (!list) throw new Error("Missing pointer deletion runtime");
+    const mountedRuntime = requireContentRuntime(runtime);
     Object.defineProperties(list, {
       setPointerCapture: { configurable: true, value: vi.fn() },
       hasPointerCapture: { configurable: true, value: vi.fn(() => true) },
@@ -468,13 +465,7 @@ describe("First Draft real pointer activation allocation contract", () => {
         70,
         108,
       );
-      dispatchPointerUpAt(
-        rendered.container,
-        bulletTextB,
-        pointerId,
-        70,
-        108,
-      );
+      dispatchPointerUpAt(rendered.container, bulletTextB, pointerId, 70, 108);
 
       const committed = editor.selectionController.getCommittedSnapshot();
       expect(committed?.kind).toBe("document");
@@ -483,10 +474,9 @@ describe("First Draft real pointer activation allocation contract", () => {
       expect(committed?.endpoints.anchor?.blockId).not.toBe(
         committed?.endpoints.head?.blockId,
       );
-      expect(runtime.getLiveBlockContentCount()).toBe(1);
-      const activeView = rendered.container.querySelector<HTMLElement>(
-        ".ProseMirror",
-      );
+      expect(mountedRuntime.getLiveBlockContentCount()).toBe(1);
+      const activeView =
+        rendered.container.querySelector<HTMLElement>(".ProseMirror");
       if (!activeView) throw new Error("Missing active text projection");
       const deleteEvent = new KeyboardEvent("keydown", {
         bubbles: true,
@@ -554,7 +544,7 @@ describe("First Draft real pointer activation allocation contract", () => {
         </section>
       </FirstDraftViewStateProvider>,
     );
-    const implementation = editor as unknown as EditorImplementation;
+    const implementation = editor;
     const list = rendered.container.querySelector<HTMLElement>(
       '[data-editor-block-list-root="true"]',
     );
@@ -564,20 +554,21 @@ describe("First Draft real pointer activation allocation contract", () => {
       hasPointerCapture: { configurable: true, value: vi.fn(() => true) },
       releasePointerCapture: { configurable: true, value: vi.fn() },
     });
-    const blockBText = blockElement(rendered.container, blockB).querySelector<HTMLElement>(
-      '[data-editor-text-root="true"]',
-    );
+    const blockBText = blockElement(
+      rendered.container,
+      blockB,
+    ).querySelector<HTMLElement>('[data-editor-text-root="true"]');
     if (!blockBText) throw new Error("Missing second text root");
     installTestRect(blockBText);
     dispatchPointerDown(rendered.container, blockA, 30, true);
     dispatchPointerMoveToElement(blockBText, 30, 12, 12);
     dispatchPointerUp(rendered.container, blockB, 30);
-    expect(implementation.selectionController.getCanonicalSnapshot()).toMatchObject(
-      { kind: "document" },
-    );
-    expect(implementation.selectionController.localPaint.getSnapshot()).toMatchObject(
-      { kind: "range" },
-    );
+    expect(
+      implementation.selectionController.getCanonicalSnapshot(),
+    ).toMatchObject({ kind: "document" });
+    expect(
+      implementation.selectionController.localPaint.getSnapshot(),
+    ).toMatchObject({ kind: "range" });
     const textRoot = blockElement(rendered.container, blockA).querySelector(
       '[data-editor-text-root="true"]',
     );
@@ -598,12 +589,14 @@ describe("First Draft real pointer activation allocation contract", () => {
       document.dispatchEvent(new Event("selectionchange"));
     });
 
-    expect(implementation.selectionController.getCanonicalSnapshot()).toMatchObject(
-      { kind: "none" },
+    expect(
+      implementation.selectionController.getCanonicalSnapshot(),
+    ).toMatchObject({ kind: "none" });
+    expect(implementation.selectionController.localPaint.getSnapshot()).toEqual(
+      {
+        kind: "none",
+      },
     );
-    expect(implementation.selectionController.localPaint.getSnapshot()).toEqual({
-      kind: "none",
-    });
     expect(
       rendered.container.querySelector("[data-editor-selection-paint]"),
     ).toBeNull();
@@ -671,8 +664,8 @@ describe("First Draft real pointer activation allocation contract", () => {
         </div>
       </FirstDraftViewStateProvider>,
     );
-    const implementation = editor as unknown as EditorImplementation;
-    const holdA = runtime!.acquireBlockContent(
+    const implementation = editor;
+    const holdA = requireContentRuntime(runtime).acquireBlockContent(
       blockA,
       "paragraph",
       "canonical-transaction",
@@ -695,7 +688,7 @@ describe("First Draft real pointer activation allocation contract", () => {
           },
         );
       if (settlement.kind === "rejected")
-        throw new Error(`selection was rejected: ${settlement.reason}`);
+        throw new Error("selection was rejected");
     });
     holdA.release();
 
@@ -704,12 +697,7 @@ describe("First Draft real pointer activation allocation contract", () => {
       checkpointDecodes: checkpointDecodes.mock.calls.length,
       acquisitions: acquisitions.length,
     };
-    const projectionReads = vi.spyOn(
-      implementation as unknown as {
-        readBlockContent(blockId: BlockId, blockType: string): unknown;
-      },
-      "readBlockContent",
-    );
+    const projectionReads = vi.spyOn(implementation, "readBlockContent");
     const firstRead = editor.readCurrentSelectionInlineMarkFormatStates({
       marks: ["strong", "em", "link"],
     });
@@ -1089,4 +1077,20 @@ function expectNativeCaret(
   prefix.setStart(view, 0);
   prefix.setEnd(native!.anchorNode!, native!.anchorOffset);
   expect(prefix.toString().length).toBe(point?.textOffset);
+}
+
+function requireContentRuntime(
+  runtime: YjsBlockContentRuntime | null,
+): YjsBlockContentRuntime {
+  if (!runtime) throw new Error("Missing block content runtime");
+  return runtime;
+}
+
+function isContentPaint(value: unknown): boolean {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "kind" in value &&
+    value.kind === "content"
+  );
 }

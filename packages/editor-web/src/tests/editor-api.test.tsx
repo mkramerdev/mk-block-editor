@@ -12,7 +12,10 @@ import {
 } from "@repo/editor-react/editor";
 import { beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { createEditorContentRuntime } from "../runtime/content/content-runtime.ts";
-import type { EditorDefinition } from "../runtime/definition/contracts.ts";
+import type {
+  EditableEditorDefinition,
+  EditorDefinition,
+} from "../runtime/definition/contracts.ts";
 import { EditorDocument } from "../runtime/document/editor-document-component.tsx";
 import type {
   EditableEditor,
@@ -32,6 +35,8 @@ import {
   initializeTestEditableEditor,
   useTestEditor as useEditor,
 } from "./test-editor-initializers.ts";
+import { createTestContentOperationUpdate } from "./editor-web-test-helpers.ts";
+import { resolveEditorRuntimePort } from "../runtime/document/runtime-port-registry.ts";
 
 const renderProbe = vi.hoisted(() => ({
   editor: null as unknown,
@@ -149,11 +154,11 @@ describe("initializeTestEditableEditor", () => {
         { id: blockId, type: "paragraph", text: "registered" },
       ]),
     });
-    const renderEditor = editor as EditorRuntimePort;
+    const renderEditor = resolveEditorRuntimePort(editor);
     const runtime = {
       definition: testEditableEditorDefinition,
       store: renderEditor.store,
-      editor: editor as EditorImplementation,
+      editor: renderEditor,
     };
     const undo = renderEditor.commands.get(EDITOR_UNDO_COMMAND_ID);
     const redo = renderEditor.commands.get(EDITOR_REDO_COMMAND_ID);
@@ -218,12 +223,12 @@ describe("initializeTestEditableEditor", () => {
         { id: blockId, type: "paragraph", text: "start" },
       ]),
     });
-    (editor as EditorRuntimePort).contentRuntime.applyExternalContentUpdate({
-      blockGraphVersion: (
-        editor as EditorRuntimePort
-      ).getSelectionGraphRevision(),
+    const runtime = resolveEditorRuntimePort(editor);
+    runtime.contentRuntime.applyExternalContentUpdate({
+      blockGraphVersion: runtime.getSelectionGraphRevision(),
       blockId,
       blockType: "paragraph",
+      update: createTestContentOperationUpdate(runtime.contentRuntime),
       readProjection: {
         type: "doc",
         content: [
@@ -234,6 +239,7 @@ describe("initializeTestEditableEditor", () => {
         ],
       },
       origin: "external-change",
+      revision: 1,
     });
 
     expect(editor.canUndo).toBe(false);
@@ -794,10 +800,11 @@ describe("initializeTestEditableEditor", () => {
           renderer: undefined,
         },
       },
-    } as unknown as EditorDefinition;
+    };
 
     expect(() =>
       initializeTestEditableEditor({
+        // @ts-expect-error The missing renderer is the invalid startup contract under test.
         definition: invalidDefinition,
         snapshot: createTestEditorSnapshot([
           { type: "paragraph", text: "invalid definition" },
@@ -809,7 +816,7 @@ describe("initializeTestEditableEditor", () => {
     const definition = {
       ...testEditableEditorDefinition,
       content: { createRuntime },
-    } satisfies EditorDefinition;
+    } satisfies EditableEditorDefinition;
     const snapshot = createTestEditorSnapshot([
       { type: "paragraph", text: "invalid snapshot" },
     ]);
@@ -904,7 +911,7 @@ describe("core structural key behavior", () => {
   it("runs Backspace for a textbox definition with no optional capabilities", () => {
     const firstId = "textbox-first" as BlockId;
     const secondId = "textbox-second" as BlockId;
-    const definition: EditorDefinition = {
+    const definition: EditableEditorDefinition = {
       blocks: {
         paragraph: testEditableEditorDefinition.blocks.paragraph!,
       },
@@ -920,15 +927,11 @@ describe("core structural key behavior", () => {
       ]),
     });
     const result = executeCoreBlockKeyBehavior({
-      editor: editor as EditorRuntimePort,
+      editor: resolveEditorRuntimePort(editor),
       blockId: secondId,
       blockType: "paragraph",
       key: "backspace",
       cursorOffset: 0,
-      readBlockContent: (blockId, blockType) =>
-        editor.readBlockContent(blockId, blockType),
-      readBlockPlainText: (blockId, blockType) =>
-        editor.readBlockPlainText(blockId, blockType),
     });
 
     expect(result).toStrictEqual({ ok: true, handled: true });
@@ -1201,8 +1204,7 @@ describe("useEditor", () => {
       },
       transaction: {
         transactionId: "external-metadata",
-        baseRevision: 0,
-        revision: 1,
+        historyAction: "command",
         graph: null,
         metadata: {
           kind: "updateBlockMetadata",
@@ -1400,8 +1402,7 @@ describe("useEditor", () => {
         },
         transaction: {
           transactionId: "disposed-ingress",
-          baseRevision: 0,
-          revision: 1,
+          historyAction: "command",
           graph: {
             affectedBlockIds: [blockId],
             upsertedBlocks: [],
@@ -1514,10 +1515,8 @@ describe("useEditor", () => {
       ok: true,
       operationResult: { ok: true },
     });
-    expect(
-      (transaction as { operationResult: { operation?: unknown } })
-        .operationResult.operation,
-    ).toBeUndefined();
+    const completed = requireStructuralTransaction(transaction);
+    expect(completed.operationResult.operation).toBeUndefined();
     expect(onChange).not.toHaveBeenCalled();
     expect(rootListener).not.toHaveBeenCalled();
     expect(movingListener).not.toHaveBeenCalled();
@@ -1846,7 +1845,7 @@ function commitTextAppend(
 function createCleanupDefinition(
   events: string[],
   onCreate: () => void = () => undefined,
-): EditorDefinition {
+): EditableEditorDefinition {
   return {
     ...testEditableEditorDefinition,
     content: {
@@ -1863,4 +1862,19 @@ function createCleanupDefinition(
       },
     },
   };
+}
+
+function requireStructuralTransaction(
+  value: ReturnType<
+    EditorImplementation["executeStructuralTransaction"]
+  > | null,
+): Extract<
+  ReturnType<EditorImplementation["executeStructuralTransaction"]>,
+  { readonly ok: true }
+> {
+  expect(value).not.toBeNull();
+  if (!value || !value.ok) {
+    throw new Error("expected a successful structural transaction");
+  }
+  return value;
 }

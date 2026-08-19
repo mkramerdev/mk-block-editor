@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { BlockDefinition } from "../../definitions/block-definition.ts";
 import type {
   BlockType,
   OrderedBlockGraph,
@@ -6,6 +7,7 @@ import type {
 } from "../../document/model/block.ts";
 import type { BlockId } from "../../kernel/identity/ids.ts";
 import { asBlockId } from "../../kernel/identity/uuid.ts";
+import { asContentVersion } from "../../kernel/versioning/versions.ts";
 import { createVersionedBlockRecord } from "../../metadata/block-record.ts";
 import { createBlockRichTextContentFromPlainText } from "../../content/rich-text/rich-inline-content.ts";
 import { testBlockDefinitions } from "../../testing/test-block-definitions.ts";
@@ -20,7 +22,7 @@ import type {
 
 const id = (suffix: number): BlockId =>
   asBlockId(`01890f07-1c00-7000-8000-${String(suffix).padStart(12, "0")}`);
-const blockDefinitions = {
+const blockDefinitions: Readonly<Record<BlockType, BlockDefinition>> = {
   ...testBlockDefinitions,
   emptyFlowShell: {
     kind: "wrapper" as const,
@@ -42,7 +44,8 @@ const block = (
     parentId,
     version: {
       metadataVersion: "1",
-      contentVersion: blockDefinitions[type]?.kind === "text" ? "1" : null,
+      contentVersion:
+        blockDefinitions[type]?.kind === "text" ? asContentVersion("1") : null,
     },
   });
 const graph = (
@@ -72,7 +75,7 @@ const context = (
       ? {
           content: createBlockRichTextContentFromPlainText(blockType, ""),
           plainText: "",
-          version: "1",
+          version: asContentVersion("1"),
         }
       : null,
   validateContent: () => true,

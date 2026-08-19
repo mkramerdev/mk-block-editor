@@ -1,7 +1,7 @@
 import type { BlockType } from "@repo/editor-core/document";
 import type { BlockId } from "@repo/editor-core/kernel";
+import type { AppliedContentCommit } from "@repo/editor-core/operations";
 import type {
-  AppliedContentCommit,
   EditorLocalMutationProvenance,
   EditorPreparedContentSelection,
 } from "@repo/editor-react/editor";
@@ -23,7 +23,7 @@ import {
 } from "@repo/editor-dom/prosemirror";
 import type { BlockLocalDocumentMappingOptions } from "@repo/editor-dom/schema";
 import { blockTextCoordinateCodec } from "@repo/editor-dom/caret";
-import type { EditorContentRuntime } from "../../runtime/content/content-runtime.ts";
+import type { EditorContentRuntime } from "@repo/editor-core/content";
 import type { EditorRuntimePort } from "../../runtime/document/render-port.ts";
 
 export interface CreateActiveProseMirrorProposalAdapterOptions {
@@ -41,9 +41,7 @@ export interface CreateActiveProseMirrorProposalAdapterOptions {
  * Owns the block-local ProseMirror proposal boundary and the publication-only
  * projection boundary. Projection never dispatches.
  */
-export class ActiveProseMirrorProposalAdapter
-  implements ProseMirrorProposalAdapter
-{
+export class ActiveProseMirrorProposalAdapter implements ProseMirrorProposalAdapter {
   private evaluatingProposal = false;
   private projectingFinalizedContent = false;
   private disposed = false;
@@ -114,7 +112,9 @@ export class ActiveProseMirrorProposalAdapter
       if (proposalChangesDocument(proposal)) {
         return this.evaluateContentProposal(proposal, view);
       }
-      if (proposal.previousState.selection.eq(proposal.proposedState.selection)) {
+      if (
+        proposal.previousState.selection.eq(proposal.proposedState.selection)
+      ) {
         return { kind: "view-only", state: proposal.proposedState };
       }
       return this.evaluateSelectionProposal(proposal, view);
@@ -228,9 +228,7 @@ export class ActiveProseMirrorProposalAdapter
     return {
       kind: "accepted",
       state: proposal.proposedState,
-      ...(accepted.release
-        ? { afterStateInstalled: accepted.release }
-        : {}),
+      ...(accepted.release ? { afterStateInstalled: accepted.release } : {}),
     };
   }
 
@@ -333,7 +331,9 @@ export class ActiveProseMirrorProposalAdapter
 
   private createProjectedState(
     view: EditorView,
-    content: NonNullable<ReturnType<EditorContentRuntime["readBlockProjection"]>>,
+    content: NonNullable<
+      ReturnType<EditorContentRuntime["readBlockProjection"]>
+    >,
   ): EditorState {
     const { blockId, blockType, documentMapping } = this.options;
     const state = createBlockLocalProseMirrorState({
@@ -388,7 +388,6 @@ export class ActiveProseMirrorProposalAdapter
     }
     return state;
   }
-
 }
 
 function deriveReplacementText(before: string, after: string): string {

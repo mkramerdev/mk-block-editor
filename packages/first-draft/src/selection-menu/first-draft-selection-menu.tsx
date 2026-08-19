@@ -53,7 +53,9 @@ const actions = Object.freeze([
 export function FirstDraftSelectionMenu({
   editor,
 }: FirstDraftSelectionMenuProps) {
-  return editor.editable ? <EditableFirstDraftSelectionMenu editor={editor} /> : null;
+  return editor.editable ? (
+    <EditableFirstDraftSelectionMenu editor={editor} />
+  ) : null;
 }
 
 function EditableFirstDraftSelectionMenu({
@@ -61,7 +63,10 @@ function EditableFirstDraftSelectionMenu({
 }: {
   readonly editor: EditableEditor;
 }) {
-  const store = useMemo(() => createFirstDraftSelectionMenuStore(editor), [editor]);
+  const store = useMemo(
+    () => createFirstDraftSelectionMenuStore(editor),
+    [editor],
+  );
   const snapshot = useSyncExternalStore(
     store.subscribe,
     store.getSnapshot,
