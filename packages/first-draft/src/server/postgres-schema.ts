@@ -100,7 +100,7 @@ interface IndexRow extends Record<string, unknown> {
   readonly indexdef: unknown;
 }
 
-const expectedColumns = Object.freeze({
+const expectedColumns = {
   editor_documents: [
     ["document_id", "uuid", false],
     ["revision", "integer", false],
@@ -128,10 +128,10 @@ const expectedColumns = Object.freeze({
     ["transaction_json", "text", false],
     ["accepted_at", "bigint", false],
   ],
-} satisfies Record<
+} as const satisfies Record<
   (typeof FIRST_DRAFT_EDITOR_TABLES)[number],
   readonly (readonly [string, string, boolean])[]
->);
+>;
 
 export class FirstDraftPostgresSchemaError extends Error {
   readonly issues: readonly string[];
@@ -212,7 +212,7 @@ export async function validateFirstDraftPostgresSchema(
   }
 
   if (issues.some((issue) => issue.startsWith("missing public."))) {
-    return { ok: false, issues: Object.freeze(issues) };
+    return { ok: false, issues };
   }
 
   const constraints = await client.query<ConstraintRow>(
@@ -348,7 +348,7 @@ export async function validateFirstDraftPostgresSchema(
     ["(document_id, parent_block_id, order_key, block_id)"],
   );
 
-  return { ok: issues.length === 0, issues: Object.freeze(issues) };
+  return { ok: issues.length === 0, issues };
 }
 
 function requireConstraint(

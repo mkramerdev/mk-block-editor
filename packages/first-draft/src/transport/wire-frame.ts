@@ -1,7 +1,7 @@
 export const FIRST_DRAFT_PROTOCOL_VERSION = 4;
 export const MAX_FIRST_DRAFT_FRAME_BYTES = 32 * 1024 * 1024;
 
-const MAGIC = Object.freeze([0x46, 0x44, 0x54, FIRST_DRAFT_PROTOCOL_VERSION]);
+const MAGIC = [0x46, 0x44, 0x54, FIRST_DRAFT_PROTOCOL_VERSION] as const;
 const HEADER_BYTES = 8;
 const LENGTH_BYTES = 4;
 const textEncoder = new TextEncoder();
@@ -92,7 +92,7 @@ export function decodeFirstDraftWireFrame(
     payloads.push(bytes.slice(offset, offset + length));
     offset += length;
   }
-  return { ok: true, metadata, payloads: Object.freeze(payloads) };
+  return { ok: true, metadata, payloads };
 }
 
 function toBytes(input: ArrayBuffer | ArrayBufferView): Uint8Array {

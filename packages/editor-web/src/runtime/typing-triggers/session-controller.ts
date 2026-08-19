@@ -159,10 +159,10 @@ export class EditorTypingTriggerSessionController {
   isCurrentReference(reference: EditorTypingTriggerSessionReference): boolean {
     return Boolean(
       this.active &&
-        reference &&
-        reference.sessionId === this.active.id &&
-        Number.isSafeInteger(reference.revision) &&
-        reference.revision === this.active.revision,
+      reference &&
+      reference.sessionId === this.active.id &&
+      Number.isSafeInteger(reference.revision) &&
+      reference.revision === this.active.revision,
     );
   }
 
@@ -249,18 +249,18 @@ export class EditorTypingTriggerSessionController {
     );
     const match = candidates[0];
     if (!match) return;
-    const activationContext = Object.freeze({
+    const activationContext = {
       blockId: block.id,
       blockType: block.type,
       trigger: match.definition.trigger,
-      triggerRange: Object.freeze({
+      triggerRange: {
         from: match.from,
         to: match.triggerEnd,
-      }),
+      },
       textBeforeTrigger: extractPlainTextFromRichTextDocument(
         sliceRichTextDocument(block.type, content, 0, match.from),
       ),
-    });
+    };
     try {
       if (match.definition.isAllowed) {
         const allowed = match.definition.isAllowed(activationContext);
@@ -418,10 +418,10 @@ function isTriggerBoundary(
   const node = previous[0];
   return Boolean(
     node &&
-      ((node.type === "text" &&
-        "text" in node &&
-        typeof node.text === "string" &&
-        /\s/u.test(node.text)) ||
-        node.type === "hard_break"),
+    ((node.type === "text" &&
+      "text" in node &&
+      typeof node.text === "string" &&
+      /\s/u.test(node.text)) ||
+      node.type === "hard_break"),
   );
 }

@@ -58,12 +58,10 @@ export function normalizeNewSelection(
     ok: true,
     range: {
       ...normalized.range,
-      rangeBlocks: Object.freeze(
-        normalized.range.rangeBlocks.map((block) => ({
-          ...block,
-          owner: documentSelectionOwner,
-        })),
-      ),
+      rangeBlocks: normalized.range.rangeBlocks.map((block) => ({
+        ...block,
+        owner: documentSelectionOwner,
+      })),
     },
   };
 }
@@ -131,14 +129,14 @@ export function normalizeSelectionRangeResult(
           focus: normalizedFocus,
           normalizedStart,
           normalizedEnd,
-          rangeBlocks: Object.freeze([
+          rangeBlocks: [
             createRangeBlock(
               target,
               coverageResult,
               normalizedStart,
               normalizedEnd,
             ),
-          ]),
+          ],
         },
       };
     }
@@ -267,7 +265,7 @@ function createSelectionRangeBlocks(
       createRangeBlock(target, coverageResult, normalizedStart, normalizedEnd),
     );
   }
-  return Object.freeze(rangeBlocks);
+  return rangeBlocks;
 }
 
 function evaluateSelectionCoverage(
@@ -284,12 +282,10 @@ function evaluateSelectionCoverage(
     const evaluatedChildren = relevantChildBlocks(target, context).map(
       (child) => evaluateSelectionCoverage(child, context),
     );
-    childCoverages = Object.freeze(
-      evaluatedChildren.map((result) => ({
-        blockId: result.blockId,
-        coverage: result.coverage,
-      })),
-    );
+    childCoverages = evaluatedChildren.map((result) => ({
+      blockId: result.blockId,
+      coverage: result.coverage,
+    }));
     coverage = aggregateContainerCoverage(directCoverage, childCoverages);
   }
   const result: BlockSelectionCoverageResult = {

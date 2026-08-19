@@ -133,12 +133,12 @@ export function materializeEditorDocumentData(
     if (block.contentReadProjection) {
       contentById[blockId] = block.contentReadProjection;
       const checkpoint = encodeLocalContentCheckpoint(block.contentReadProjection);
-      opaqueContentCheckpoints[blockId] = Object.freeze({
+      opaqueContentCheckpoints[blockId] = {
         kind: checkpoint.kind,
         format: checkpoint.format,
         version: checkpoint.version,
         payloadBase64: encodeBase64(checkpoint.payload.copy()),
-      });
+      };
     }
   }
 

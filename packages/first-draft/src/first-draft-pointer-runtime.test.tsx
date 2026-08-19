@@ -162,9 +162,8 @@ describe("First Draft real pointer activation allocation contract", () => {
     ]);
     expect(acquisitions[0]!.context).toBe(acquisitions[1]!.context);
     expect(runtime!.getLiveBlockContentCount()).toBe(1);
-    const sharedEditorView = rendered.container.querySelector<HTMLElement>(
-      ".ProseMirror",
-    )!;
+    const sharedEditorView =
+      rendered.container.querySelector<HTMLElement>(".ProseMirror")!;
     expectNativeCaret(editor, sharedEditorView, blockA);
 
     const firstAContext = acquisitions[1]!.context;
@@ -398,7 +397,10 @@ describe("First Draft real pointer activation allocation contract", () => {
     });
     allocations.yDocs = 0;
     const checkpointDecodes = vi.spyOn(globalThis, "atob");
-    const acquisitions: Array<{ readonly blockId: BlockId; readonly reason: string }> = [];
+    const acquisitions: Array<{
+      readonly blockId: BlockId;
+      readonly reason: string;
+    }> = [];
     let runtime: YjsBlockContentRuntime | null = null;
     const changes = vi.fn();
     const viewState = createFirstDraftViewStateStore();
@@ -444,23 +446,28 @@ describe("First Draft real pointer activation allocation contract", () => {
       </FirstDraftViewStateProvider>,
     );
     const implementation = editor as unknown as EditorImplementation;
-    const holdA = runtime!.acquireBlockContent(blockA, "paragraph", "canonical-transaction");
+    const holdA = runtime!.acquireBlockContent(
+      blockA,
+      "paragraph",
+      "canonical-transaction",
+    );
     act(() => {
       const anchor = captureTextPoint(implementation, blockA, 1);
       const focus = captureTextPoint(implementation, blockB, 4);
-      const settlement = implementation.selectionController.commitCanonicalSelection(
-        { direction: "forward", anchor, focus },
-        implementation,
-        implementation.getSelectionGraphRevision(),
-        {
-          publication: { kind: "standalone-local" },
-          cause: "programmatic-edit",
-        },
-        {
-          resolveTextAnchor: (point) =>
-            implementation.resolveSelectionTextAnchor(point),
-        },
-      );
+      const settlement =
+        implementation.selectionController.commitCanonicalSelection(
+          { direction: "forward", anchor, focus },
+          implementation,
+          implementation.getSelectionGraphRevision(),
+          {
+            publication: { kind: "standalone-local" },
+            cause: "programmatic-edit",
+          },
+          {
+            resolveTextAnchor: (point) =>
+              implementation.resolveSelectionTextAnchor(point),
+          },
+        );
       if (settlement.kind === "rejected")
         throw new Error(`selection was rejected: ${settlement.reason}`);
     });
@@ -501,7 +508,8 @@ describe("First Draft real pointer activation allocation contract", () => {
     }).toEqual(baseline);
     expect(runtime!.getLiveBlockContentCount()).toBe(1);
 
-    const viewBeforeUi = rendered.container.querySelector<HTMLElement>(".ProseMirror");
+    const viewBeforeUi =
+      rendered.container.querySelector<HTMLElement>(".ProseMirror");
     const uiBaseline = {
       yDocs: allocations.yDocs,
       checkpointDecodes: checkpointDecodes.mock.calls.length,
@@ -535,10 +543,12 @@ describe("First Draft real pointer activation allocation contract", () => {
     }).toEqual(uiBaseline);
 
     const canonical = editor.selection.getSnapshot();
-    if (canonical.kind !== "document") throw new Error("selection was not committed");
+    if (canonical.kind !== "document")
+      throw new Error("selection was not committed");
     acquisitions.length = 0;
     const docsBeforeCommand = allocations.yDocs;
-    const sharedView = rendered.container.querySelector<HTMLElement>(".ProseMirror");
+    const sharedView =
+      rendered.container.querySelector<HTMLElement>(".ProseMirror");
     if (!sharedView) throw new Error("active EditorView was not mounted");
     expect(
       editor.formatSelectionInlineMark({
@@ -571,7 +581,8 @@ function captureTextPoint(
   const canonical = editor.selectionController.getCanonicalSnapshot();
   if (canonical.kind !== "document") throw new Error("text focus was rejected");
   const point = canonical.snapshot.documentSelection.focus;
-  if (!point?.textAnchor) throw new Error("text focus did not create an anchor");
+  if (!point?.textAnchor)
+    throw new Error("text focus did not create an anchor");
   return point;
 }
 
@@ -579,20 +590,20 @@ function createPointerSnapshot(): EditorInstanceSnapshot {
   const source = createFirstDraftSnapshot();
   return {
     ...source,
-    blocks: Object.freeze({
+    blocks: {
       [blockA]: source.blocks[blockA]!,
       [blockB]: source.blocks[blockB]!,
-    }),
-    rootBlockIds: Object.freeze([blockA, blockB]),
-    childIdsByParentId: Object.freeze({}),
-    content: Object.freeze({
+    },
+    rootBlockIds: [blockA, blockB],
+    childIdsByParentId: {},
+    content: {
       [blockA]: source.content[blockA]!,
       [blockB]: source.content[blockB]!,
-    }),
-    opaqueContentCheckpoints: Object.freeze({
+    },
+    opaqueContentCheckpoints: {
       [blockA]: source.opaqueContentCheckpoints[blockA]!,
       [blockB]: source.opaqueContentCheckpoints[blockB]!,
-    }),
+    },
   };
 }
 
@@ -609,25 +620,25 @@ function createListPointerSnapshot(): EditorInstanceSnapshot {
   };
   return {
     ...source,
-    blocks: Object.freeze(blocks),
-    rootBlockIds: Object.freeze([beforeList, bulletList, afterList]),
-    childIdsByParentId: Object.freeze({
-      [bulletList]: Object.freeze([bulletItemA, bulletItemB]),
-      [bulletItemA]: Object.freeze([bulletTextA]),
-      [bulletItemB]: Object.freeze([bulletTextB]),
-    }),
-    content: Object.freeze({
+    blocks,
+    rootBlockIds: [beforeList, bulletList, afterList],
+    childIdsByParentId: {
+      [bulletList]: [bulletItemA, bulletItemB],
+      [bulletItemA]: [bulletTextA],
+      [bulletItemB]: [bulletTextB],
+    },
+    content: {
       [beforeList]: source.content[beforeList]!,
       [bulletTextA]: source.content[bulletTextA]!,
       [bulletTextB]: source.content[bulletTextB]!,
       [afterList]: source.content[afterList]!,
-    }),
-    opaqueContentCheckpoints: Object.freeze({
+    },
+    opaqueContentCheckpoints: {
       [beforeList]: source.opaqueContentCheckpoints[beforeList]!,
       [bulletTextA]: source.opaqueContentCheckpoints[bulletTextA]!,
       [bulletTextB]: source.opaqueContentCheckpoints[bulletTextB]!,
       [afterList]: source.opaqueContentCheckpoints[afterList]!,
-    }),
+    },
   };
 }
 
@@ -673,7 +684,9 @@ function dispatchPointerUp(
     shell.querySelector<HTMLElement>('[data-editor-text-root="true"]') ?? shell;
   if (atStart) installTestRect(target);
   act(() =>
-    target.dispatchEvent(pointerEvent("pointerup", pointerId, atStart ? 0 : 10)),
+    target.dispatchEvent(
+      pointerEvent("pointerup", pointerId, atStart ? 0 : 10),
+    ),
   );
 }
 
@@ -837,7 +850,8 @@ function expectNativeCaret(
 ): void {
   const selection = editor.selection.getSnapshot();
   expect(selection.kind).toBe("document");
-  if (selection.kind !== "document") throw new Error("Missing document selection");
+  if (selection.kind !== "document")
+    throw new Error("Missing document selection");
   const point = selection.snapshot.endpoints.head;
   expect(point?.blockId).toBe(blockId);
   expect(point?.textAnchor).not.toBeNull();

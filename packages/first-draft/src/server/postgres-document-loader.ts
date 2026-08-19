@@ -228,7 +228,7 @@ export async function loadFirstDraftAcceptedTransactionsFromPostgres(
       ok: true,
       requestedRevision: options.revision,
       currentRevision,
-      transactions: Object.freeze(transactions),
+      transactions,
     };
   } catch (error) {
     if (open) await rollbackBestEffort(options.client);
@@ -282,39 +282,35 @@ function materializeBootstrapBlocks(
         row.content_checkpoint_base64,
         "block content checkpoint",
       );
-      entries.push(
-        Object.freeze({
-          block: createBlockRecord({
-            id: blockId,
-            type: blockType,
-            parentId,
-            ...(metadata ? { metadata } : {}),
-          }),
-          readProjection: projection as EditorTextBlockContent,
-          checkpoint: Object.freeze({
-            kind: "checkpoint" as const,
-            format: EDITOR_YJS_CONTENT_FORMAT,
-            version: EDITOR_YJS_CONTENT_FORMAT_VERSION,
-            payloadBase64: checkpoint,
-          }),
+      entries.push({
+        block: createBlockRecord({
+          id: blockId,
+          type: blockType,
+          parentId,
+          ...(metadata ? { metadata } : {}),
         }),
-      );
+        readProjection: projection as EditorTextBlockContent,
+        checkpoint: {
+          kind: "checkpoint" as const,
+          format: EDITOR_YJS_CONTENT_FORMAT,
+          version: EDITOR_YJS_CONTENT_FORMAT_VERSION,
+          payloadBase64: checkpoint,
+        },
+      });
     } else if (projection !== null) {
       invalid(`Persisted non-text block ${blockId} owns text content`);
     } else {
       if (row.content_checkpoint_base64 !== null) {
         invalid(`Persisted non-text block ${blockId} owns a checkpoint`);
       }
-      entries.push(
-        Object.freeze({
-          block: createBlockRecord({
-            id: blockId,
-            type: blockType,
-            parentId,
-            ...(metadata ? { metadata } : {}),
-          }),
+      entries.push({
+        block: createBlockRecord({
+          id: blockId,
+          type: blockType,
+          parentId,
+          ...(metadata ? { metadata } : {}),
         }),
-      );
+      });
     }
   }
   return entries;

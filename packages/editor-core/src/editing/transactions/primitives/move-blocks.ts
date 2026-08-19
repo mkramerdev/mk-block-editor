@@ -9,10 +9,10 @@ export function moveBlocks(input: {
   readonly sourcePlacement: BlockPlacement;
   readonly destinationPlacement: BlockPlacement;
 }): StructuralTransactionOperation {
-  return Object.freeze({
+  return {
     kind: "moveBlocks",
-    blockIds: Object.freeze([...input.blockIds]),
-    sourcePlacement: Object.freeze({ ...input.sourcePlacement }),
-    destinationPlacement: Object.freeze({ ...input.destinationPlacement }),
-  });
+    blockIds: [...input.blockIds],
+    sourcePlacement: { ...input.sourcePlacement },
+    destinationPlacement: { ...input.destinationPlacement },
+  };
 }

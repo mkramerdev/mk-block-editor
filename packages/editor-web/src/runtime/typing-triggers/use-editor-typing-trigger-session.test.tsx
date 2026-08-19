@@ -74,15 +74,15 @@ function session(
   query: string,
 ): EditorTypingTriggerSession {
   const blockId = "hook-block" as BlockId;
-  return Object.freeze({
+  return {
     id: id as EditorTypingTriggerSessionId,
     triggerId: "mention",
     trigger: "@",
     blockId,
     blockType: "paragraph",
-    range: Object.freeze({ from: 0, to: 1 + query.length }),
+    range: { from: 0, to: 1 + query.length },
     query,
     revision,
-    selection: Object.freeze({ blockId, offset: 1 + query.length }),
-  });
+    selection: { blockId, offset: 1 + query.length },
+  };
 }

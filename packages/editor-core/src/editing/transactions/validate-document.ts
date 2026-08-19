@@ -73,8 +73,9 @@ export interface StructuralDocumentSelection {
   readonly focus: StructuralDocumentSelectionPoint;
 }
 
-export interface ValidateStructuralDocumentInput
-  extends OrderedBlockGraph<Block | VersionedBlock> {
+export interface ValidateStructuralDocumentInput extends OrderedBlockGraph<
+  Block | VersionedBlock
+> {
   readonly blockDefinitions: Readonly<Record<BlockType, BlockDefinition>>;
   readonly readContent?: (
     blockId: BlockId,
@@ -89,8 +90,9 @@ export interface ValidateStructuralDocumentInput
   readonly validators?: readonly StructuralDocumentValidator[];
 }
 
-export interface StructuralDocumentValidatorInput
-  extends OrderedBlockGraph<Block | VersionedBlock> {
+export interface StructuralDocumentValidatorInput extends OrderedBlockGraph<
+  Block | VersionedBlock
+> {
   readonly blockDefinitions: Readonly<Record<BlockType, BlockDefinition>>;
   /**
    * When present, the candidate is derived from a previously validated
@@ -211,7 +213,7 @@ export function validateStructuralDocument(
           blockType: block.type,
           parentId: block.parentId,
           constraint: "direct-child-sequence",
-          actualChildTypes: Object.freeze(childTypes),
+          actualChildTypes: childTypes,
         },
       );
     }
@@ -265,7 +267,7 @@ export function validateStructuralDocument(
     validateSelection(input.selection, input, readContent, issues);
   return issues.length === 0
     ? { valid: true, issues: [] }
-    : { valid: false, issues: Object.freeze(issues) };
+    : { valid: false, issues };
 }
 
 function validateContent(

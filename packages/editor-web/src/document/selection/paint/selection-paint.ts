@@ -64,9 +64,7 @@ export function deriveEditorSelectionRangeBlockPaint({
       ? {
           kind: "text-range",
           blockId: rangeBlock.blockId,
-          ranges: Object.freeze([
-            range,
-          ]) as readonly EditorSelectionTextRangePaint[],
+          ranges: [range] as readonly EditorSelectionTextRangePaint[],
           coverageResult: rangeBlock.coverageResult,
         }
       : noSelectionPaint();

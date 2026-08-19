@@ -8,9 +8,12 @@ describe("EditorImmutableBinary", () => {
     source.fill(9);
 
     expect(value.equalsBytes(new Uint8Array([1, 2, 3]))).toBe(true);
-    expect(Reflect.set(value, "0", 7)).toBe(false);
+    Reflect.set(value, "0", 7);
+    expect(value.equalsBytes(new Uint8Array([1, 2, 3]))).toBe(true);
     expect("buffer" in value).toBe(false);
-    expect(Object.isFrozen(value)).toBe(true);
+    const copy = value.copy();
+    copy.fill(7);
+    expect(value.equalsBytes(new Uint8Array([1, 2, 3]))).toBe(true);
   });
 
   it("detaches transferred ownership and copies directly into an encoder destination", () => {

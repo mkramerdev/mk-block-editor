@@ -775,7 +775,7 @@ function success(
     handled: true,
     plan: {
       origin: "generic-backspace",
-      operations: Object.freeze([...operations]),
+      operations: [...operations],
       preconditions: {
         blocks: expectedBlocks.map((block) => ({
           blockId: block.id,

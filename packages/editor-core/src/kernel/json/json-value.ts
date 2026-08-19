@@ -1,9 +1,24 @@
 export type JsonPrimitive = null | boolean | number | string;
 export type JsonValue =
   | JsonPrimitive
-  | JsonValue[]
-  | { [key: string]: JsonValue };
-export type JsonObject = { [key: string]: JsonValue };
+  | readonly JsonValue[]
+  | { readonly [key: string]: JsonValue };
+export type JsonObject = { readonly [key: string]: JsonValue };
+
+/** Mutable construction shape. Seal it as JsonValue before publication. */
+export type MutableJsonValue =
+  | JsonPrimitive
+  | MutableJsonValue[]
+  | { [key: string]: MutableJsonValue };
+export type MutableJsonObject = { [key: string]: MutableJsonValue };
+
+export type MutableJsonClone<T> = T extends JsonPrimitive
+  ? T
+  : T extends readonly (infer Item)[]
+    ? MutableJsonClone<Item>[]
+    : T extends object
+      ? { -readonly [Key in keyof T]: MutableJsonClone<T[Key]> }
+      : T;
 
 export function validateJsonObject(
   value: unknown,
@@ -19,9 +34,9 @@ export function isJsonObject(value: unknown): value is JsonObject {
   return validateJsonObject(value).length === 0;
 }
 
-export function cloneJsonValue<T>(value: T): T {
+export function cloneJsonValue<T>(value: T): MutableJsonClone<T> {
   if (Array.isArray(value)) {
-    return value.map((item) => cloneJsonValue(item)) as T;
+    return value.map((item) => cloneJsonValue(item)) as MutableJsonClone<T>;
   }
   if (value && typeof value === "object") {
     const source = value as Record<string, unknown>;
@@ -36,7 +51,30 @@ export function cloneJsonValue<T>(value: T): T {
         value: cloneJsonValue(source[key]),
       });
     }
-    return clone as T;
+    return clone as MutableJsonClone<T>;
+  }
+  return value as MutableJsonClone<T>;
+}
+
+/** Clone and deeply seal one validated JSON value at an ownership boundary. */
+export function ownJsonValue<T extends JsonValue>(value: T): T {
+  return freezeOwnedJsonValue(cloneJsonValue(value)) as T;
+}
+
+function freezeOwnedJsonValue(value: MutableJsonValue): MutableJsonValue {
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index += 1) {
+      value[index] = freezeOwnedJsonValue(value[index]!);
+    }
+    Object.freeze(value);
+    return value;
+  }
+  if (value && typeof value === "object") {
+    for (const key of Object.keys(value)) {
+      value[key] = freezeOwnedJsonValue(value[key]!);
+    }
+    Object.freeze(value);
+    return value;
   }
   return value;
 }

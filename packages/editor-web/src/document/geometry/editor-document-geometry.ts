@@ -284,9 +284,7 @@ export function createEditorDocumentGeometryOwner(): EditorDocumentGeometryOwner
         .filter((rect): rect is GeometryRect => rect !== null)
         .map((rect) => projectViewportRectToDocument(rect, projection))
         .filter((rect): rect is EditorDocumentRect => rect !== null);
-      return projected.length === 0
-        ? emptyDocumentRects
-        : Object.freeze(projected);
+      return projected.length === 0 ? emptyDocumentRects : projected;
     },
     readTextCanonicalLength(blockId) {
       return readCanonicalLength(resolveTextRoot(blockId));
@@ -420,7 +418,9 @@ export function createEditorDocumentGeometryOwner(): EditorDocumentGeometryOwner
       if (disposed) return false;
       const registered = textRoots.get(blockId);
       if (!registered) return false;
-      const previousShell = registered.element.closest(editorBlockShellSelector);
+      const previousShell = registered.element.closest(
+        editorBlockShellSelector,
+      );
       const nextShell = element.closest(editorBlockShellSelector);
       if (!previousShell || previousShell !== nextShell) return false;
       registered.element = element;
@@ -618,13 +618,13 @@ function normalizeRect(
 function freezeDocumentRect(
   rect: GeometryRect | null,
 ): EditorDocumentRect | null {
-  return rect ? Object.freeze({ ...rect }) : null;
+  return rect ? { ...rect } : null;
 }
 
 function freezeViewportRect(
   rect: GeometryRect | null,
 ): EditorViewportRect | null {
-  return rect ? Object.freeze({ ...rect }) : null;
+  return rect ? { ...rect } : null;
 }
 
 function readClippingAncestorRects(
@@ -651,9 +651,9 @@ function isClippingElement(element: HTMLElement): boolean {
     element.ownerDocument.defaultView?.getComputedStyle(element) ?? null;
   return Boolean(
     computed &&
-      [computed.overflow, computed.overflowX, computed.overflowY].some(
-        isClippingOverflow,
-      ),
+    [computed.overflow, computed.overflowX, computed.overflowY].some(
+      isClippingOverflow,
+    ),
   );
 }
 

@@ -16,7 +16,7 @@ export function createFirstDraftTableColumnIds(
   if (new Set(ids).size !== ids.length || ids.some((id) => !id)) {
     throw new Error("table column ids must be unique non-empty strings");
   }
-  return Object.freeze(ids);
+  return ids;
 }
 
 export function createFirstDraftTableMetadata(

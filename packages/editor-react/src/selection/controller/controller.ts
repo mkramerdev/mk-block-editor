@@ -1,9 +1,7 @@
 import { cloneJsonValue, type BlockId } from "@repo/editor-core/kernel";
 import type { EditorContentBaseToken } from "@repo/editor-core/operations";
 import type { BlockSelectionCoverageResult } from "@repo/editor-core/selection";
-import {
-  type EditorSelectionGraphReader,
-} from "../graph/reader.ts";
+import { type EditorSelectionGraphReader } from "../graph/reader.ts";
 import { validateEditorSelectionInvalidation } from "./invalidation.ts";
 import {
   normalizeNewSelection,
@@ -462,7 +460,7 @@ class SelectionControllerImplementation implements SelectionController {
 
   setKeyboardNavigation(input: { readonly preferredX: number | null }): void {
     if (this.disposed) return;
-    this.keyboardNavigation = Object.freeze({ ...input });
+    this.keyboardNavigation = { ...input };
   }
 
   readKeyboardNavigation(): {
@@ -480,9 +478,9 @@ class SelectionControllerImplementation implements SelectionController {
     preferredX: number | null = null,
   ): CanonicalSelectionSettlementResult {
     if (this.keyboardNavigation) {
-      this.keyboardNavigation = Object.freeze({
+      this.keyboardNavigation = {
         preferredX,
-      });
+      };
     }
     return this.settleRangeSelection(
       anchor,
@@ -516,18 +514,16 @@ class SelectionControllerImplementation implements SelectionController {
     )
       return null;
     this.compositionRevision += 1;
-    this.compositionSession = Object.freeze({
+    this.compositionSession = {
       revision: this.compositionRevision,
       frozenSelection: input.frozenSelection,
       selectionRevision: input.frozenSelection.revision,
       graphRevision: input.graphRevision,
-      baseTokens: Object.freeze(
-        input.baseTokens.map((token) => Object.freeze({ ...token })),
-      ),
+      baseTokens: input.baseTokens.map((token) => ({ ...token })),
       hostBlockId: input.hostBlockId,
       hasUnpublishedDraft: false,
       latestText: null,
-    });
+    };
     this.publishPresentation(this.presentationSnapshot.settlement);
     return this.compositionSession;
   }
@@ -538,11 +534,11 @@ class SelectionControllerImplementation implements SelectionController {
   }): SelectionCompositionSessionSnapshot | null {
     const current = this.compositionSession;
     if (!current || current.revision !== input.revision) return null;
-    this.compositionSession = Object.freeze({
+    this.compositionSession = {
       ...current,
       hasUnpublishedDraft: true,
       latestText: input.latestText,
-    });
+    };
     this.publishPresentation(this.presentationSnapshot.settlement);
     return this.compositionSession;
   }
@@ -1318,11 +1314,11 @@ function logicalSelectionPointEquals(
     left === right ||
     Boolean(
       left &&
-        right &&
-        left.blockId === right.blockId &&
-        left.blockType === right.blockType &&
-        left.blockCategory === right.blockCategory &&
-        left.textOffset === right.textOffset,
+      right &&
+      left.blockId === right.blockId &&
+      left.blockType === right.blockType &&
+      left.blockCategory === right.blockCategory &&
+      left.textOffset === right.textOffset,
     )
   );
 }
@@ -1340,11 +1336,11 @@ function isCollapsedTextSelection(
   const head = snapshot.endpoints.head;
   return Boolean(
     anchor &&
-      head &&
-      isEditorSelectionTextAnchor(anchor.textAnchor) &&
-      isEditorSelectionTextAnchor(head.textAnchor) &&
-      anchor.blockId === head.blockId &&
-      anchor.textOffset === head.textOffset,
+    head &&
+    isEditorSelectionTextAnchor(anchor.textAnchor) &&
+    isEditorSelectionTextAnchor(head.textAnchor) &&
+    anchor.blockId === head.blockId &&
+    anchor.textOffset === head.textOffset,
   );
 }
 
@@ -1412,9 +1408,7 @@ function subsystemKey(subsystem: BlockInternalSelectionSubsystem): string {
   return subsystem.id;
 }
 
-const emptyBlockIdSet = Object.freeze(
-  new Set<BlockId>(),
-) as ReadonlySet<BlockId>;
+const emptyBlockIdSet: ReadonlySet<BlockId> = new Set<BlockId>();
 
 function changedSelectionBlockIds(
   previous: EditorSelectionSnapshot,
@@ -1451,9 +1445,10 @@ function selectionSubscriptionBlockKeys(
   return keys;
 }
 
-const emptyPaintBlockKeyMap = Object.freeze(
-  new Map<BlockId, string>(),
-) as ReadonlyMap<BlockId, string>;
+const emptyPaintBlockKeyMap: ReadonlyMap<BlockId, string> = new Map<
+  BlockId,
+  string
+>();
 
 function selectionSubscriptionBlockKey(
   rangeBlock: EditorSelectionRangeBlock,
@@ -1511,16 +1506,16 @@ function createBlockInternalSelectionRange(
     focus: point,
     normalizedStart: point,
     normalizedEnd: point,
-    rangeBlocks: Object.freeze([
+    rangeBlocks: [
       {
         ...createDirectSelectionRangeBlock(target, coverageResult),
-        owner: Object.freeze({
+        owner: {
           kind: "block-internal" as const,
           blockId: target.block.id,
           subsystem,
-        }),
+        },
       },
-    ]) as readonly EditorSelectionRangeBlock[],
+    ] as readonly EditorSelectionRangeBlock[],
   };
 }
 

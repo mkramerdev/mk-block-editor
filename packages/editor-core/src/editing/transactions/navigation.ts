@@ -12,8 +12,7 @@ import type { BlockId } from "../../kernel/identity/ids.ts";
 import { placementAtIndex } from "./boundary.ts";
 import type { BlockPlacement } from "./types.ts";
 
-export interface AdjacentInsertionNavigationInput
-  extends OrderedBlockGraph<VersionedBlock> {
+export interface AdjacentInsertionNavigationInput extends OrderedBlockGraph<VersionedBlock> {
   readonly originBlockId: BlockId;
   readonly proposedType: BlockType;
   readonly blockDefinitions: Readonly<Record<BlockType, BlockDefinition>>;
@@ -54,14 +53,14 @@ export function findAdjacentValidInsertionPlacement(
       cursorDefinition?.kind === "wrapper" &&
       cursorDefinition.contentBoundary
     ) {
-      return Object.freeze({
+      return {
         ok: false,
         reason: "content-boundary",
         boundaryBlockingWrapperId: cursor.id,
-        crossedAncestorIds: Object.freeze(
-          crossed.filter((ancestorId) => ancestorId !== cursor.id),
+        crossedAncestorIds: crossed.filter(
+          (ancestorId) => ancestorId !== cursor.id,
         ),
-      });
+      };
     }
     const parentId = cursor.parentId ?? null;
     const siblings = liveChildren(input, parentId);
@@ -72,12 +71,12 @@ export function findAdjacentValidInsertionPlacement(
       placement &&
       acceptsInsertion(input, parentId, cursorIndex + 1, input.proposedType)
     ) {
-      return Object.freeze({
+      return {
         ok: true,
         placement,
         remainsInsideDirectParent: parentId === directParentId,
-        crossedAncestorIds: Object.freeze([...crossed]),
-      });
+        crossedAncestorIds: [...crossed],
+      };
     }
 
     const following = siblings[cursorIndex + 1] ?? null;
@@ -87,12 +86,12 @@ export function findAdjacentValidInsertionPlacement(
     ) {
       const descended = earliestCanonicalPlacement(input, following);
       if (descended) {
-        return Object.freeze({
+        return {
           ok: true,
           placement: descended,
           remainsInsideDirectParent: true,
-          crossedAncestorIds: Object.freeze([...crossed]),
-        });
+          crossedAncestorIds: [...crossed],
+        };
       }
     }
     if (parentId === null) break;

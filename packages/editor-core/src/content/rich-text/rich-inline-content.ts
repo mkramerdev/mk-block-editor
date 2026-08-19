@@ -45,20 +45,25 @@ export interface RichInlineContentNormalizationOptions {
   readonly inlineMarks?: readonly InlineMarkDefinition[];
   readonly inlineAtoms?: readonly {
     readonly type: string;
-    readonly metadata: Readonly<
-      Record<string, InlineMetadataFieldDefinition>
-    >;
+    readonly metadata: Readonly<Record<string, InlineMetadataFieldDefinition>>;
   }[];
 }
 
-export function textBlockNodeNameForBlockType(_blockType: BlockType): "paragraph" {
+export function textBlockNodeNameForBlockType(
+  _blockType: BlockType,
+): "paragraph" {
   void _blockType;
   return "paragraph";
 }
 
-export function createBlockRichTextContentFromPlainText(blockType: BlockType, text: string): RichTextDocumentNodeJson {
-  const textblock: RichTextBlockNodeJson = { type: textBlockNodeNameForBlockType(blockType) };
-  if (text.length > 0) textblock.content = [{ type: "text", text }];
+export function createBlockRichTextContentFromPlainText(
+  blockType: BlockType,
+  text: string,
+): RichTextDocumentNodeJson {
+  const textblock: RichTextBlockNodeJson = {
+    type: textBlockNodeNameForBlockType(blockType),
+    ...(text.length > 0 ? { content: [{ type: "text", text }] } : {}),
+  };
   return { type: "doc", content: [textblock] };
 }
 
@@ -146,14 +151,20 @@ export function assertRichTextMarkJson(
   mark: unknown,
   label = "mark",
 ): asserts mark is RichTextMarkJson {
-  assertRichTextValidation(validateRichTextMarkJson(mark, label), "rich text mark");
+  assertRichTextValidation(
+    validateRichTextMarkJson(mark, label),
+    "rich text mark",
+  );
 }
 
 export function assertRichTextAttrsJson(
   attrs: unknown,
   label = "attrs",
 ): asserts attrs is RichTextAttrsJson {
-  assertRichTextValidation(validateRichTextAttrsJson(attrs, label), "rich text attrs");
+  assertRichTextValidation(
+    validateRichTextAttrsJson(attrs, label),
+    "rich text attrs",
+  );
 }
 
 export function isRichTextDocument(
@@ -178,30 +189,39 @@ export function retargetRichTextDocument(
   options: RichInlineContentNormalizationOptions = {},
 ): RichTextDocumentNodeJson {
   assertRichTextDocumentNodeJson(content, "content", options);
-  const blocks = content.content.length > 0 ? content.content : [{ type: textBlockNodeNameForBlockType(blockType) }];
+  const blocks =
+    content.content.length > 0
+      ? content.content
+      : [{ type: textBlockNodeNameForBlockType(blockType) }];
   return {
     type: "doc",
     content: blocks.map((block) => {
-      const nextBlock: RichTextBlockNodeJson = {
-        type: textBlockNodeNameForBlockType(blockType),
-      };
       const inlineContent = block.content
         ? mergeAdjacentTextNodes(block.content, options)
         : [];
-      if (inlineContent.length > 0) nextBlock.content = inlineContent;
+      const nextBlock: RichTextBlockNodeJson = {
+        type: textBlockNodeNameForBlockType(blockType),
+        ...(inlineContent.length > 0 ? { content: inlineContent } : {}),
+      };
       return nextBlock;
     }),
   };
 }
 
-export function richTextBlock(content: RichTextDocumentNodeJson): RichTextBlockNodeJson {
+export function richTextBlock(
+  content: RichTextDocumentNodeJson,
+): RichTextBlockNodeJson {
   const first = content.content[0];
   return first ? cloneJsonValue(first) : { type: "paragraph" };
 }
 
-export function richTextBlockInlineContent(content: RichTextDocumentNodeJson): RichTextInlineNodeJson[] {
+export function richTextBlockInlineContent(
+  content: RichTextDocumentNodeJson,
+): RichTextInlineNodeJson[] {
   const textblock = richTextBlock(content);
-  return textblock.content ? textblock.content.map((node) => cloneJsonValue(node)) : [];
+  return textblock.content
+    ? textblock.content.map((node) => cloneJsonValue(node))
+    : [];
 }
 
 export function richTextDocumentWithInlineContent(
@@ -211,31 +231,43 @@ export function richTextDocumentWithInlineContent(
   options: RichInlineContentNormalizationOptions = {},
 ): RichTextDocumentNodeJson {
   assertRichTextDocumentNodeJson(baseDoc);
-  const textblock = richTextBlock(baseDoc);
+  const {
+    attrs: _attrs,
+    content: _content,
+    ...textblock
+  } = richTextBlock(baseDoc);
+  void _attrs;
+  void _content;
+  const content = mergeAdjacentTextNodes(inlineContent, options);
   const nextTextblock: RichTextBlockNodeJson = {
     ...textblock,
     type: textBlockNodeNameForBlockType(blockType),
+    ...(content.length > 0 ? { content } : {}),
   };
-  delete nextTextblock.attrs;
-  const content = mergeAdjacentTextNodes(inlineContent, options);
-  if (content.length > 0) nextTextblock.content = content;
-  else delete nextTextblock.content;
   return { type: "doc", content: [nextTextblock] };
 }
 
-export function extractPlainTextFromRichTextDocument(content: RichTextDocumentNodeJson): string {
-  return richTextBlockInlineContent(content).map((node) => {
-    if (isRichTextTextNode(node)) return node.text;
-    if (node.type === "hard_break") return "\n";
-    return "";
-  }).join("");
+export function extractPlainTextFromRichTextDocument(
+  content: RichTextDocumentNodeJson,
+): string {
+  return richTextBlockInlineContent(content)
+    .map((node) => {
+      if (isRichTextTextNode(node)) return node.text;
+      if (node.type === "hard_break") return "\n";
+      return "";
+    })
+    .join("");
 }
 
-export function richTextDocumentContentSize(content: RichTextDocumentNodeJson): number {
+export function richTextDocumentContentSize(
+  content: RichTextDocumentNodeJson,
+): number {
   return richInlineContentSize(richTextBlockInlineContent(content));
 }
 
-export function richInlineContentSize(content: readonly RichTextInlineNodeJson[]): number {
+export function richInlineContentSize(
+  content: readonly RichTextInlineNodeJson[],
+): number {
   return richInlineContentUnitSize(content);
 }
 
@@ -243,12 +275,15 @@ export function richInlineNodeSize(node: RichTextInlineNodeJson): number {
   return richInlineNodeUnitSize(node);
 }
 
-export function richTextDocumentHasDurableInlineContent(content: RichTextDocumentNodeJson): boolean {
-  return richTextBlockInlineContent(content).some((node) => (
-    hasKnownMarks(node) ||
-    node.type === "hard_break" ||
-    isRichTextAtomNode(node)
-  ));
+export function richTextDocumentHasDurableInlineContent(
+  content: RichTextDocumentNodeJson,
+): boolean {
+  return richTextBlockInlineContent(content).some(
+    (node) =>
+      hasKnownMarks(node) ||
+      node.type === "hard_break" ||
+      isRichTextAtomNode(node),
+  );
 }
 
 export function sliceRichTextDocument(
@@ -287,7 +322,11 @@ export function appendPlainTextToRichTextDocument(
   text: string,
 ): RichTextDocumentNodeJson {
   if (!text) return normalizeRichTextDocument(blockType, content);
-  return concatenateRichTextDocuments(blockType, content, createBlockRichTextContentFromPlainText(blockType, text));
+  return concatenateRichTextDocuments(
+    blockType,
+    content,
+    createBlockRichTextContentFromPlainText(blockType, text),
+  );
 }
 
 export function removeTextRangeFromRichTextDocument(
@@ -321,7 +360,10 @@ export function mergeAdjacentTextNodes(
       isRichTextTextNode(clone) &&
       inlineMarksEqual(previous.marks, clone.marks, options)
     ) {
-      previous.text += clone.text;
+      merged[merged.length - 1] = {
+        ...previous,
+        text: previous.text + clone.text,
+      };
       continue;
     }
     merged.push(clone);
@@ -365,10 +407,14 @@ function validateRichTextBlockNodeJsonErrors(
   if (!record.valid) return [...record.errors];
   const errors: string[] = [
     ...validateAllowedKeys(record.value, ["type", "content", "attrs"], label),
-    ...(record.value.type === "paragraph" ? [] : [`${label}.type must be paragraph`]),
+    ...(record.value.type === "paragraph"
+      ? []
+      : [`${label}.type must be paragraph`]),
   ];
   if (record.value.attrs !== undefined) {
-    errors.push(...validateRichTextAttrsJsonErrors(record.value.attrs, `${label}.attrs`));
+    errors.push(
+      ...validateRichTextAttrsJsonErrors(record.value.attrs, `${label}.attrs`),
+    );
   }
   if (record.value.content !== undefined) {
     if (!Array.isArray(record.value.content)) {
@@ -395,21 +441,31 @@ function validateRichTextInlineNodeJsonErrors(
 ): string[] {
   const record = validateJsonRecord(node, label);
   if (!record.valid) return [...record.errors];
-  if (record.value.type === "text") return validateRichTextTextNodeJsonErrors(record.value, label);
-  if (record.value.type === "hard_break") return validateRichTextHardBreakNodeJsonErrors(record.value, label);
+  if (record.value.type === "text")
+    return validateRichTextTextNodeJsonErrors(record.value, label);
+  if (record.value.type === "hard_break")
+    return validateRichTextHardBreakNodeJsonErrors(record.value, label);
   return validateRichTextAtomNodeJsonErrors(record.value, label, options);
 }
 
-function validateRichTextTextNodeJsonErrors(node: Record<string, unknown>, label: string): string[] {
+function validateRichTextTextNodeJsonErrors(
+  node: Record<string, unknown>,
+  label: string,
+): string[] {
   const errors: string[] = [
     ...validateAllowedKeys(node, ["type", "text", "marks"], label),
-    ...(typeof node.text === "string" ? [] : [`${label}.text must be a string`]),
+    ...(typeof node.text === "string"
+      ? []
+      : [`${label}.text must be a string`]),
   ];
   errors.push(...validateOptionalRichTextMarks(node.marks, `${label}.marks`));
   return errors;
 }
 
-function validateRichTextHardBreakNodeJsonErrors(node: Record<string, unknown>, label: string): string[] {
+function validateRichTextHardBreakNodeJsonErrors(
+  node: Record<string, unknown>,
+  label: string,
+): string[] {
   return [
     ...validateAllowedKeys(node, ["type", "marks"], label),
     ...validateOptionalRichTextMarks(node.marks, `${label}.marks`),
@@ -450,35 +506,57 @@ function validateRichTextAtomNodeJsonErrors(
   return errors;
 }
 
-function validateRichTextMarkJsonErrors(mark: unknown, label: string): string[] {
+function validateRichTextMarkJsonErrors(
+  mark: unknown,
+  label: string,
+): string[] {
   const record = validateJsonRecord(mark, label);
   if (!record.valid) return [...record.errors];
   const markType = record.value.type;
   const errors: string[] = [
     ...validateAllowedKeys(record.value, ["type", "attrs"], label),
-    ...(isInlineMarkName(markType) ? [] : [`${label}.type must be a known inline mark`]),
+    ...(isInlineMarkName(markType)
+      ? []
+      : [`${label}.type must be a known inline mark`]),
   ];
   if (!isInlineMarkName(markType)) return errors;
-  errors.push(...validateMarkAttrs(markType, record.value.attrs, `${label}.attrs`));
+  errors.push(
+    ...validateMarkAttrs(markType, record.value.attrs, `${label}.attrs`),
+  );
   return errors;
 }
 
-function validateRichTextAttrsJsonErrors(attrs: unknown, label: string): string[] {
+function validateRichTextAttrsJsonErrors(
+  attrs: unknown,
+  label: string,
+): string[] {
   return [...validateJsonObject(attrs, label)];
 }
 
-function validateOptionalRichTextMarks(marks: unknown, label: string): string[] {
+function validateOptionalRichTextMarks(
+  marks: unknown,
+  label: string,
+): string[] {
   if (marks === undefined) return [];
   if (!Array.isArray(marks)) return [`${label} must be an array`];
   const errors: string[] = [];
   for (let index = 0; index < marks.length; index += 1) {
-    errors.push(...validateRichTextMarkJsonErrors(marks[index], `${label}[${index}]`));
+    errors.push(
+      ...validateRichTextMarkJsonErrors(marks[index], `${label}[${index}]`),
+    );
   }
   return errors;
 }
 
-function validateMarkAttrs(markType: InlineMarkName, attrs: unknown, label: string): string[] {
-  const definition = findInlineMarkDefinition(primitiveInlineMarkDefinitions, markType);
+function validateMarkAttrs(
+  markType: InlineMarkName,
+  attrs: unknown,
+  label: string,
+): string[] {
+  const definition = findInlineMarkDefinition(
+    primitiveInlineMarkDefinitions,
+    markType,
+  );
   if (!definition) return [`${label} is not supported for ${markType}`];
   if (attrs === undefined) {
     return Object.values(definition.attrs).some((contract) => contract.required)
@@ -487,9 +565,16 @@ function validateMarkAttrs(markType: InlineMarkName, attrs: unknown, label: stri
   }
   const attrsRecord = validateJsonRecord(attrs, label);
   if (!attrsRecord.valid) return [...attrsRecord.errors];
-  const errors = [...validateAllowedKeys(attrsRecord.value, Object.keys(definition.attrs), label)];
+  const errors = [
+    ...validateAllowedKeys(
+      attrsRecord.value,
+      Object.keys(definition.attrs),
+      label,
+    ),
+  ];
   for (const [attrName, contract] of Object.entries(definition.attrs)) {
-    if (contract.required && !Object.hasOwn(attrsRecord.value, attrName)) errors.push(`${label}.${attrName} is required`);
+    if (contract.required && !Object.hasOwn(attrsRecord.value, attrName))
+      errors.push(`${label}.${attrName} is required`);
   }
   const sanitized = sanitizeInlineMarkAttrs(definition, attrsRecord.value);
   if (!sanitized) {
@@ -497,7 +582,10 @@ function validateMarkAttrs(markType: InlineMarkName, attrs: unknown, label: stri
     return errors;
   }
   for (const key of Object.keys(attrsRecord.value)) {
-    if (!Object.hasOwn(sanitized, key) || !jsonValuesEqual(attrsRecord.value[key], sanitized[key])) {
+    if (
+      !Object.hasOwn(sanitized, key) ||
+      !jsonValuesEqual(attrsRecord.value[key], sanitized[key])
+    ) {
       errors.push(`${label}.${key} is invalid for ${markType}`);
     }
   }
@@ -514,10 +602,7 @@ function normalizeInlineNode(
       (candidate) => candidate.type === node.type,
     );
     const metadata = definition
-      ? validateAndCloneInlineAtomMetadata(
-          node.metadata,
-          definition.metadata,
-        )
+      ? validateAndCloneInlineAtomMetadata(node.metadata, definition.metadata)
       : null;
     if (definition && !metadata?.valid) {
       throw new TypeError(`Invalid rich text inline atom ${node.type}`);
@@ -547,9 +632,15 @@ function normalizedMarks(
   return marks.flatMap((mark) => {
     const validation = validateRichTextMarkJson(mark);
     if (!validation.valid) return [];
-    const definition = findInlineMarkDefinition(inlineMarks, validation.value.type);
+    const definition = findInlineMarkDefinition(
+      inlineMarks,
+      validation.value.type,
+    );
     if (!definition) return [];
-    const attrs = sanitizeInlineMarkAttrs(definition, validation.value.attrs ?? {});
+    const attrs = sanitizeInlineMarkAttrs(
+      definition,
+      validation.value.attrs ?? {},
+    );
     if (!attrs) return [];
     return [createRichTextMark(definition.name, attrs)];
   });
@@ -583,35 +674,54 @@ function inlineMarksEqual(
   if (leftMarks.length !== rightMarks.length) return false;
   return leftMarks.every((mark, index) => {
     const other = rightMarks[index];
-    return Boolean(other && mark.type === other.type && inlineAttrsEqual(
-      mark.attrs ?? {},
-      other.attrs ?? {},
-    ));
+    return Boolean(
+      other &&
+      mark.type === other.type &&
+      inlineAttrsEqual(mark.attrs ?? {}, other.attrs ?? {}),
+    );
   });
 }
 
-function inlineAttrsEqual(left: Readonly<Record<string, unknown>>, right: Readonly<Record<string, unknown>>): boolean {
+function inlineAttrsEqual(
+  left: Readonly<Record<string, unknown>>,
+  right: Readonly<Record<string, unknown>>,
+): boolean {
   const leftKeys = Object.keys(left).sort();
   const rightKeys = Object.keys(right).sort();
   if (leftKeys.length !== rightKeys.length) return false;
-  return leftKeys.every((key, index) => key === rightKeys[index] && jsonValuesEqual(left[key], right[key]));
+  return leftKeys.every(
+    (key, index) =>
+      key === rightKeys[index] && jsonValuesEqual(left[key], right[key]),
+  );
 }
 
-function validationResult<T>(value: unknown, errors: readonly string[]): RichTextJsonValidationResult<T> {
+function validationResult<T>(
+  value: unknown,
+  errors: readonly string[],
+): RichTextJsonValidationResult<T> {
   return errors.length === 0
     ? { valid: true, value: value as T, errors: [] }
     : { valid: false, value: null, errors };
 }
 
-function assertRichTextValidation<T>(result: RichTextJsonValidationResult<T>, kind: string): asserts result is Extract<RichTextJsonValidationResult<T>, { valid: true }> {
-  if (!result.valid) throw new TypeError(`Invalid ${kind}: ${result.errors.join("; ")}`);
+function assertRichTextValidation<T>(
+  result: RichTextJsonValidationResult<T>,
+  kind: string,
+): asserts result is Extract<RichTextJsonValidationResult<T>, { valid: true }> {
+  if (!result.valid)
+    throw new TypeError(`Invalid ${kind}: ${result.errors.join("; ")}`);
 }
 
 function validateJsonRecord(
   value: unknown,
   label: string,
 ): RichTextJsonValidationResult<Record<string, unknown>> {
-  if (!isRecord(value)) return { valid: false, value: null, errors: [`${label} must be a JSON object`] };
+  if (!isRecord(value))
+    return {
+      valid: false,
+      value: null,
+      errors: [`${label} must be a JSON object`],
+    };
   const jsonErrors = validateJsonObject(value, label);
   return jsonErrors.length === 0
     ? { valid: true, value, errors: [] }

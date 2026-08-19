@@ -21,7 +21,7 @@ describe("SelectionPaintLayer", () => {
   it("keeps canonical caret revisions current while the truthful paint model remains none", () => {
     let selection = rangeSelection(1, 1, null, 1);
     let invalidate = () => undefined;
-    const noPaint = Object.freeze({ kind: "none" as const });
+    const noPaint = { kind: "none" as const };
     const editor = {
       editable: false,
       selection: {
@@ -347,7 +347,7 @@ describe("SelectionPaintLayer", () => {
         return () => undefined;
       },
     };
-    const noPaint = Object.freeze({ kind: "none" as const });
+    const noPaint = { kind: "none" as const };
     const editor = {
       editable: false,
       selection: reader,
@@ -469,18 +469,18 @@ function selectionPaintReader(selection: CanonicalLocalSelection) {
     selection.kind === "none" ? null : selection.snapshot.endpoints;
   const isCaret = Boolean(
     endpoints?.anchor?.textAnchor &&
-      endpoints.head?.textAnchor &&
-      endpoints.anchor.blockId === endpoints.head.blockId &&
-      endpoints.anchor.textOffset === endpoints.head.textOffset,
+    endpoints.head?.textAnchor &&
+    endpoints.anchor.blockId === endpoints.head.blockId &&
+    endpoints.anchor.textOffset === endpoints.head.textOffset,
   );
   const snapshot =
     selection.kind === "none" || isCaret
-      ? Object.freeze({ kind: "none" as const })
-      : Object.freeze({
+      ? { kind: "none" as const }
+      : {
           kind: "range" as const,
           sourceRevision: selection.revision,
           snapshot: selection.snapshot,
-        });
+        };
   return {
     getSnapshot: () => snapshot,
     subscribe: () => () => undefined,
@@ -488,7 +488,7 @@ function selectionPaintReader(selection: CanonicalLocalSelection) {
 }
 
 function noneSelection(): CanonicalLocalSelection {
-  return Object.freeze({ kind: "none", revision: 0 });
+  return { kind: "none", revision: 0 };
 }
 
 function rangeSelection(

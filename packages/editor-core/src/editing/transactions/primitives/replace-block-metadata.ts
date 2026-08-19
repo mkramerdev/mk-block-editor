@@ -9,10 +9,10 @@ export function replaceBlockMetadata(input: {
   readonly metadata: JsonObject | null;
 }): ReplaceBlockMetadataOperation {
   const metadata = normalizeBlockMetadata(input.metadata ?? undefined);
-  return Object.freeze({
+  return {
     kind: "replaceBlockMetadata",
     blockId: input.blockId,
     expectedMetadataVersion: input.expectedMetadataVersion,
-    metadata: metadata === undefined ? null : Object.freeze(metadata),
-  });
+    metadata: metadata ?? null,
+  };
 }

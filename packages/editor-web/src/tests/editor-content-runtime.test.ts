@@ -672,7 +672,7 @@ describe("local content envelopes", () => {
     const runtime = createRuntime({ [firstBlockId]: "immutable" });
     const first = runtime.readBlockContentCheckpoint(firstBlockId, "paragraph");
     const originalByte = first.payload.byteAt(0);
-    expect(Reflect.set(first.payload, "0", 255)).toBe(false);
+    Reflect.set(first.payload, "0", 255);
     const second = runtime.readBlockContentCheckpoint(
       firstBlockId,
       "paragraph",
@@ -806,7 +806,10 @@ function readText(runtime: EditorContentRuntime, blockId: BlockId): string {
 
 function requireAnchor(
   result: ReturnType<EditorContentRuntime["tryCreateTextAnchorInLiveContext"]>,
-): Extract<ReturnType<EditorContentRuntime["tryCreateTextAnchorInLiveContext"]>, { ok: true }> {
+): Extract<
+  ReturnType<EditorContentRuntime["tryCreateTextAnchorInLiveContext"]>,
+  { ok: true }
+> {
   if (!result.ok) throw new Error(result.message ?? result.reason);
   return result;
 }
@@ -814,7 +817,10 @@ function requireAnchor(
 function resolveAnchor(
   runtime: EditorContentRuntime,
   anchor: Pick<
-    Extract<ReturnType<EditorContentRuntime["tryCreateTextAnchorInLiveContext"]>, { ok: true }>,
+    Extract<
+      ReturnType<EditorContentRuntime["tryCreateTextAnchorInLiveContext"]>,
+      { ok: true }
+    >,
     "codec" | "payload"
   >,
 ) {

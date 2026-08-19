@@ -91,14 +91,12 @@ export function planBlockTreeCreation(
       metadata,
     );
     nodes.push(
-      Object.freeze(
-        createBlockRecord({
-          id,
-          type,
-          parentId,
-          metadata: materializedMetadata,
-        }),
-      ),
+      createBlockRecord({
+        id,
+        type,
+        parentId,
+        metadata: materializedMetadata,
+      }),
     );
     const nextAncestors = new Set(ancestors);
     nextAncestors.add(type);
@@ -167,8 +165,8 @@ export function planBlockTreeCreation(
         const definition = input.blockDefinitions[node.type];
         return Boolean(
           definition &&
-            (definition.kind === "text" || definition.kind === "atomic") &&
-            blockCreationSelectionTargetKind(definition) !== null,
+          (definition.kind === "text" || definition.kind === "atomic") &&
+          blockCreationSelectionTargetKind(definition) !== null,
         );
       })
     : undefined;
@@ -184,11 +182,11 @@ export function planBlockTreeCreation(
       : undefined;
   const selectionBlockId =
     primarySelectionNode?.id ?? wrapperSelectionNode?.id ?? null;
-  return Object.freeze({
+  return {
     rootBlockId,
-    nodes: Object.freeze(nodes),
+    nodes,
     selectionBlockId,
-  });
+  };
 }
 
 export function materializeBlockCreationMetadata(

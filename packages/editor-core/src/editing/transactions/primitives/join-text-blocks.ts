@@ -5,9 +5,9 @@ export function joinTextBlocks(
   leftBlockId: BlockId,
   rightBlockId: BlockId,
 ): StructuralTransactionOperation {
-  return Object.freeze({
+  return {
     kind: "joinTextBlocks",
     leftBlockId,
     rightBlockId,
-  });
+  };
 }

@@ -9,5 +9,5 @@ export function splitText(input: {
   readonly expectedContentVersion: ContentVersion | string | null;
   readonly outputId: string;
 }): StructuralTransactionOperation {
-  return Object.freeze({ kind: "splitText", ...input });
+  return { kind: "splitText", ...input };
 }

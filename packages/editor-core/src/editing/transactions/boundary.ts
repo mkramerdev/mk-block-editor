@@ -40,12 +40,12 @@ export function resolveBlockPlacement(
 ): ResolvedBlockPlacement | null {
   if (!validateBlockPlacement(graph, placement)) return null;
   const ids = childIdsAt(graph, placement.parentId);
-  return Object.freeze({
+  return {
     parentId: placement.parentId,
     childIndex: placement.childIndex,
     previousSiblingId: ids[placement.childIndex - 1] ?? null,
     nextSiblingId: ids[placement.childIndex] ?? null,
-  });
+  };
 }
 
 export function placementAtIndex(
@@ -54,7 +54,5 @@ export function placementAtIndex(
   childIndex: number,
 ): BlockPlacement | null {
   const placement = { parentId, childIndex };
-  return validateBlockPlacement(graph, placement)
-    ? Object.freeze(placement)
-    : null;
+  return validateBlockPlacement(graph, placement) ? placement : null;
 }

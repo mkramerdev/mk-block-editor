@@ -126,20 +126,18 @@ export function applyStructuralTransaction(
     }
     const blocks = state.sealBlocks();
     const contentOperations = projectContentOperations(state);
-    const transaction: AppliedStructuralTransaction = Object.freeze({
+    const transaction: AppliedStructuralTransaction = {
       blocks,
       rootBlockIds: state.rootBlockIds,
       childIdsByParentId: sealChildIdsByParentId(state),
       contentOperations,
-      stagedContent: Object.freeze(
-        Object.fromEntries(
-          [...state.content].map(([blockId, content]) => [blockId, content]),
-        ),
+      stagedContent: Object.fromEntries(
+        [...state.content].map(([blockId, content]) => [blockId, content]),
       ),
       selection: state.selection,
-      affectedBlockIds: Object.freeze([...state.affected]),
-      splitOutputs: Object.freeze(Object.fromEntries(state.splitOutputs)),
-    });
+      affectedBlockIds: [...state.affected],
+      splitOutputs: Object.fromEntries(state.splitOutputs),
+    };
     return { ok: true, transaction };
   } catch (error) {
     if (error instanceof TransactionFailure) {
@@ -239,19 +237,10 @@ function applyOperation(
       );
       return;
     case "appendTextBlockContent":
-      applyAppendTextBlockContent(
-        operation,
-        index,
-        state,
-        context,
-      );
+      applyAppendTextBlockContent(operation, index, state, context);
       return;
     case "applyContentOperation": {
-      const block = liveBlock(
-        state.blocks,
-        operation.operation.blockId,
-        index,
-      );
+      const block = liveBlock(state.blocks, operation.operation.blockId, index);
       if (
         block.type !== operation.operation.blockType ||
         context.blockDefinitions[block.type]?.kind !== "text"
@@ -323,7 +312,7 @@ function applyOperation(
       applyReplaceBlockMetadata(operation, index, state, context);
       return;
     case "setSelection":
-      state.selection = Object.freeze({ ...operation.target });
+      state.selection = { ...operation.target };
       return;
   }
 }
@@ -360,13 +349,14 @@ function applyReplaceBlockMetadata(
   }
   if (jsonValuesEqual(currentMetadata ?? null, metadata ?? null)) return;
 
+  const { metadata: _metadata, ...blockWithoutMetadata } = block;
+  void _metadata;
   const nextBlock: VersionedBlock = {
-    ...block,
+    ...blockWithoutMetadata,
+    ...(metadata === undefined ? {} : { metadata }),
     metadataVersion:
       context.nextMetadataVersion ?? incrementVersion(block.metadataVersion),
   };
-  if (metadata === undefined) delete nextBlock.metadata;
-  else nextBlock.metadata = metadata;
   state.blocks[block.id] = nextBlock;
   state.affected.add(block.id);
 }
@@ -689,14 +679,22 @@ function applyAppendTextBlockContent(
     expectedSourceContentVersion,
   } = operation;
   if (destinationBlockId === sourceBlockId) {
-    fail("invalid-plan", index, "appendTextBlockContent requires distinct blocks");
+    fail(
+      "invalid-plan",
+      index,
+      "appendTextBlockContent requires distinct blocks",
+    );
   }
   const left = liveBlock(state.blocks, destinationBlockId, index);
   const right = liveBlock(state.blocks, sourceBlockId, index);
   const leftDefinition = context.blockDefinitions[left.type];
   const rightDefinition = context.blockDefinitions[right.type];
   if (leftDefinition?.kind !== "text" || rightDefinition?.kind !== "text") {
-    fail("invalid-content", index, "appendTextBlockContent requires two text blocks");
+    fail(
+      "invalid-content",
+      index,
+      "appendTextBlockContent requires two text blocks",
+    );
   }
   if (
     left.contentVersion !== expectedDestinationContentVersion ||
@@ -716,7 +714,11 @@ function applyAppendTextBlockContent(
     operation.operation.blockType !== left.type ||
     operation.operation.position.blockId !== left.id
   ) {
-    fail("invalid-content", index, "append content operation target is invalid");
+    fail(
+      "invalid-content",
+      index,
+      "append content operation target is invalid",
+    );
   }
   const joinOffset =
     state.contentSizes.get(left.id) ?? operation.operation.position.offset;
@@ -724,12 +726,7 @@ function applyAppendTextBlockContent(
     fail("stale-precondition", index, "append content offset changed");
   }
   state.contentSizes.set(left.id, joinOffset);
-  recordIncrementalContentOperation(
-    left,
-    operation.operation,
-    state,
-    context,
-  );
+  recordIncrementalContentOperation(left, operation.operation, state, context);
   return joinOffset;
 }
 
@@ -745,7 +742,11 @@ function nextCanonicalLeafId(
       const current = liveBlock(state.blocks, currentId, index);
       const definition = context.blockDefinitions[current.type];
       if (!definition) {
-        fail("invalid-structure", index, `block type ${current.type} is unknown`);
+        fail(
+          "invalid-structure",
+          index,
+          `block type ${current.type} is unknown`,
+        );
       }
       if (definition.kind === "text" || definition.kind === "atomic") {
         return current.id;
@@ -1491,7 +1492,7 @@ function currentCanonicalOrder(
       fail("invalid-structure", null, `block ${blockId} is unreachable`);
     }
   }
-  return Object.freeze(ordered);
+  return ordered;
 }
 
 function assertRangeBlockPreconditions(
@@ -1861,16 +1862,12 @@ function resolveDeleteSelection(
 function projectContentOperations(
   state: MutableTransactionState,
 ): readonly EditorBlockContentOperationBatch[] {
-  return Object.freeze(
-    [...state.contentOperations]
-      .filter(([blockId]) => {
-        const block = state.blocks[blockId];
-        return block !== undefined && !block.tombstone;
-      })
-      .map(([blockId, operations]) =>
-        Object.freeze({ blockId, operations: Object.freeze(operations) }),
-      ),
-  );
+  return [...state.contentOperations]
+    .filter(([blockId]) => {
+      const block = state.blocks[blockId];
+      return block !== undefined && !block.tombstone;
+    })
+    .map(([blockId, operations]) => ({ blockId, operations }));
 }
 
 function recordContentReplacement(
@@ -1888,13 +1885,13 @@ function recordContentReplacement(
     target: { kind: "text" as const },
   };
   const range = {
-      from: { blockId: block.id, offset: 0 },
-      to: {
-        blockId: block.id,
-        offset: richTextDocumentContentSize(before),
-      },
+    from: { blockId: block.id, offset: 0 },
+    to: {
+      blockId: block.id,
+      offset: richTextDocumentContentSize(before),
+    },
   };
-  const operation: EditorLogicalContentOperation = Object.freeze(
+  const operation: EditorLogicalContentOperation =
     deletedContent.length === 0
       ? {
           ...base,
@@ -1915,8 +1912,7 @@ function recordContentReplacement(
             range,
             content,
             deletedContent,
-          },
-  );
+          };
   recordContentOperation(operation, state);
 }
 
@@ -1971,8 +1967,7 @@ function validateSelectionTarget(
       index,
       `selection block ${block.id} has no text content`,
     );
-  const size =
-    stagedSize ?? richTextDocumentContentSize(current!.content);
+  const size = stagedSize ?? richTextDocumentContentSize(current!.content);
   if (
     !Number.isInteger(target.offset) ||
     target.offset < 0 ||
@@ -2295,20 +2290,18 @@ function setChildIds(
     if (blockIdSequencesEqual(state.rootBlockIds, childIds)) return;
     state.rootBlockIds = blockIdSequencesEqual(state.baseRootBlockIds, childIds)
       ? state.baseRootBlockIds
-      : Object.freeze([...childIds]);
+      : [...childIds];
     return;
   }
   const current = state.childIdsByParentId[parentId];
   if (current && blockIdSequencesEqual(current, childIds)) return;
   const base = state.baseChildIdsByParentId[parentId];
   const next =
-    base && blockIdSequencesEqual(base, childIds)
-      ? base
-      : Object.freeze([...childIds]);
-  state.childIdsByParentId = Object.freeze({
+    base && blockIdSequencesEqual(base, childIds) ? base : [...childIds];
+  state.childIdsByParentId = {
     ...state.childIdsByParentId,
     [parentId]: next,
-  });
+  };
 }
 
 function deleteChildIds(
@@ -2318,7 +2311,7 @@ function deleteChildIds(
   if (!(parentId in state.childIdsByParentId)) return;
   const next = { ...state.childIdsByParentId };
   delete next[parentId];
-  state.childIdsByParentId = Object.freeze(next);
+  state.childIdsByParentId = next;
 }
 
 function sealChildIdsByParentId(

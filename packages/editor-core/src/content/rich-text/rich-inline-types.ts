@@ -1,30 +1,28 @@
-import type {
-  JsonObject as EditorJsonMap,
-} from "../../kernel/json/json-value.ts";
+import type { JsonObject as EditorJsonMap } from "../../kernel/json/json-value.ts";
 import type { InlineMarkName } from "../marks/types.ts";
 
 export type RichTextAttrsJson = EditorJsonMap;
 
 export type RichTextMarkJson = EditorJsonMap & {
-  type: InlineMarkName;
-  attrs?: RichTextAttrsJson;
+  readonly type: InlineMarkName;
+  readonly attrs?: RichTextAttrsJson;
 };
 
 export type RichTextTextNodeJson = EditorJsonMap & {
-  type: "text";
-  text: string;
-  marks?: RichTextMarkJson[];
+  readonly type: "text";
+  readonly text: string;
+  readonly marks?: readonly RichTextMarkJson[];
 };
 
 export type RichTextHardBreakNodeJson = EditorJsonMap & {
-  type: "hard_break";
-  marks?: RichTextMarkJson[];
+  readonly type: "hard_break";
+  readonly marks?: readonly RichTextMarkJson[];
 };
 
 export type RichTextAtomNodeJson = EditorJsonMap & {
-  type: string;
-  metadata: EditorJsonMap;
-  marks?: RichTextMarkJson[];
+  readonly type: string;
+  readonly metadata: EditorJsonMap;
+  readonly marks?: readonly RichTextMarkJson[];
 };
 
 export type RichTextInlineNodeJson =
@@ -33,14 +31,14 @@ export type RichTextInlineNodeJson =
   | RichTextAtomNodeJson;
 
 export type RichTextBlockNodeJson = EditorJsonMap & {
-  type: "paragraph";
-  content?: RichTextInlineNodeJson[];
-  attrs?: RichTextAttrsJson;
+  readonly type: "paragraph";
+  readonly content?: readonly RichTextInlineNodeJson[];
+  readonly attrs?: RichTextAttrsJson;
 };
 
 export type RichTextDocumentNodeJson = EditorJsonMap & {
-  type: "doc";
-  content: RichTextBlockNodeJson[];
+  readonly type: "doc";
+  readonly content: readonly RichTextBlockNodeJson[];
 };
 
 export type RichTextJsonValidationResult<T> =

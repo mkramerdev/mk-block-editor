@@ -1,5 +1,6 @@
 import type { CompiledCanonicalEditorDefinition } from "../definition/compiled-editor-definition.ts";
 import type { EditorDefinition } from "../definition/contracts.ts";
+import { createImmutableSet } from "../definition/immutable-map.ts";
 
 /**
  * Immutable resources used by canonical read projection.
@@ -18,10 +19,8 @@ export function createCanonicalContentResources(input: {
   const definition = input.compiledDefinition.definition;
   return Object.freeze({
     definition,
-    inlineAtomTypes: Object.freeze(
-      new Set(
-        input.compiledDefinition.inlineAtomRegistry.definitions.keys(),
-      ),
+    inlineAtomTypes: createImmutableSet(
+      input.compiledDefinition.inlineAtomRegistry.definitions.keys(),
     ),
   });
 }

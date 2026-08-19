@@ -51,7 +51,7 @@ export function createFirstDraftPostgresPersistence(
         options.onError?.(error);
         return {
           ok: false,
-          issues: Object.freeze(["PostgreSQL is unavailable."]),
+          issues: ["PostgreSQL is unavailable."],
         };
       }
       try {
@@ -60,7 +60,7 @@ export function createFirstDraftPostgresPersistence(
         options.onError?.(error);
         return {
           ok: false,
-          issues: Object.freeze(["PostgreSQL schema validation failed."]),
+          issues: ["PostgreSQL schema validation failed."],
         };
       } finally {
         client.release();

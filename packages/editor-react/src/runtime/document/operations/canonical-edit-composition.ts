@@ -84,12 +84,10 @@ function canonicalFragmentRootTypes(
   fragment: CanonicalBlockFragment,
 ): readonly BlockType[] {
   const blockById = new Map(fragment.blocks.map((block) => [block.id, block]));
-  return Object.freeze(
-    fragment.rootBlockIds.flatMap((rootId) => {
-      const record = blockById.get(rootId);
-      return record ? [record.type] : [];
-    }),
-  );
+  return fragment.rootBlockIds.flatMap((rootId) => {
+    const record = blockById.get(rootId);
+    return record ? [record.type] : [];
+  });
 }
 
 function resolveCaretComposition(
@@ -309,7 +307,7 @@ function resolveSelectionComposition(
     fragment = fragmentWithSuffix;
     range = {
       ...range,
-      blocks: Object.freeze([{ ...last, to: size }]),
+      blocks: [{ ...last, to: size }],
       end: { kind: "text", blockId: last.blockId, offset: size },
     };
   }
@@ -354,7 +352,7 @@ function resolveSelectionComposition(
   return {
     deletion: range,
     insertions: [{ placement, fragment }],
-    ...(joins.length > 0 ? { joins: Object.freeze(joins) } : {}),
+    ...(joins.length > 0 ? { joins } : {}),
     ...(finalSelection ? { finalSelection } : {}),
   };
 }

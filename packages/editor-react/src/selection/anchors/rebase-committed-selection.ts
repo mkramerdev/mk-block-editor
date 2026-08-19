@@ -145,12 +145,12 @@ export function rebaseCommittedSelectionAnchors(
     context.graphRevision !== snapshot.documentSelection.graphRevision;
   const changed = endpointChanged || projectionChanged;
   const endpoints = endpointChanged
-    ? Object.freeze({
+    ? {
         anchor: resolvedAnchor.point,
         head: resolvedHead.point,
         normalizedStart: resolvedStart.point,
         normalizedEnd: resolvedEnd.point,
-      })
+      }
     : snapshot.endpoints;
   const rebasedBlocks = rebaseBoundaryBlocks(
     snapshot.documentSelection.rangeBlocks,
@@ -159,7 +159,7 @@ export function rebaseCommittedSelectionAnchors(
   );
   const documentSelection =
     endpointChanged || projectionChanged
-      ? Object.freeze({
+      ? {
           ...snapshot.documentSelection,
           graphRevision: context.graphRevision,
           anchor: resolvedAnchor.point,
@@ -167,13 +167,13 @@ export function rebaseCommittedSelectionAnchors(
           normalizedStart: resolvedStart.point,
           normalizedEnd: resolvedEnd.point,
           rangeBlocks: rebasedBlocks,
-        })
+        }
       : snapshot.documentSelection;
   return {
     ok: true,
     sourceSelectionRevision: snapshot.revision,
     rebasedEndpoints: endpoints,
-    snapshot: Object.freeze({ committed: snapshot, documentSelection }),
+    snapshot: { committed: snapshot, documentSelection },
     changed,
     normalizationInvoked: false,
   };
@@ -198,15 +198,15 @@ function rebaseBoundaryBlocks(
     )
       return rangeBlock;
     changed = true;
-    return Object.freeze({
+    return {
       ...rangeBlock,
       ...(isStart
         ? { startOffset: nextStart, startTextAnchor: start.textAnchor! }
         : {}),
       ...(isEnd ? { endOffset: nextEnd, endTextAnchor: end.textAnchor! } : {}),
-    });
+    };
   });
-  return changed ? Object.freeze(rebased) : blocks;
+  return changed ? rebased : blocks;
 }
 
 type PointResult =
@@ -247,12 +247,12 @@ function rebasePoint(
     return { ok: true, point };
   return {
     ok: true,
-    point: Object.freeze({
+    point: {
       ...point,
       textOffset: resolved.textOffset,
       textAnchor: point.textAnchor,
       affinity: resolved.affinity,
-    }),
+    },
   };
 }
 

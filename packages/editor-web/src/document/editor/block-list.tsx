@@ -333,12 +333,13 @@ function initialSequencePartitions(
   ) {
     partitions.push({
       id: partitions.length,
-      blockIds: Object.freeze(
-        blockIds.slice(offset, offset + INITIAL_SEQUENCE_PARTITION_SIZE),
+      blockIds: blockIds.slice(
+        offset,
+        offset + INITIAL_SEQUENCE_PARTITION_SIZE,
       ),
     });
   }
-  return Object.freeze(partitions);
+  return partitions;
 }
 
 function reconcileSequencePartitions(
@@ -383,14 +384,14 @@ function reconcileSequencePartitions(
         ? prior
         : {
             id: prior?.id ?? nextId++,
-            blockIds: Object.freeze(nextIds),
+            blockIds: nextIds,
           },
     );
   }
   return {
     nextId,
     blockIds,
-    partitions: Object.freeze(partitions),
+    partitions,
   };
 }
 

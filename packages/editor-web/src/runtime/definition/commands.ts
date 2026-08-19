@@ -1,4 +1,5 @@
 import type { EditorCommandDefinition, EditorCommandId } from "./contracts.ts";
+import { createImmutableMap } from "./immutable-map.ts";
 
 const validEditorCommandId = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/u;
 
@@ -9,7 +10,7 @@ export function compileRegisteredEditorCommands(
   for (const command of definitions) {
     registerCommand(commands, command, "EditableEditorDefinition.commands");
   }
-  return new ImmutableRegisteredEditorCommandMap(commands);
+  return createImmutableMap(commands);
 }
 
 function registerCommand(
@@ -23,7 +24,7 @@ function registerCommand(
       `Editor command ${command.id} is registered more than once.`,
     );
   }
-  commands.set(command.id, command);
+  commands.set(command.id, Object.freeze({ ...command }));
 }
 
 function assertValidCommandDefinition(
@@ -71,61 +72,5 @@ function assertValidCommandDefinition(
     throw new Error(
       `Editor command ${candidate.id} from ${source} has an invalid isEnabled function.`,
     );
-  }
-}
-
-class ImmutableRegisteredEditorCommandMap
-  implements ReadonlyMap<EditorCommandId, EditorCommandDefinition>
-{
-  readonly #commands: Map<EditorCommandId, EditorCommandDefinition>;
-
-  constructor(commands: Map<EditorCommandId, EditorCommandDefinition>) {
-    this.#commands = new Map(commands);
-    Object.freeze(this);
-  }
-
-  get size(): number {
-    return this.#commands.size;
-  }
-
-  get(key: EditorCommandId): EditorCommandDefinition | undefined {
-    return this.#commands.get(key);
-  }
-
-  has(key: EditorCommandId): boolean {
-    return this.#commands.has(key);
-  }
-
-  forEach(
-    callbackfn: (
-      value: EditorCommandDefinition,
-      key: EditorCommandId,
-      map: ReadonlyMap<EditorCommandId, EditorCommandDefinition>,
-    ) => void,
-    thisArg?: unknown,
-  ): void {
-    this.#commands.forEach((value, key) =>
-      callbackfn.call(thisArg, value, key, this),
-    );
-  }
-
-  entries(): MapIterator<[EditorCommandId, EditorCommandDefinition]> {
-    return this.#commands.entries();
-  }
-
-  keys(): MapIterator<EditorCommandId> {
-    return this.#commands.keys();
-  }
-
-  values(): MapIterator<EditorCommandDefinition> {
-    return this.#commands.values();
-  }
-
-  [Symbol.iterator](): MapIterator<[EditorCommandId, EditorCommandDefinition]> {
-    return this.#commands[Symbol.iterator]();
-  }
-
-  get [Symbol.toStringTag](): string {
-    return "ImmutableRegisteredEditorCommandMap";
   }
 }

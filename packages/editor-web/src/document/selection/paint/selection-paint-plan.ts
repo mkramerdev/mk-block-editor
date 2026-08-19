@@ -95,18 +95,18 @@ export function deriveLocalSelectionPaintPlan(
       return { ok: false, reason: "unknown-internal-subsystem" };
     return {
       ok: true,
-      plan: Object.freeze({
+      plan: {
         kind: "block-internal" as const,
         sourceSelectionRevision: snapshot.revision,
         hostBlockId: snapshot.owner.blockId,
         subsystem: snapshot.owner.subsystem,
-        internalPaint: Object.freeze({
+        internalPaint: {
           sourceSelectionRevision: snapshot.revision,
           hostBlockId: snapshot.owner.blockId,
           subsystem: snapshot.owner.subsystem,
           selection: snapshot.internal.snapshot,
-        }),
-      }),
+        },
+      },
     };
   }
 
@@ -120,11 +120,11 @@ export function deriveLocalSelectionPaintPlan(
   if (!primitives.ok) return primitives;
   return {
     ok: true,
-    plan: Object.freeze({
+    plan: {
       kind: "document" as const,
       sourceSelectionRevision: snapshot.revision,
       primitives: primitives.primitives,
-    }),
+    },
   };
 }
 
@@ -157,17 +157,15 @@ export function deriveDocumentSelectionPaintPrimitives(
         rangeBlock.coverage !== "complete-content"
       )
         continue;
-      primitives.push(
-        Object.freeze({
-          kind: "text-fragment" as const,
-          blockId: rangeBlock.blockId,
-          bounds: Object.freeze({
-            coverage: rangeBlock.coverage,
-            startOffset: rangeBlock.startOffset ?? null,
-            endOffset: rangeBlock.endOffset ?? null,
-          }),
-        }),
-      );
+      primitives.push({
+        kind: "text-fragment" as const,
+        blockId: rangeBlock.blockId,
+        bounds: {
+          coverage: rangeBlock.coverage,
+          startOffset: rangeBlock.startOffset ?? null,
+          endOffset: rangeBlock.endOffset ?? null,
+        },
+      });
       continue;
     }
     if (isBlockSurfacePaint(descriptor)) {
@@ -179,14 +177,12 @@ export function deriveDocumentSelectionPaintPrimitives(
           blockId: rangeBlock.blockId,
         };
       atomicBlocks.add(rangeBlock.blockId);
-      primitives.push(
-        Object.freeze({
-          kind: "atomic-surface" as const,
-          blockId: rangeBlock.blockId,
-          target:
-            typeof descriptor.target === "string" ? descriptor.target : null,
-        }),
-      );
+      primitives.push({
+        kind: "atomic-surface" as const,
+        blockId: rangeBlock.blockId,
+        target:
+          typeof descriptor.target === "string" ? descriptor.target : null,
+      });
       continue;
     }
     if (descriptor !== undefined)
@@ -198,7 +194,7 @@ export function deriveDocumentSelectionPaintPrimitives(
   }
   return {
     ok: true,
-    primitives: Object.freeze(primitives),
+    primitives,
   };
 }
 
@@ -218,7 +214,6 @@ export function resolveAtomicSurfacePaintBounds<T>(
       }
     : { ok: true, target };
 }
-
 
 function isContentPaint(value: unknown): value is { readonly kind: "content" } {
   return isRecord(value) && value.kind === "content";

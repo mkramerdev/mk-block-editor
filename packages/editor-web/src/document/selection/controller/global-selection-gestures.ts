@@ -187,10 +187,10 @@ export function useGlobalSelectionGestures({
       );
       onTransientPointerPaintChange(
         primitives
-          ? Object.freeze({
+          ? {
               revision: ++transientPaintRevision,
               primitives,
-            })
+            }
           : null,
       );
       publishSelectionDrag(resource);
@@ -998,20 +998,20 @@ function materializeSelectionDragSnapshot(
 ): EditorSelectionDragSnapshot | null {
   const points = materializePointerSettlement(resource, editor, contentRuntime);
   if (!points) return null;
-  const selection: EditorSelection = Object.freeze({
+  const selection: EditorSelection = {
     direction: points.direction,
     anchor: points.anchor,
     focus: points.focus,
-  });
-  return Object.freeze({
+  };
+  return {
     selection,
     anchor: points.anchor,
     focus: points.focus,
-    pointer: Object.freeze({
+    pointer: {
       clientX: resource.lastClientX,
       clientY: resource.lastClientY,
-    }),
-  });
+    },
+  };
 }
 
 function readCanonicalKeyboardNavigationText(
@@ -1230,7 +1230,7 @@ function pointerCandidateFromTarget(
   graphRevision: number,
   phase: PointerSelectionCandidate["phase"],
 ): PointerSelectionCandidate {
-  return Object.freeze({
+  return {
     pointerId,
     graphRevision,
     blockId: target.block.id,
@@ -1238,16 +1238,14 @@ function pointerCandidateFromTarget(
     textOffset,
     affinity,
     phase,
-  });
+  };
 }
 
 function pointerCandidateWithPhase(
   candidate: PointerSelectionCandidate,
   phase: PointerSelectionCandidate["phase"],
 ): PointerSelectionCandidate {
-  return candidate.phase === phase
-    ? candidate
-    : Object.freeze({ ...candidate, phase });
+  return candidate.phase === phase ? candidate : { ...candidate, phase };
 }
 
 function deriveTransientPointerPaintPrimitives(
@@ -1348,12 +1346,10 @@ function evaluateTransientPointerCoverage(
       .map((blockId) => readEditorBlockSelectionTarget(context.editor, blockId))
       .filter((child): child is EditorBlockSelectionTarget => child !== null)
       .map((child) => evaluateTransientPointerCoverage(child, context));
-    childCoverages = Object.freeze(
-      children.map((child) => ({
-        blockId: child.blockId,
-        coverage: child.coverage,
-      })),
-    );
+    childCoverages = children.map((child) => ({
+      blockId: child.blockId,
+      coverage: child.coverage,
+    }));
     coverage = aggregateTransientPointerCoverage(
       directCoverage,
       childCoverages,
@@ -1448,7 +1444,7 @@ function pointerCandidateFromHit(
   graphRevision: number,
   phase: PointerSelectionCandidate["phase"],
 ): PointerSelectionCandidate {
-  return Object.freeze({
+  return {
     pointerId,
     graphRevision,
     blockId: hit.target.block.id,
@@ -1456,7 +1452,7 @@ function pointerCandidateFromHit(
     textOffset: hit.textOffset,
     affinity: hit.affinity,
     phase,
-  });
+  };
 }
 
 function materializePointerSettlement(
@@ -1500,14 +1496,14 @@ function materializePointerSettlement(
     focus.blockId,
   );
   if (order === null) return null;
-  return Object.freeze({
+  return {
     direction:
       order < 0 || (order === 0 && anchor.textOffset <= focus.textOffset)
         ? "forward"
         : "backward",
     anchor,
     focus,
-  });
+  };
 }
 
 function materializePointerCandidate(

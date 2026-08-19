@@ -91,7 +91,7 @@ export function createFirstDraftMessageDispatcher(
       socketErrorListeners.clear();
     },
   };
-  return Object.freeze(dispatcher);
+  return dispatcher;
 }
 
 function isServerMessage(

@@ -15,22 +15,22 @@ export type InlineMarkName =
   | "strikethrough";
 
 export interface InlineMarkBlockPolicy {
-  allowBlockTypes?: readonly BlockType[];
-  denyBlockTypes?: readonly BlockType[];
-  requireText?: boolean;
+  readonly allowBlockTypes?: readonly BlockType[];
+  readonly denyBlockTypes?: readonly BlockType[];
+  readonly requireText?: boolean;
 }
 
 export interface InlineMarkDefinition<
   Name extends InlineMarkName = InlineMarkName,
 > {
-  name: Name;
-  valueKind: "boolean" | "value";
-  attrs: Readonly<Record<string, InlineAttributeContract>>;
-  defaultAttrs: Readonly<Record<string, InlineAttributePrimitive>>;
-  contexts: readonly InlineTextContext[];
-  blockPolicy: InlineMarkBlockPolicy;
-  inclusive: boolean;
-  excludes?: string;
-  code?: boolean;
-  command: InlineCommandMetadata;
+  readonly name: Name;
+  readonly valueKind: "boolean" | "value";
+  readonly attrs: Readonly<Record<string, InlineAttributeContract>>;
+  readonly defaultAttrs: Readonly<Record<string, InlineAttributePrimitive>>;
+  readonly contexts: readonly InlineTextContext[];
+  readonly blockPolicy: InlineMarkBlockPolicy;
+  readonly inclusive: boolean;
+  readonly excludes?: string;
+  readonly code?: boolean;
+  readonly command: InlineCommandMetadata;
 }

@@ -6,8 +6,8 @@ import type {
 export function setSelection(
   target: TransactionSelectionTarget,
 ): StructuralTransactionOperation {
-  return Object.freeze({
+  return {
     kind: "setSelection",
-    target: Object.freeze({ ...target }),
-  });
+    target: { ...target },
+  };
 }

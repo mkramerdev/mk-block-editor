@@ -67,7 +67,7 @@ export function createTextHtmlImportHandler(options: {
   const tags = new Set(options.tags.map((tag) => tag.toLowerCase()));
   return {
     id: options.id,
-    elements: Object.freeze([...tags]),
+    elements: [...tags],
     parse(node, context) {
       return tags.has(node.tagName.toLowerCase())
         ? context.parseTextBlock(

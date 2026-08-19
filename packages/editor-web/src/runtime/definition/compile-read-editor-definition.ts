@@ -1,8 +1,6 @@
 import type { InlineMarkDefinition } from "@repo/editor-core/content/marks";
 import { assertValidBlockDefinitions } from "@repo/editor-core/definitions";
-import {
-  compileEditorContentCodecs,
-} from "./content-codecs.ts";
+import { compileEditorContentCodecs } from "./content-codecs.ts";
 import type {
   EditorBlockInternalSelectionSubsystemDefinition,
   EditorCommandDefinition,
@@ -10,6 +8,7 @@ import type {
 } from "./contracts.ts";
 import { compileEditorInlineAtoms } from "./inline-atoms.ts";
 import type { CompiledCanonicalEditorDefinition } from "./compiled-editor-definition.ts";
+import { captureCompiledDefinition } from "./compiled-editor-definition.ts";
 import { createImmutableMap } from "./immutable-map.ts";
 
 const allowedReadDefinitionFields = new Set([
@@ -30,16 +29,17 @@ export function compileReadEditorDefinition(
   definition: ReadEditorDefinition,
 ): CompiledCanonicalEditorDefinition<ReadEditorDefinition> {
   assertValidReadDefinition(definition);
+  const ownedDefinition = captureCompiledDefinition(definition);
   const emptyCommands = createImmutableMap(
     new Map<string, EditorCommandDefinition>(),
   );
   const emptyBindings = createImmutableMap(new Map());
   return Object.freeze({
-    definition,
-    inlineAtomRegistry: compileEditorInlineAtoms(definition),
+    definition: ownedDefinition,
+    inlineAtomRegistry: compileEditorInlineAtoms(ownedDefinition),
     blockInternalSelectionSubsystems:
-      compileBlockInternalSelectionSubsystems(definition),
-    contentCodecs: compileEditorContentCodecs(definition.contentCodecs),
+      compileBlockInternalSelectionSubsystems(ownedDefinition),
+    contentCodecs: compileEditorContentCodecs(ownedDefinition.contentCodecs),
     typingTriggers: Object.freeze({
       definitions: Object.freeze([]),
       byId: createImmutableMap(new Map()),

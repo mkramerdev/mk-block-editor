@@ -17,9 +17,7 @@ import {
   compileEditorTypingTriggers,
   type CompiledEditorTypingTriggers,
 } from "./typing-triggers.ts";
-import {
-  compileRegisteredEditorCommands,
-} from "./commands.ts";
+import { compileRegisteredEditorCommands } from "./commands.ts";
 import type { EditorCommandDefinition } from "./contracts.ts";
 import {
   compileEditorKeybindings,
@@ -59,31 +57,77 @@ export function compileCanonicalEditorDefinition<
   assertValidBlockShellElements(definition);
   assertValidBlockRenderers(definition);
   assertValidInlineMarkDefinitions(definition.inlineMarks);
-  const editable = "commands" in definition || "keybindings" in definition;
+  const ownedDefinition = captureCompiledDefinition(definition);
+  const editable =
+    "commands" in ownedDefinition || "keybindings" in ownedDefinition;
   const commands = editable
     ? compileRegisteredEditorCommands(
-        "commands" in definition ? definition.commands ?? [] : [],
+        "commands" in ownedDefinition ? (ownedDefinition.commands ?? []) : [],
       )
     : createImmutableMap(new Map<string, EditorCommandDefinition>());
   const compiled = Object.freeze({
-    definition,
-    inlineAtomRegistry: compileEditorInlineAtoms(definition),
+    definition: ownedDefinition,
+    inlineAtomRegistry: compileEditorInlineAtoms(ownedDefinition),
     blockInternalSelectionSubsystems:
-      compileBlockInternalSelectionSubsystems(definition),
-    contentCodecs: compileEditorContentCodecs(definition.contentCodecs),
+      compileBlockInternalSelectionSubsystems(ownedDefinition),
+    contentCodecs: compileEditorContentCodecs(ownedDefinition.contentCodecs),
     typingTriggers: compileEditorTypingTriggers(
-      definition.typingTriggers ?? [],
+      ownedDefinition.typingTriggers ?? [],
     ),
     commands,
     keybindings: compileEditorKeybindings(
-      editable && "keybindings" in definition
-        ? definition.keybindings ?? []
+      editable && "keybindings" in ownedDefinition
+        ? (ownedDefinition.keybindings ?? [])
         : [],
       commands,
     ),
   });
-  assertValidContentIntegration(definition);
+  assertValidContentIntegration(ownedDefinition);
   return compiled;
+}
+
+/**
+ * Captures declarative definition data without retaining caller-owned arrays
+ * or records. Functions, renderers, class instances, and React elements remain
+ * intentional identity references.
+ */
+export function captureCompiledDefinition<TDefinition extends EditorDefinition>(
+  definition: TDefinition,
+): TDefinition {
+  return captureDefinitionValue(
+    definition,
+    new WeakMap<object, object>(),
+  ) as TDefinition;
+}
+
+function captureDefinitionValue(
+  value: unknown,
+  captured: WeakMap<object, object>,
+): unknown {
+  if (typeof value !== "object" || value === null) return value;
+  if ("$$typeof" in value) return value;
+  const existing = captured.get(value);
+  if (existing) return existing;
+  if (Array.isArray(value)) {
+    const clone: unknown[] = [];
+    captured.set(value, clone);
+    for (const item of value)
+      clone.push(captureDefinitionValue(item, captured));
+    return Object.freeze(clone);
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return value;
+  const clone = Object.create(
+    prototype === null ? null : Object.prototype,
+  ) as Record<string, unknown>;
+  captured.set(value, clone);
+  for (const key of Object.keys(value)) {
+    clone[key] = captureDefinitionValue(
+      (value as Record<string, unknown>)[key],
+      captured,
+    );
+  }
+  return Object.freeze(clone);
 }
 
 function assertValidInlineMarkDefinitions(
@@ -268,5 +312,5 @@ function compileBlockInternalSelectionSubsystems(
     }
     compiled.set(subsystem.id, subsystem);
   }
-  return compiled;
+  return createImmutableMap(compiled);
 }

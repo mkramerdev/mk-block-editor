@@ -11,6 +11,7 @@ import {
   assertValidEditorInstanceSnapshot,
   validateEditorInstanceBlockSlice,
   validateEditorInstanceSnapshot,
+  validateEditorInstanceSnapshotAtBoundary,
 } from "./snapshots.ts";
 
 const renderer = () => null;
@@ -50,6 +51,60 @@ const definitions: Readonly<Record<BlockType, BlockDefinition>> = {
 const options = { blockDefinitions: definitions };
 
 describe("editor snapshot text content ownership", () => {
+  it("captures an owned snapshot instead of certifying caller-owned aliases", () => {
+    const blockId = id(1);
+    const source = {
+      blockGraphVersion: INITIAL_BLOCK_GRAPH_VERSION,
+      blocks: {
+        [blockId]: {
+          id: blockId,
+          type: "paragraph",
+          parentId: null,
+          tombstone: null,
+          metadata: { nested: { label: "before" } },
+        },
+      },
+      rootBlockIds: [blockId],
+      childIdsByParentId: {},
+      content: {
+        [blockId]: {
+          type: "doc" as const,
+          content: [
+            {
+              type: "paragraph" as const,
+              content: [{ type: "text" as const, text: "before" }],
+            },
+          ],
+        },
+      },
+      opaqueContentCheckpoints: {
+        [blockId]: {
+          kind: "checkpoint" as const,
+          format: "test-content",
+          version: 1,
+          payloadBase64: "AQ==",
+        },
+      },
+    };
+    const validated = validateEditorInstanceSnapshotAtBoundary(source, options);
+
+    source.rootBlockIds.length = 0;
+    source.blocks[blockId].metadata.nested.label = "after";
+    source.content[blockId].content[0]!.content[0]!.text = "after";
+    source.opaqueContentCheckpoints[blockId].payloadBase64 = "Ag==";
+
+    expect(validated.snapshot.rootBlockIds).toStrictEqual([blockId]);
+    expect(validated.snapshot.blocks[blockId]?.metadata).toStrictEqual({
+      nested: { label: "before" },
+    });
+    expect(validated.snapshot.content[blockId]).toMatchObject({
+      content: [{ content: [{ text: "before" }] }],
+    });
+    expect(
+      validated.snapshot.opaqueContentCheckpoints[blockId]?.payloadBase64,
+    ).toBe("AQ==");
+  });
+
   it.each(["paragraph", "heading", "textbox"] as const)(
     "requires rich-text content for %s",
     (type) => {

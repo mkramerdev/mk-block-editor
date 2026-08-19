@@ -129,7 +129,7 @@ export function createSingleTextBlockPlainTextImportHandler(options?: {
   readonly id?: string;
   readonly blockType?: BlockType;
 }): EditorPlainTextImportHandler {
-  return Object.freeze({
+  return {
     id: options?.id ?? "core.single-text-block",
     importText(text: string, context: import("./codec-contracts.ts").EditorPlainTextImportContext) {
       const normalized = normalizeLineEndings(text);
@@ -162,7 +162,7 @@ export function createSingleTextBlockPlainTextImportHandler(options?: {
         blockDefinitions: context.blockDefinitions,
       });
     },
-  });
+  };
 }
 
 function normalizeLineEndings(value: string): string {

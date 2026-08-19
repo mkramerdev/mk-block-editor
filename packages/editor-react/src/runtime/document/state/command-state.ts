@@ -8,23 +8,27 @@ import { createInitialEditorSessionState } from "../../../store/session-state.ts
 import type { EditorSessionState } from "../../../store/contracts.ts";
 
 export interface EditorManifestState {
-  blockGraphVersion: number;
-  blocks: Record<BlockId, VersionedBlock>;
-  rootBlockIds: readonly BlockId[];
-  childIdsByParentId: Readonly<Partial<Record<BlockId, readonly BlockId[]>>>;
-  createdAt: number;
-  updatedAt: number;
+  readonly blockGraphVersion: number;
+  readonly blocks: Readonly<Record<BlockId, VersionedBlock>>;
+  readonly rootBlockIds: readonly BlockId[];
+  readonly childIdsByParentId: Readonly<
+    Partial<Record<BlockId, readonly BlockId[]>>
+  >;
+  readonly createdAt: number;
+  readonly updatedAt: number;
 }
 
 export interface EditorCommandState extends EditorSessionState {
-  blocks: Record<BlockId, VersionedBlock>;
-  rootBlockIds: readonly BlockId[];
-  childIdsByParentId: Readonly<Partial<Record<BlockId, readonly BlockId[]>>>;
+  readonly blocks: Readonly<Record<BlockId, VersionedBlock>>;
+  readonly rootBlockIds: readonly BlockId[];
+  readonly childIdsByParentId: Readonly<
+    Partial<Record<BlockId, readonly BlockId[]>>
+  >;
 }
 
 export function createInitialEditorManifestState(options: {
   blockGraphVersion?: number;
-  blocks?: Record<BlockId, VersionedBlock>;
+  blocks?: Readonly<Record<BlockId, VersionedBlock>>;
   rootBlockIds?: readonly BlockId[];
   childIdsByParentId?: Readonly<Partial<Record<BlockId, readonly BlockId[]>>>;
   createdAt?: number;
@@ -48,7 +52,7 @@ export function createInitialEditorManifestState(options: {
 
 export function createInitialEditorCommandState(options: {
   blockGraphVersion?: number;
-  blocks?: Record<BlockId, VersionedBlock>;
+  blocks?: Readonly<Record<BlockId, VersionedBlock>>;
   rootBlockIds?: readonly BlockId[];
   childIdsByParentId?: Readonly<Partial<Record<BlockId, readonly BlockId[]>>>;
   createdAt?: number;
@@ -87,12 +91,7 @@ export function splitEditorCommandState(state: EditorCommandState): {
   session: EditorSessionState;
   manifest: EditorManifestState;
 } {
-  const {
-    blocks,
-    rootBlockIds,
-    childIdsByParentId,
-    ...sessionFields
-  } = state;
+  const { blocks, rootBlockIds, childIdsByParentId, ...sessionFields } = state;
   return {
     session: sessionFields,
     manifest: {

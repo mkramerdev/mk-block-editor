@@ -81,7 +81,7 @@ vi.mock("@repo/editor-web/document-runtime", () => ({
   toCollaborationSubjectKey: () => null,
 }));
 vi.mock("@repo/editor-web/editor-definition", () => ({
-  compileCanonicalEditorDefinition: () => Object.freeze({}),
+  compileCanonicalEditorDefinition: () => ({}),
 }));
 vi.mock("@repo/editor-web/editor", () => ({
   initializeEditableEditor: probes.initialize,
@@ -93,10 +93,10 @@ vi.mock("@repo/editor-web/typing-triggers", () => ({
   useEditorTypingTriggerSession: () => null,
 }));
 vi.mock("./first-draft-definition.tsx", () => ({
-  createFirstDraftEditorDefinition: () => Object.freeze({}),
+  createFirstDraftEditorDefinition: () => ({}),
 }));
 vi.mock("./blocks/view-state.tsx", () => ({
-  createFirstDraftViewStateStore: () => Object.freeze({}),
+  createFirstDraftViewStateStore: () => ({}),
   FirstDraftViewStateProvider: ({ children }: { children: ReactNode }) =>
     children,
 }));
@@ -215,18 +215,18 @@ class TestWebSocket {
   }
 }
 
-const first: FirstDraftCollaborationOptions = Object.freeze({
+const first: FirstDraftCollaborationOptions = {
   webSocketUrl: "ws://example.test/first",
   documentId: "document-first",
   actorId: "actor",
   clientId: "client",
   authenticationToken: "token",
-});
-const second: FirstDraftCollaborationOptions = Object.freeze({
+};
+const second: FirstDraftCollaborationOptions = {
   ...first,
   webSocketUrl: "ws://example.test/second",
   documentId: "document-second",
-});
+};
 
 describe("FirstDraftEditorSurface canonical lifecycle", () => {
   afterEach(cleanup);

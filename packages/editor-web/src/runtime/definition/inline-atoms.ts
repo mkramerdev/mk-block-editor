@@ -34,7 +34,20 @@ export function compileEditorInlineAtoms(
         `Editor inline atom ${atom.type} is registered more than once.`,
       );
     }
-    definitions.set(atom.type, Object.freeze({ ...atom }));
+    const metadata: Record<string, InlineMetadataFieldDefinition> = {};
+    for (const name of Object.keys(atom.metadata)) {
+      const field = atom.metadata[name]!;
+      metadata[name] = Object.freeze({
+        type: field.type,
+        ...(field.required === undefined
+          ? {}
+          : { required: field.required }),
+      });
+    }
+    definitions.set(
+      atom.type,
+      Object.freeze({ ...atom, metadata: Object.freeze(metadata) }),
+    );
   }
   const compiled = Object.freeze({
     definitions: createImmutableMap(definitions),

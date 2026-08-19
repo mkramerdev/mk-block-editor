@@ -237,26 +237,22 @@ function createListSnapshot(listCase: ListCase): EditorInstanceSnapshot {
   const textIds = [firstText, middleText, listCase.extraTextId, lastText];
   return {
     ...source,
-    blocks: Object.freeze(blocks),
-    rootBlockIds: Object.freeze([listCase.containerId]),
-    childIdsByParentId: Object.freeze({
-      [listCase.containerId]: Object.freeze([...listCase.itemIds]),
-      [firstItem]: Object.freeze([firstText]),
-      [middleItem]: Object.freeze([middleText, listCase.extraTextId]),
-      [lastItem]: Object.freeze([lastText]),
-    }),
-    content: Object.freeze(
-      Object.fromEntries(
-        textIds.map((blockId) => [blockId, source.content[blockId]!]),
-      ),
+    blocks,
+    rootBlockIds: [listCase.containerId],
+    childIdsByParentId: {
+      [listCase.containerId]: [...listCase.itemIds],
+      [firstItem]: [firstText],
+      [middleItem]: [middleText, listCase.extraTextId],
+      [lastItem]: [lastText],
+    },
+    content: Object.fromEntries(
+      textIds.map((blockId) => [blockId, source.content[blockId]!]),
     ),
-    opaqueContentCheckpoints: Object.freeze(
-      Object.fromEntries(
-        textIds.map((blockId) => [
-          blockId,
-          source.opaqueContentCheckpoints[blockId]!,
-        ]),
-      ),
+    opaqueContentCheckpoints: Object.fromEntries(
+      textIds.map((blockId) => [
+        blockId,
+        source.opaqueContentCheckpoints[blockId]!,
+      ]),
     ),
   };
 }

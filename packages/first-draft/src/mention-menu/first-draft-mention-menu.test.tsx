@@ -1,4 +1,10 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BlockId } from "@repo/editor-core/kernel";
 import type {
@@ -80,22 +86,25 @@ describe("FirstDraftMentionMenu", () => {
     renderMenu(fixture.editor, interaction.port);
     fireEvent.pointerMove(screen.getByText("Nina Petrova").closest("button")!);
     expect(
-      screen.getByText("Nina Petrova").closest("button")?.getAttribute(
-        "aria-selected",
-      ),
+      screen
+        .getByText("Nina Petrova")
+        .closest("button")
+        ?.getAttribute("aria-selected"),
     ).toBe("true");
 
     fixture.setSession(session("mention", "data", 2));
     expect(
-      screen.getByText("Nina Petrova").closest("button")?.getAttribute(
-        "aria-selected",
-      ),
+      screen
+        .getByText("Nina Petrova")
+        .closest("button")
+        ?.getAttribute("aria-selected"),
     ).toBe("true");
     fixture.setSession(session("mention", "sam", 3));
     expect(
-      screen.getByText("Sam Okafor").closest("button")?.getAttribute(
-        "aria-selected",
-      ),
+      screen
+        .getByText("Sam Okafor")
+        .closest("button")
+        ?.getAttribute("aria-selected"),
     ).toBe("true");
     expect(selectedOptions(screen.getAllByRole("option"))).toHaveLength(1);
   });
@@ -112,9 +121,9 @@ describe("FirstDraftMentionMenu", () => {
     expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
 
     expect(interaction.dispatch("ArrowDown")).toBe("handled");
-    expect(screen.getAllByRole("option")[3]?.getAttribute("aria-selected")).toBe(
-      "true",
-    );
+    expect(
+      screen.getAllByRole("option")[3]?.getAttribute("aria-selected"),
+    ).toBe("true");
     expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledWith({
       block: "nearest",
     });
@@ -203,7 +212,9 @@ describe("FirstDraftMentionMenu", () => {
 
   it("publishes placement and the selected-side available-height constraint", () => {
     const fixture = editorFixture(session("mention", ""));
-    vi.mocked(fixture.editor.geometry.readViewportTextCaretRect).mockReturnValue({
+    vi.mocked(
+      fixture.editor.geometry.readViewportTextCaretRect,
+    ).mockReturnValue({
       left: 100,
       top: 400,
       right: 101,
@@ -285,17 +296,17 @@ function session(
   revision = 1,
 ): EditorTypingTriggerSession {
   const blockId = "mention-source" as BlockId;
-  return Object.freeze({
+  return {
     id: "mention-session",
     triggerId,
     trigger: triggerId === "mention" ? "@" : "/",
     blockId,
     blockType: "paragraph",
-    range: Object.freeze({ from: 4, to: query.length + 5 }),
+    range: { from: 4, to: query.length + 5 },
     query,
     revision,
-    selection: Object.freeze({ blockId, offset: query.length + 5 }),
-  });
+    selection: { blockId, offset: query.length + 5 },
+  };
 }
 
 function editorFixture(initial: EditorTypingTriggerSession | null) {

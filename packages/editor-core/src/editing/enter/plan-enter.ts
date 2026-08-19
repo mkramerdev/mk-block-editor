@@ -124,7 +124,10 @@ export function planTextSplitAtPlacement(
     if (!definition || definition.kind !== "text")
       return failure("not-text", "focused block is not editable text");
     if (!isRichTextDocument(input.content.content))
-      return failure("invalid-content", "focused block content is not rich text");
+      return failure(
+        "invalid-content",
+        "focused block content is not rich text",
+      );
     if (input.content.version !== focused.contentVersion)
       return failure("stale-content", "focused block content version changed");
     const size = richTextDocumentContentSize(input.content.content);
@@ -151,7 +154,10 @@ export function planTextSplitAtPlacement(
         blockDefinitions: input.blockDefinitions,
       })
     ) {
-      return failure("no-destination", "explicit split placement rejects the result");
+      return failure(
+        "no-destination",
+        "explicit split placement rejects the result",
+      );
     }
 
     const splitOutputId = "right";
@@ -182,12 +188,9 @@ export function planTextSplitAtPlacement(
       ok: true,
       plan: {
         origin: "explicit-text-split",
-        operations: Object.freeze(operations),
+        operations,
         preconditions: {
-          blocks: Object.freeze([
-            blockExpectation(focused),
-            ...inserted.expectedBlocks,
-          ]),
+          blocks: [blockExpectation(focused), ...inserted.expectedBlocks],
         },
       },
       insertedRootBlockId: inserted.rootBlockId,
@@ -1078,9 +1081,9 @@ function success(
     ok: true,
     plan: {
       origin: "generic-enter",
-      operations: Object.freeze([...operations]),
+      operations: [...operations],
       preconditions: {
-        blocks: Object.freeze(uniqueExpectations(expectedBlocks)),
+        blocks: uniqueExpectations(expectedBlocks),
       },
     },
     selectionBlockId,

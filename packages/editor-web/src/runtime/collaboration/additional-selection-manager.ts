@@ -15,9 +15,7 @@ import {
 } from "@repo/editor-react/selection";
 import type { EditorContentRuntime } from "../content/content-runtime.ts";
 import type { CompiledCanonicalEditorDefinition } from "../definition/compiled-editor-definition.ts";
-import type {
-  EditorBlockInternalSelectionSubsystemDefinition,
-} from "../definition/contracts.ts";
+import type { EditorBlockInternalSelectionSubsystemDefinition } from "../definition/contracts.ts";
 import type {
   AdditionalSelectionRecord,
   CollaborationSubjectKey,
@@ -50,9 +48,7 @@ type SelectionInterpretation =
   | { readonly status: "cleared"; readonly stable: RemoteStableSelection }
   | { readonly status: "invalid" };
 
-export class AdditionalSelectionManager
-  implements EditorAdditionalSelectionReader
-{
+export class AdditionalSelectionManager implements EditorAdditionalSelectionReader {
   private records: Map<
     CollaborationSubjectKey,
     AdditionalSelectionRecord
@@ -440,8 +436,10 @@ function interpretBlockInternalSelection(
   >,
   environment: AdditionalSelectionEnvironment,
 ): SelectionInterpretation {
-  const subsystem = environment.compiledDefinition
-    .blockInternalSelectionSubsystems.get(selection.subsystem);
+  const subsystem =
+    environment.compiledDefinition.blockInternalSelectionSubsystems.get(
+      selection.subsystem,
+    );
   if (!subsystem) return { status: "invalid" };
   const block = environment.graph.getBlock(selection.blockId);
   if (!block || block.tombstone) return { status: "unresolved", stable };
@@ -658,12 +656,14 @@ function resolveDocumentPoint(
   ) {
     return { status: "invalid" };
   }
-  const resolved = environment.contentRuntime.tryResolveTextAnchorInLiveContext({
-    blockId: point.blockId,
-    blockType: target.block.type,
-    codec: point.textAnchor.codec,
-    payload: point.textAnchor.payload,
-  });
+  const resolved = environment.contentRuntime.tryResolveTextAnchorInLiveContext(
+    {
+      blockId: point.blockId,
+      blockType: target.block.type,
+      codec: point.textAnchor.codec,
+      payload: point.textAnchor.payload,
+    },
+  );
   if (!resolved.ok && resolved.reason === "not-live") {
     return {
       status: "resolved",
@@ -771,7 +771,13 @@ function decodeStableDocumentPoint(input: unknown) {
   }
   if (
     input.kind !== "text" ||
-    !hasExactKeys(input, ["kind", "blockId", "textOffset", "textAnchor", "affinity"]) ||
+    !hasExactKeys(input, [
+      "kind",
+      "blockId",
+      "textOffset",
+      "textAnchor",
+      "affinity",
+    ]) ||
     !isBlockId(input.blockId) ||
     !Number.isSafeInteger(input.textOffset) ||
     Number(input.textOffset) < 0 ||
@@ -919,6 +925,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 const noop = () => undefined;
 const emptyRecords = Object.freeze([]) as readonly AdditionalSelectionRecord[];
-const emptyFocusedKeys = Object.freeze(
-  new Map<BlockId, string>(),
-) as ReadonlyMap<BlockId, string>;
+const emptyFocusedKeys: ReadonlyMap<BlockId, string> = new Map<
+  BlockId,
+  string
+>();

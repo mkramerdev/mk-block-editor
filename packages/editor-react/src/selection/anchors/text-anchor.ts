@@ -25,17 +25,17 @@ export function createEditorSelectionTextAnchor(input: {
   if (!validation.ok) return validation;
   return {
     ok: true,
-    textAnchor: Object.freeze({
+    textAnchor: {
       kind: "block-relative-text",
       codec: input.codec,
       version: 1,
-      payload: Object.freeze({
+      payload: {
         encoded: input.payload.encoded,
         ...(input.payload.assoc === undefined
           ? {}
           : { assoc: input.payload.assoc }),
-      }),
-    }),
+      },
+    },
   };
 }
 

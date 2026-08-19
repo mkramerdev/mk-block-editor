@@ -904,15 +904,13 @@ function resizeColumn(
   target: number,
 ): Readonly<Record<string, number>> | null {
   if (!ids.includes(id) || !Number.isFinite(target)) return null;
-  return Object.freeze(
-    Object.fromEntries(
-      ids.map((current) => [
-        current,
-        current === id
-          ? Math.max(MIN_WIDTH, Math.round(target))
-          : (widths[current] ?? MIN_WIDTH),
-      ]),
-    ),
+  return Object.fromEntries(
+    ids.map((current) => [
+      current,
+      current === id
+        ? Math.max(MIN_WIDTH, Math.round(target))
+        : (widths[current] ?? MIN_WIDTH),
+    ]),
   );
 }
 

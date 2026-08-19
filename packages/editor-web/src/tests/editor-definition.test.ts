@@ -51,10 +51,16 @@ describe("EditorDefinition direct composition", () => {
   });
 
   it("compiles editable commands separately and rejects duplicate ids", () => {
-    const command = documentCommand("product.open");
-    expect(compileRegisteredEditorCommands([command]).get(command.id)).toBe(
-      command,
+    const command = {
+      id: "product.open",
+      scope: "document" as const,
+      execute: () => true,
+    };
+    const registered = compileRegisteredEditorCommands([command]).get(
+      command.id,
     );
+    expect(registered).toStrictEqual(command);
+    expect(registered).not.toBe(command);
     expect(() =>
       compileRegisteredEditorCommands([command, documentCommand(command.id)]),
     ).toThrow(/product\.open is registered more than once/u);
@@ -83,9 +89,10 @@ describe("EditorDefinition direct composition", () => {
         internalSelectionFragmentMaterializers: [handler],
       },
     });
-    expect(compileCanonicalEditorDefinition(definition).contentCodecs.internalSelectionFragmentMaterializers).toEqual(
-      [handler],
-    );
+    expect(
+      compileCanonicalEditorDefinition(definition).contentCodecs
+        .internalSelectionFragmentMaterializers,
+    ).toEqual([handler]);
     expect(() =>
       compileCanonicalEditorDefinition(
         testDefinition({
@@ -131,6 +138,78 @@ describe("EditorDefinition direct composition", () => {
       trigger: "@",
     });
     expect(compiled.byTrigger.get("@")).toMatchObject({ id: "mention" });
+  });
+
+  it("owns compiled definitions and every mutable registry input", () => {
+    const command = documentCommand("product.open");
+    const binding = {
+      key: "Mod-k",
+      commandId: command.id,
+      scope: "document" as const,
+    };
+    const trigger = { id: "mention", trigger: "@" };
+    const atom = {
+      type: "mention",
+      metadata: { id: { type: "string" as const, required: true } },
+      render: () => null,
+    };
+    const codec = {
+      id: "product.selection",
+      subsystemId: "product",
+      materialize: () => null,
+    };
+    const subsystem = {
+      id: "product",
+      validate: () => ({ ok: false as const }),
+    };
+    const commands = [command];
+    const keybindings = [binding];
+    const typingTriggers = [trigger];
+    const inlineAtoms = [atom];
+    const handlers = [codec];
+    const subsystems = [subsystem];
+    const source = testDefinition({
+      commands,
+      keybindings,
+      typingTriggers,
+      inlineAtoms,
+      contentCodecs: { internalSelectionFragmentMaterializers: handlers },
+      blockInternalSelectionSubsystems: subsystems,
+    });
+    const compiled = compileCanonicalEditorDefinition(source);
+
+    command.id = "product.changed";
+    binding.key = "Mod-x";
+    trigger.id = "changed";
+    atom.metadata.id.required = false;
+    codec.id = "changed";
+    subsystem.id = "changed";
+    commands.length = 0;
+    keybindings.length = 0;
+    typingTriggers.length = 0;
+    inlineAtoms.length = 0;
+    handlers.length = 0;
+    subsystems.length = 0;
+
+    expect(compiled.commands.has("product.open")).toBe(true);
+    expect(compiled.keybindings.document.has("Mod-k")).toBe(true);
+    expect(compiled.typingTriggers.byId.has("mention")).toBe(true);
+    expect(
+      compiled.inlineAtomRegistry.definitions.get("mention")?.metadata.id,
+    ).toMatchObject({ required: true });
+    expect(
+      compiled.contentCodecs.internalSelectionFragmentMaterializers[0]?.id,
+    ).toBe("product.selection");
+    expect(compiled.blockInternalSelectionSubsystems.has("product")).toBe(true);
+  });
+
+  it("does not expose mutators on compiled registries", () => {
+    const compiled = compileCanonicalEditorDefinition(testDefinition());
+    expect("set" in compiled.commands).toBe(false);
+    expect("delete" in compiled.commands).toBe(false);
+    expect("clear" in compiled.commands).toBe(false);
+    expect("set" in compiled.keybindings.document).toBe(false);
+    expect("set" in compiled.blockInternalSelectionSubsystems).toBe(false);
   });
 
   it.each([

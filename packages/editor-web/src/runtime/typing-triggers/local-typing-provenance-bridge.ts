@@ -28,11 +28,11 @@ export class LocalTypingProvenanceBridge {
     if (inputType === null) return;
 
     this.pending = {
-      provenance: Object.freeze({
+      provenance: {
         kind: "typing",
         text: event.data,
         inputType,
-      }),
+      },
     };
   }
 

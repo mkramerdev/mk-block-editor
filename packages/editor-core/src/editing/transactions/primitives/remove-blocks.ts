@@ -6,12 +6,12 @@ export function removeBlocks(input: {
   readonly includeDescendants: boolean;
   readonly expectedParents?: Readonly<Partial<Record<BlockId, BlockId | null>>>;
 }): StructuralTransactionOperation {
-  return Object.freeze({
+  return {
     kind: "removeBlocks",
-    blockIds: Object.freeze([...input.blockIds]),
+    blockIds: [...input.blockIds],
     includeDescendants: input.includeDescendants,
     ...(input.expectedParents === undefined
       ? {}
-      : { expectedParents: Object.freeze({ ...input.expectedParents }) }),
-  });
+      : { expectedParents: { ...input.expectedParents } }),
+  };
 }

@@ -10,7 +10,11 @@ import {
   type CanonicalBlockFragment,
   type CanonicalBlockRecord,
 } from "@repo/editor-core/editing";
-import type { BlockId, JsonObject } from "@repo/editor-core/kernel";
+import type {
+  BlockId,
+  JsonObject,
+  MutableJsonObject,
+} from "@repo/editor-core/kernel";
 import { createBlockRecord } from "@repo/editor-core/metadata";
 import type { EditorContentCodecs } from "@repo/editor-web/document-runtime";
 import {
@@ -243,7 +247,7 @@ function selectedMetadata(
     Object.entries(source ?? {}).filter(
       ([key]) => key !== COLUMN_IDS && key !== COLUMN_WIDTHS,
     ),
-  ) as JsonObject;
+  ) as MutableJsonObject;
   result[COLUMN_IDS] = [...newIds];
   const sourceIds = source?.[COLUMN_IDS];
   const sourceWidths = source?.[COLUMN_WIDTHS];

@@ -149,7 +149,7 @@ function createCanonicalPositionComparator(
       reversePath.push(currentId);
       currentId = block.parentId;
     }
-    return Object.freeze(reversePath.reverse());
+    return reversePath.reverse();
   };
   const readSiblingIndex = (
     parentId: BlockId | null,

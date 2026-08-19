@@ -470,10 +470,15 @@ describe("First Draft binary message protocol", () => {
     if (!decoded.ok || decoded.message.type !== "first-draft-document-loaded") {
       throw new Error("Expected the complete initial document message");
     }
-    expect(decoded.message.bootstrap.snapshot.rootBlockIds.length).toBeGreaterThan(0);
-    expect(Object.keys(decoded.message.bootstrap.snapshot.content).length).toBeGreaterThan(0);
     expect(
-      Object.keys(decoded.message.bootstrap.snapshot.opaqueContentCheckpoints).length,
+      decoded.message.bootstrap.snapshot.rootBlockIds.length,
+    ).toBeGreaterThan(0);
+    expect(
+      Object.keys(decoded.message.bootstrap.snapshot.content).length,
+    ).toBeGreaterThan(0);
+    expect(
+      Object.keys(decoded.message.bootstrap.snapshot.opaqueContentCheckpoints)
+        .length,
     ).toBeGreaterThan(0);
     expect(decoded.message.revision).toBe(3);
   });
@@ -558,13 +563,16 @@ describe("First Draft binary message protocol", () => {
         transaction.content[0]!.update.payload,
       ),
     ).toBe(true);
+    Reflect.set(
+      decoded.message.transaction.content[0]!.update.payload,
+      "0",
+      255,
+    );
     expect(
-      Reflect.set(
-        decoded.message.transaction.content[0]!.update.payload,
-        "0",
-        255,
+      decoded.message.transaction.content[0]!.update.payload.equals(
+        transaction.content[0]!.update.payload,
       ),
-    ).toBe(false);
+    ).toBe(true);
     editor.dispose();
   });
 

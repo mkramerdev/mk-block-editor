@@ -110,7 +110,7 @@ export function createSemanticDomTextLayout(
     measureSemanticCaretRect(root, segments, length, offset, affinity);
   const rows = (): readonly SemanticDomVisualRow[] =>
     collectSemanticVisualRows(length, caretRect);
-  return Object.freeze({
+  return {
     length,
     pointFromCanonicalOffset,
     canonicalOffsetFromPoint,
@@ -226,7 +226,7 @@ export function createSemanticDomTextLayout(
         ).offset,
       };
     },
-  });
+  };
 }
 
 export function readSemanticDomCanonicalLength(root: HTMLElement): number {
@@ -376,9 +376,7 @@ function semanticDomCanonicalOffsetForPointWithSegments(
     if (segment?.kind === "text") {
       const text = target.textContent ?? "";
       const utf16Offset = clampDomOffset(targetOffset, text.length);
-      return (
-        segment.start + canonicalTextLength(text.slice(0, utf16Offset))
-      );
+      return segment.start + canonicalTextLength(text.slice(0, utf16Offset));
     }
   }
   return semanticDomCanonicalOffsetForPoint(
@@ -460,13 +458,13 @@ export function collectSemanticVisualRows(
       (left, right) =>
         left.rect.left - right.rect.left || left.offset - right.offset,
     );
-    return Object.freeze({
+    return {
       top: row.top,
       bottom: row.bottom,
       start: Math.min(...row.points.map((point) => point.offset)),
       end: Math.max(...row.points.map((point) => point.offset)),
-      points: Object.freeze(row.points),
-    });
+      points: row.points,
+    };
   });
 }
 

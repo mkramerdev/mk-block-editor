@@ -28,38 +28,48 @@ export function materializeFirstDraftSlashAction(
   } as const;
   switch (action.kind.type) {
     case "paragraph":
-      return requireSelection(materializeCanonicalBlockCreation({
-        ...common,
-        type: "paragraph",
-      }));
+      return requireSelection(
+        materializeCanonicalBlockCreation({
+          ...common,
+          type: "paragraph",
+        }),
+      );
     case "heading":
-      return requireSelection(materializeCanonicalBlockCreation({
-        ...common,
-        type: "heading",
-        metadata: { level: action.kind.level },
-      }));
+      return requireSelection(
+        materializeCanonicalBlockCreation({
+          ...common,
+          type: "heading",
+          metadata: { level: action.kind.level },
+        }),
+      );
     case "bulletList":
     case "orderedList":
     case "checklist":
     case "quote":
     case "toggleListItem":
     case "divider":
-      return requireSelection(materializeCanonicalBlockCreation({
-        ...common,
-        type: action.kind.type,
-      }));
+      return requireSelection(
+        materializeCanonicalBlockCreation({
+          ...common,
+          type: action.kind.type,
+        }),
+      );
     case "code":
-      return requireSelection(materializeCanonicalBlockCreation({
-        ...common,
-        type: "code",
-        metadata: { language: "plaintext" },
-      }));
+      return requireSelection(
+        materializeCanonicalBlockCreation({
+          ...common,
+          type: "code",
+          metadata: { language: "plaintext" },
+        }),
+      );
     case "callout":
-      return requireSelection(materializeCanonicalBlockCreation({
-        ...common,
-        type: "callout",
-        metadata: { icon: "idea" },
-      }));
+      return requireSelection(
+        materializeCanonicalBlockCreation({
+          ...common,
+          type: "callout",
+          metadata: { icon: "idea" },
+        }),
+      );
     case "toggleHeading":
       return withNestedHeadingLevel(
         materializeCanonicalBlockCreation({
@@ -69,11 +79,13 @@ export function materializeFirstDraftSlashAction(
         action.kind.level,
       );
     case "bookmark":
-      return requireSelection(materializeCanonicalBlockCreation({
-        ...common,
-        type: "bookmark",
-        metadata: { url: "" },
-      }));
+      return requireSelection(
+        materializeCanonicalBlockCreation({
+          ...common,
+          type: "bookmark",
+          metadata: { url: "" },
+        }),
+      );
     case "columns":
       return materializeColumns(action.kind.count, reservedBlockIds);
     case "tabs":
@@ -220,13 +232,15 @@ function recreateMaterialization(
     !fragment.blocks.some(({ id }) => id === materialization.rootBlockId) ||
     !fragment.blocks.some(({ id }) => id === materialization.selectionBlockId)
   ) {
-    throw new Error("First Draft fragment transformation changed creation identities");
+    throw new Error(
+      "First Draft fragment transformation changed creation identities",
+    );
   }
-  return Object.freeze({
+  return {
     fragment,
     rootBlockId: materialization.rootBlockId,
     selectionBlockId: materialization.selectionBlockId,
-  });
+  };
 }
 
 function recreateFragment(

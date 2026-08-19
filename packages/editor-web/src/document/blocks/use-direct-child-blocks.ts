@@ -37,16 +37,14 @@ export function useDirectChildBlocks(
   );
   return useMemo(
     () =>
-      Object.freeze(
-        childIds.flatMap((childId) => {
-          const block = editor.getBlock(childId);
-          return block &&
-            !block.tombstone &&
-            (block.parentId ?? null) === parentId
-            ? [block]
-            : [];
-        }),
-      ),
+      childIds.flatMap((childId) => {
+        const block = editor.getBlock(childId);
+        return block &&
+          !block.tombstone &&
+          (block.parentId ?? null) === parentId
+          ? [block]
+          : [];
+      }),
     // blockRevision represents the subscribed record state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [blockRevision, childIdentity, editor, parentId],

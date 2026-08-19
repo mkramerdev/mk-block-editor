@@ -1,11 +1,47 @@
 import { describe, expect, it } from "vitest";
-import type { BlockId } from "@repo/editor-core/kernel";
+import { cloneJsonValue, type BlockId } from "@repo/editor-core/kernel";
+import { validateEditorInstanceSnapshotAtBoundary } from "@repo/editor-core/codecs";
 import { createTestEditorSnapshot } from "../../tests/editor-snapshot-fixtures.ts";
 import { testEditableEditorDefinition } from "../../tests/test-editor-definition.ts";
 import { assertValidEditorSnapshotForStartupOrRecovery } from "./snapshot-initialization.ts";
 import { compileCanonicalEditorDefinition } from "../definition/compiled-editor-definition.ts";
+import { initializeTestEditableEditor } from "../../tests/test-editor-initializers.ts";
 
 describe("definition-aware snapshot ingress", () => {
+  it("initializes from validated ownership after the source is mutated", () => {
+    const blockId = "snapshot-owned-paragraph" as BlockId;
+    const fixture = createTestEditorSnapshot([
+      { id: blockId, type: "paragraph", text: "before" },
+    ]);
+    const content = cloneJsonValue(fixture.content[blockId]!);
+    const rootBlockIds = [...fixture.rootBlockIds];
+    const source = {
+      ...fixture,
+      rootBlockIds,
+      content: { [blockId]: content },
+    };
+    const validated = validateEditorInstanceSnapshotAtBoundary(source, {
+      blockDefinitions: testEditableEditorDefinition.blocks,
+      inlineMarks: testEditableEditorDefinition.inlineMarks,
+      inlineAtoms: testEditableEditorDefinition.inlineAtoms,
+    });
+
+    rootBlockIds.length = 0;
+    const text = content.content[0]?.content?.[0];
+    if (text?.type === "text") text.text = "after";
+    const editor = initializeTestEditableEditor({
+      definition: testEditableEditorDefinition,
+      snapshot: source,
+      validatedSnapshot: validated,
+    });
+
+    expect(editor.getRootBlockIds()).toStrictEqual([blockId]);
+    expect(editor.readBlockContent(blockId, "paragraph")).toMatchObject({
+      content: [{ content: [{ text: "before" }] }],
+    });
+    editor.dispose();
+  });
+
   it("accepts a valid semantic snapshot", () => {
     expect(() =>
       assertValidEditorSnapshotForStartupOrRecovery(

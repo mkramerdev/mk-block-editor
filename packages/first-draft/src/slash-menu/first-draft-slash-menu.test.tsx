@@ -1,4 +1,10 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BlockId } from "@repo/editor-core/kernel";
 import type {
@@ -271,17 +277,17 @@ function interactionFixture() {
 
 function editorFixture(query = "") {
   const blockId = "slash-source" as BlockId;
-  const session = Object.freeze({
+  const session = {
     id: "typing-trigger-1",
     triggerId: "slash",
     trigger: "/",
     blockId,
     blockType: "paragraph",
-    range: Object.freeze({ from: 0, to: query.length + 1 }),
+    range: { from: 0, to: query.length + 1 },
     query,
     revision: 1,
-    selection: Object.freeze({ blockId, offset: query.length + 1 }),
-  }) as EditorTypingTriggerSession;
+    selection: { blockId, offset: query.length + 1 },
+  } as EditorTypingTriggerSession;
   const replace = vi.fn(
     (replacement: EditorTypingTriggerFragmentReplacement) => {
       void replacement;
@@ -289,7 +295,7 @@ function editorFixture(query = "") {
     },
   );
   const dismiss = vi.fn(() => true);
-  const selectionSnapshot = Object.freeze({ kind: "none", revision: 0 });
+  const selectionSnapshot = { kind: "none" as const, revision: 0 };
   const editor = {
     editable: true,
     getTypingTriggerSession: vi.fn(() => session),

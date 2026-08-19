@@ -6,14 +6,14 @@ export type BlockType = string;
 export type BlockMetadata = JsonObject;
 
 export interface Block {
-  id: BlockId;
-  type: BlockType;
-  parentId: BlockId | null;
-  tombstone: {
-    deletedAt: number;
-    reason: "user-delete" | "move-replace" | "schema-compaction";
+  readonly id: BlockId;
+  readonly type: BlockType;
+  readonly parentId: BlockId | null;
+  readonly tombstone: {
+    readonly deletedAt: number;
+    readonly reason: "user-delete" | "move-replace" | "schema-compaction";
   } | null;
-  metadata?: BlockMetadata;
+  readonly metadata?: BlockMetadata;
 }
 
 export interface OrderedBlockGraph<BlockRecord extends Block = Block> {

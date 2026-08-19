@@ -27,7 +27,10 @@ describe("First Draft database-only transaction serialization", () => {
         {
           blockId: asBlockId("block-a"),
           blockType: "paragraph",
-          readProjection: createBlockRichTextContentFromPlainText("paragraph", "x"),
+          readProjection: createBlockRichTextContentFromPlainText(
+            "paragraph",
+            "x",
+          ),
           update: {
             kind: "operation",
             format: "editor-yjs-rich-text",
@@ -65,7 +68,10 @@ describe("First Draft database-only transaction serialization", () => {
         {
           blockId: asBlockId("block-a"),
           blockType: "paragraph",
-          readProjection: createBlockRichTextContentFromPlainText("paragraph", "x"),
+          readProjection: createBlockRichTextContentFromPlainText(
+            "paragraph",
+            "x",
+          ),
           update: {
             kind: "operation",
             format: "editor-yjs-rich-text",
@@ -85,7 +91,7 @@ describe("First Draft database-only transaction serialization", () => {
     );
     const persistedAfterTransport =
       serializeFirstDraftTransactionForDatabase(transaction);
-    expect(Reflect.set(immutableBytes, "0", 255)).toBe(false);
+    Reflect.set(immutableBytes, "0", 255);
     const persistedBeforeTransport =
       serializeFirstDraftTransactionForDatabase(transaction);
     const transportAfterPersistence = new Uint8Array(
@@ -99,7 +105,8 @@ describe("First Draft database-only transaction serialization", () => {
     if (!remote.ok) throw new Error(remote.error);
     const remoteBlock = remote.message.transaction.content[0]!;
     expect(remoteBlock.update.payload.equals(immutableBytes)).toBe(true);
-    expect(Reflect.set(remoteBlock.update.payload, "0", 255)).toBe(false);
+    Reflect.set(remoteBlock.update.payload, "0", 255);
+    expect(remoteBlock.update.payload.equals(immutableBytes)).toBe(true);
     expect("operations" in remoteBlock).toBe(false);
   });
 

@@ -14,12 +14,12 @@ import type {
 } from "./transactions/proposal.ts";
 
 const blockId = "block" as never;
-const base = Object.freeze({
+const base = {
   graphRevision: 7,
   blockId,
   blockType: "paragraph" as const,
   contentRevision: 11,
-});
+};
 const testViews: EditorView[] = [];
 
 afterEach(() => {

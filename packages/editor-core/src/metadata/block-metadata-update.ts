@@ -3,7 +3,10 @@ import type { BlockType } from "../document/model/block.ts";
 import type { VersionedBlock } from "../document/model/block-version.ts";
 import type { BlockId } from "../kernel/identity/ids.ts";
 import { cloneJsonValue } from "../kernel/json/json-value.ts";
-import { jsonValuesEqual, type JsonObject } from "../kernel/json/json-value.ts";
+import {
+  jsonValuesEqual,
+  type MutableJsonObject,
+} from "../kernel/json/json-value.ts";
 import type { UpdateBlockMetadataOperation } from "../operations/language/logical-operations.ts";
 import { validateUpdateBlockMetadataOperation } from "./operation-validation.ts";
 import { normalizeBlockMetadata } from "./block-metadata.ts";
@@ -32,7 +35,7 @@ export function applyBlockMetadataUpdates(
   if (!validation.valid) return { ok: false, errors: validation.errors };
 
   const nextBlocks = { ...input.blocks } as Record<BlockId, VersionedBlock>;
-  const metadataByBlock = new Map<BlockId, JsonObject>();
+  const metadataByBlock = new Map<BlockId, MutableJsonObject>();
   const affectedBlockIds: BlockId[] = [];
   const affected = new Set<BlockId>();
   const errors: string[] = [];
@@ -53,10 +56,7 @@ export function applyBlockMetadataUpdates(
       errors.push(`block ${blockId} has unknown block type ${block.type}`);
       continue;
     }
-    metadataByBlock.set(
-      block.id,
-      cloneJsonValue(block.metadata ?? {}) as JsonObject,
-    );
+    metadataByBlock.set(block.id, cloneJsonValue(block.metadata ?? {}));
   }
   if (errors.length > 0) return { ok: false, errors };
 
@@ -85,12 +85,13 @@ export function applyBlockMetadataUpdates(
       ),
     );
     if (jsonValuesEqual(block.metadata ?? null, metadata ?? null)) continue;
+    const { metadata: _metadata, ...blockWithoutMetadata } = block;
+    void _metadata;
     const next: VersionedBlock = {
-      ...block,
+      ...blockWithoutMetadata,
+      ...(metadata === undefined ? {} : { metadata }),
       metadataVersion: incrementMetadataVersion(block.metadataVersion),
     };
-    if (metadata === undefined) delete next.metadata;
-    else next.metadata = metadata;
     nextBlocks[blockId] = next;
     if (!affected.has(block.id)) {
       affected.add(block.id);
@@ -98,11 +99,11 @@ export function applyBlockMetadataUpdates(
     }
   }
   if (errors.length > 0) return { ok: false, errors };
-  return Object.freeze({
+  return {
     ok: true,
-    blocks: Object.freeze(nextBlocks),
-    affectedBlockIds: Object.freeze(affectedBlockIds),
-  });
+    blocks: nextBlocks,
+    affectedBlockIds,
+  };
 }
 
 function incrementMetadataVersion(value: string): string {

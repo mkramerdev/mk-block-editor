@@ -101,8 +101,8 @@ function compileHandlerList<T extends { readonly id: string }>(
   if (handlers !== undefined && !Array.isArray(handlers)) {
     throw new Error(`EditorContentCodecs.${field} must be an array.`);
   }
-  const compiled = [...(handlers ?? [])];
-  for (const handler of compiled) {
+  const compiled: T[] = [];
+  for (const handler of handlers ?? []) {
     if (
       !handler ||
       typeof handler !== "object" ||
@@ -114,6 +114,7 @@ function compileHandlerList<T extends { readonly id: string }>(
         `EditorContentCodecs.${field} includes an invalid handler id.`,
       );
     }
+    compiled.push(Object.freeze({ ...handler }));
   }
   return Object.freeze(compiled);
 }

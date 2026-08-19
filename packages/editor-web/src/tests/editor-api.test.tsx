@@ -38,11 +38,11 @@ const renderProbe = vi.hoisted(() => ({
   selectionController: null as unknown,
 }));
 
-const remoteSubject = Object.freeze({
+const remoteSubject = {
   actorId: "remote-actor",
   clientId: "remote-client",
   sessionId: "remote-session",
-});
+};
 
 vi.mock("../document/editor/block-list", () => ({
   BlockList: ({ editor }: { readonly editor: EditorRuntimePort }) => {
@@ -94,9 +94,7 @@ describe("initializeTestEditableEditor", () => {
     expectTypeOf<ReadEditor>().not.toHaveProperty("insertText");
     expectTypeOf<ReadEditor>().not.toHaveProperty("undo");
     expectTypeOf<ReadEditor>().not.toHaveProperty("commandAvailability");
-    expectTypeOf<ReadEditor>().not.toHaveProperty(
-      "formatSelectionInlineMark",
-    );
+    expectTypeOf<ReadEditor>().not.toHaveProperty("formatSelectionInlineMark");
     expectTypeOf<Editor>().toHaveProperty("selection");
     expectTypeOf<Editor>().not.toHaveProperty("history");
     expectTypeOf<Editor>().not.toHaveProperty("readInlineMarkState");
@@ -420,7 +418,10 @@ describe("initializeTestEditableEditor", () => {
           return {
             ...runtime,
             readBlockProjection(blockId, blockType) {
-              projectionReads.set(blockId, (projectionReads.get(blockId) ?? 0) + 1);
+              projectionReads.set(
+                blockId,
+                (projectionReads.get(blockId) ?? 0) + 1,
+              );
               return runtime.readBlockProjection(blockId, blockType);
             },
           };
@@ -436,10 +437,17 @@ describe("initializeTestEditableEditor", () => {
       ]),
       onChange: changes,
     });
-    commitTestTextSelection(editor as EditorImplementation, firstId, 1, secondId, 4);
+    commitTestTextSelection(
+      editor as EditorImplementation,
+      firstId,
+      1,
+      secondId,
+      4,
+    );
     const captured = editor.selection.getSnapshot();
     expect(captured.kind).toBe("document");
-    if (captured.kind !== "document") throw new Error("selection was not committed");
+    if (captured.kind !== "document")
+      throw new Error("selection was not committed");
     projectionReads.clear();
 
     const read = editor.readCurrentSelectionInlineMarkFormatStates({
@@ -468,10 +476,24 @@ describe("initializeTestEditableEditor", () => {
     expect(result).toMatchObject({ ok: true, changed: true });
     expect(changes).toHaveBeenCalledTimes(1);
     expect(editor.readBlockContent(firstId, "paragraph")).toMatchObject({
-      content: [{ content: [{ text: "f" }, { text: "irst", marks: [{ type: "strong" }] }] }],
+      content: [
+        {
+          content: [
+            { text: "f" },
+            { text: "irst", marks: [{ type: "strong" }] },
+          ],
+        },
+      ],
     });
     expect(editor.readBlockContent(secondId, "heading")).toMatchObject({
-      content: [{ content: [{ text: "seco", marks: [{ type: "strong" }] }, { text: "nd" }] }],
+      content: [
+        {
+          content: [
+            { text: "seco", marks: [{ type: "strong" }] },
+            { text: "nd" },
+          ],
+        },
+      ],
     });
     for (const [index, block] of unrelatedBlocks.entries()) {
       expect(editor.readBlockContent(block.id, "paragraph")).toMatchObject({
@@ -497,9 +519,16 @@ describe("initializeTestEditableEditor", () => {
         { id: blockId, type: "paragraph", text: "abcde" },
       ]),
     });
-    commitTestTextSelection(editor as EditorImplementation, blockId, 1, blockId, 4);
+    commitTestTextSelection(
+      editor as EditorImplementation,
+      blockId,
+      1,
+      blockId,
+      4,
+    );
     const canonical = editor.selection.getSnapshot();
-    if (canonical.kind !== "document") throw new Error("selection was not committed");
+    if (canonical.kind !== "document")
+      throw new Error("selection was not committed");
     const captured = canonical.snapshot;
 
     expect(editor.insertText({ blockId, offset: 0, text: "X" })).toBe(true);
@@ -568,7 +597,13 @@ describe("initializeTestEditableEditor", () => {
     expect(
       editor.readCurrentSelectionInlineMarkFormatStates({ marks: ["strong"] }),
     ).toMatchObject({ ok: false, reason: "not-committed" });
-    commitTestTextSelection(editor as EditorImplementation, firstId, 2, firstId, 2);
+    commitTestTextSelection(
+      editor as EditorImplementation,
+      firstId,
+      2,
+      firstId,
+      2,
+    );
     expect(
       editor.readCurrentSelectionInlineMarkFormatStates({ marks: ["strong"] }),
     ).toMatchObject({ ok: false, reason: "empty-range" });
@@ -589,7 +624,13 @@ describe("initializeTestEditableEditor", () => {
         enabled: true,
       }),
     ).toBe(true);
-    commitTestTextSelection(editor as EditorImplementation, firstId, 0, secondId, 6);
+    commitTestTextSelection(
+      editor as EditorImplementation,
+      firstId,
+      0,
+      secondId,
+      6,
+    );
     expect(
       editor.readCurrentSelectionInlineMarkFormatStates({ marks: ["link"] }),
     ).toMatchObject({
@@ -609,9 +650,16 @@ describe("initializeTestEditableEditor", () => {
         { id: secondId, type: "paragraph", text: "second" },
       ]),
     });
-    commitTestTextSelection(editor as EditorImplementation, firstId, 1, secondId, 4);
+    commitTestTextSelection(
+      editor as EditorImplementation,
+      firstId,
+      1,
+      secondId,
+      4,
+    );
     const canonical = editor.selection.getSnapshot();
-    if (canonical.kind !== "document") throw new Error("selection was not committed");
+    if (canonical.kind !== "document")
+      throw new Error("selection was not committed");
     expect(
       editor.transaction(() => {
         editor.deleteBlocks({
@@ -782,7 +830,11 @@ describe("initializeTestEditableEditor", () => {
     const editor = initializeTestEditableEditor({
       definition: createCleanupDefinition(events),
       snapshot: createTestEditorSnapshot([
-        { id: "editor-api-cleanup" as BlockId, type: "paragraph", text: "cleanup" },
+        {
+          id: "editor-api-cleanup" as BlockId,
+          type: "paragraph",
+          text: "cleanup",
+        },
       ]),
     });
 
@@ -1284,13 +1336,15 @@ describe("useEditor", () => {
     expect(committed.focusText(blockId, { offset: 2 })).toEqual({
       status: "pending",
     });
-    expect(committed.selectionController.canonical.getSnapshot()).toMatchObject({
-      kind: "document",
-      revision: 1,
-      snapshot: {
-        focus: { target: { blockId, textOffset: 2 } },
+    expect(committed.selectionController.canonical.getSnapshot()).toMatchObject(
+      {
+        kind: "document",
+        revision: 1,
+        snapshot: {
+          focus: { target: { blockId, textOffset: 2 } },
+        },
       },
-    });
+    );
 
     unmount();
     committed.dispose();
@@ -1329,10 +1383,12 @@ describe("useEditor", () => {
       settlementListener,
     );
     result.current.dispose();
-    expect(result.current.focusBlock(blockId, { preventScroll: true })).toEqual({
-      status: "rejected",
-      reason: "disposed",
-    });
+    expect(result.current.focusBlock(blockId, { preventScroll: true })).toEqual(
+      {
+        status: "rejected",
+        reason: "disposed",
+      },
+    );
 
     expect(
       result.current.applyRemoteTransaction({
@@ -1386,7 +1442,9 @@ describe("useEditor", () => {
     expect(result.current.focusText(blockId, options)).toEqual({
       status: "pending",
     });
-    expect(result.current.selectionController.canonical.getSnapshot()).toMatchObject({
+    expect(
+      result.current.selectionController.canonical.getSnapshot(),
+    ).toMatchObject({
       kind: "document",
       revision: 1,
       snapshot: {
@@ -1727,7 +1785,8 @@ function commitTestTextSelection(
       throw new Error("text focus did not create a document selection");
     }
     const point = canonical.snapshot.documentSelection.focus;
-    if (!point?.textAnchor) throw new Error("text focus did not create an anchor");
+    if (!point?.textAnchor)
+      throw new Error("text focus did not create an anchor");
     return point;
   };
   const anchor = capturePoint(anchorBlockId, anchorOffset);

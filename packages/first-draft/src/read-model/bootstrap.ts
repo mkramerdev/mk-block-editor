@@ -43,8 +43,7 @@ export interface FirstDraftBootstrapData {
   readonly blocks: readonly FirstDraftBootstrapBlock[];
 }
 
-export interface ValidatedFirstDraftBootstrap
-  extends ValidatedEditorInstanceSnapshot {
+export interface ValidatedFirstDraftBootstrap extends ValidatedEditorInstanceSnapshot {
   readonly documentId: string;
   readonly revision: number;
   readonly [validatedBootstrap]: true;
@@ -76,24 +75,22 @@ export function serializeFirstDraftBootstrap(
     if (!block || block.tombstone) return;
     const readProjection = snapshot.content[blockId];
     const checkpoint = snapshot.opaqueContentCheckpoints[blockId];
-    entries.push(
-      Object.freeze({
-        block,
-        ...(readProjection === undefined ? {} : { readProjection }),
-        ...(checkpoint === undefined ? {} : { checkpoint }),
-      }),
-    );
+    entries.push({
+      block,
+      ...(readProjection === undefined ? {} : { readProjection }),
+      ...(checkpoint === undefined ? {} : { checkpoint }),
+    });
     for (const childId of snapshot.childIdsByParentId[blockId] ?? []) {
       visit(childId);
     }
   };
   for (const rootId of snapshot.rootBlockIds) visit(rootId);
-  return Object.freeze({
+  return {
     documentId: bootstrap.documentId,
     revision: bootstrap.revision,
     blockGraphVersion: snapshot.blockGraphVersion,
-    blocks: Object.freeze(entries),
-  });
+    blocks: entries,
+  };
 }
 
 /**
@@ -129,17 +126,15 @@ export function createFirstDraftBootstrapFromSnapshot(input: {
     if (!block || block.tombstone) return;
     const projection = input.snapshot.content[blockId];
     const checkpoint = input.snapshot.opaqueContentCheckpoints[blockId];
-    entries.push(
-      Object.freeze({
-        block,
-        ...(projection === undefined ? {} : { readProjection: projection }),
-        ...(checkpoint === undefined
-          ? {}
-          : {
-              checkpoint,
-            }),
-      }),
-    );
+    entries.push({
+      block,
+      ...(projection === undefined ? {} : { readProjection: projection }),
+      ...(checkpoint === undefined
+        ? {}
+        : {
+            checkpoint,
+          }),
+    });
     for (const childId of input.snapshot.childIdsByParentId[blockId] ?? []) {
       visit(childId);
     }
@@ -149,7 +144,7 @@ export function createFirstDraftBootstrapFromSnapshot(input: {
     documentId: input.documentId,
     revision: input.revision,
     blockGraphVersion: input.snapshot.blockGraphVersion,
-    blocks: Object.freeze(entries),
+    blocks: entries,
   });
 }
 
@@ -197,23 +192,20 @@ function validateBootstrapBoundary(
         `Serialized checkpoint for block ${index} is malformed`,
       );
     }
-    entries.push(
-      Object.freeze({
-        block: candidate.block as unknown as Block,
-        ...(candidate.readProjection === undefined
-          ? {}
-          : {
-              readProjection:
-                candidate.readProjection as EditorTextBlockContent,
-            }),
-        ...(candidate.checkpoint === undefined
-          ? {}
-          : {
-              checkpoint:
-                candidate.checkpoint as unknown as EditorOpaqueContentCheckpoint,
-            }),
-      }),
-    );
+    entries.push({
+      block: candidate.block as unknown as Block,
+      ...(candidate.readProjection === undefined
+        ? {}
+        : {
+            readProjection: candidate.readProjection as EditorTextBlockContent,
+          }),
+      ...(candidate.checkpoint === undefined
+        ? {}
+        : {
+            checkpoint:
+              candidate.checkpoint as unknown as EditorOpaqueContentCheckpoint,
+          }),
+    });
   }
 
   const blocks = {} as Record<BlockId, Block>;
@@ -239,21 +231,16 @@ function validateBootstrapBoundary(
       opaqueContentCheckpoints[block.id] = entry.checkpoint;
     }
   }
-  const snapshot: EditorInstanceSnapshot = Object.freeze({
+  const snapshot: EditorInstanceSnapshot = {
     blockGraphVersion: value.blockGraphVersion as number,
-    blocks: Object.freeze(blocks),
-    rootBlockIds: Object.freeze(rootBlockIds),
-    childIdsByParentId: Object.freeze(
-      Object.fromEntries(
-        Object.entries(childIdsByParentId).map(([id, ids]) => [
-          id,
-          Object.freeze(ids),
-        ]),
-      ),
+    blocks,
+    rootBlockIds,
+    childIdsByParentId: Object.fromEntries(
+      Object.entries(childIdsByParentId).map(([id, ids]) => [id, ids]),
     ) as Readonly<Partial<Record<BlockId, readonly BlockId[]>>>,
-    content: Object.freeze(content),
-    opaqueContentCheckpoints: Object.freeze(opaqueContentCheckpoints),
-  });
+    content,
+    opaqueContentCheckpoints,
+  };
   let evidence: ValidatedEditorInstanceSnapshot;
   try {
     evidence = validateEditorInstanceSnapshotAtBoundary(snapshot, {
@@ -261,9 +248,9 @@ function validateBootstrapBoundary(
       inlineAtoms: firstDraftInlineAtomModels,
     });
     const tableErrors = validateFirstDraftTableStructure({
-      blocks: snapshot.blocks,
-      rootBlockIds: snapshot.rootBlockIds,
-      childIdsByParentId: snapshot.childIdsByParentId,
+      blocks: evidence.snapshot.blocks,
+      rootBlockIds: evidence.snapshot.rootBlockIds,
+      childIdsByParentId: evidence.snapshot.childIdsByParentId,
       blockDefinitions: firstDraftBlockModelDefinitions,
     });
     if (tableErrors.length > 0) throw new Error(tableErrors.join("; "));

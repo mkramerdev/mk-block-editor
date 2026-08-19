@@ -160,7 +160,9 @@ export function readCurrentSelectionInlineMarkFormatStates(
   if (options.selection.kind !== "document") {
     return formatFailure("block-internal-selection");
   }
-  if (options.selection.documentSelection.graphRevision !== options.graphRevision)
+  if (
+    options.selection.documentSelection.graphRevision !== options.graphRevision
+  )
     return formatFailure("stale-graph");
   return readInlineMarkFormatStatesFromCurrentOffsets(
     options.selection.documentSelection,
@@ -224,7 +226,13 @@ export function readInlineMarkFormatStatesFromCurrentOffsets(
     const ranges: EditorSelectionInlineMarkFormatRange[] = [];
     const commandStates: InlineMarkCommandState[] = [];
     for (const item of prepared) {
-      if (!isInlineMarkFormatRangeEligible(definition, item.selectionRange, options))
+      if (
+        !isInlineMarkFormatRangeEligible(
+          definition,
+          item.selectionRange,
+          options,
+        )
+      )
         continue;
       const range = formatRangeFromSelectionBlock(
         item.selectionRange,
@@ -240,21 +248,24 @@ export function readInlineMarkFormatStatesFromCurrentOffsets(
       states[markName] = unavailableFormatState(definition, "no-eligible-text");
       continue;
     }
-    const commandState = combineInlineMarkCommandStates(definition, commandStates);
+    const commandState = combineInlineMarkCommandStates(
+      definition,
+      commandStates,
+    );
     states[markName] = {
       ...commandState,
       action: commandState.canExecute
         ? resolveInlineMarkCommandAction(commandState, undefined)
         : null,
-      ranges: Object.freeze(ranges),
+      ranges,
     };
   }
 
   return {
     ok: true,
     snapshot: eligibility.snapshot,
-    states: Object.freeze(states),
-    blockIds: Object.freeze([...new Set(blockIds)]),
+    states,
+    blockIds: [...new Set(blockIds)],
   };
 }
 
@@ -277,7 +288,10 @@ export function prepareCapturedSelectionInlineMarkFormatStates(
   });
   if (!resolved.ok)
     return formatFailure(resolved.reason, resolved.blockId, resolved.message);
-  return readInlineMarkFormatStatesFromCurrentOffsets(resolved.snapshot, options);
+  return readInlineMarkFormatStatesFromCurrentOffsets(
+    resolved.snapshot,
+    options,
+  );
 }
 
 function isInlineMarkFormatRangeEligible(

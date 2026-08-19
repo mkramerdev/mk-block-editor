@@ -55,14 +55,12 @@ interface CanonicalBlockCreationCommitBase {
   readonly selectionOffset?: number;
 }
 
-export interface CanonicalBlockCreationCommitInput
-  extends CanonicalBlockCreationCommitBase {
+export interface CanonicalBlockCreationCommitInput extends CanonicalBlockCreationCommitBase {
   readonly targetBlockId: BlockId;
   readonly placement: "after" | "replace";
 }
 
-interface CanonicalBlockCreationAtPlacementInput
-  extends CanonicalBlockCreationCommitBase {
+interface CanonicalBlockCreationAtPlacementInput extends CanonicalBlockCreationCommitBase {
   readonly placement: BlockPlacement;
   readonly source?: {
     readonly block: VersionedBlock;
@@ -119,29 +117,28 @@ export function commitCanonicalBlockCreation(
     childIndex: targetIndex + 1,
   };
   const targetDefinition = input.blockDefinitions[target.type];
-  const adjacent =
-    replacing
-      ? null
-      : targetDefinition?.kind === "wrapper" &&
-          targetDefinition.contentBoundary &&
-          structuralPlacementAcceptsBlockType({
-            placement: directPlacement,
-            proposedType: input.blockType,
-            ...graph,
-            blockDefinitions: input.blockDefinitions,
-          })
-        ? {
-            ok: true as const,
-            placement: directPlacement,
-            remainsInsideDirectParent: true,
-            crossedAncestorIds: Object.freeze([]),
-          }
-        : findAdjacentValidInsertionPlacement({
-            originBlockId: target.id,
-            proposedType: input.blockType,
-            ...graph,
-            blockDefinitions: input.blockDefinitions,
-          });
+  const adjacent = replacing
+    ? null
+    : targetDefinition?.kind === "wrapper" &&
+        targetDefinition.contentBoundary &&
+        structuralPlacementAcceptsBlockType({
+          placement: directPlacement,
+          proposedType: input.blockType,
+          ...graph,
+          blockDefinitions: input.blockDefinitions,
+        })
+      ? {
+          ok: true as const,
+          placement: directPlacement,
+          remainsInsideDirectParent: true,
+          crossedAncestorIds: [],
+        }
+      : findAdjacentValidInsertionPlacement({
+          originBlockId: target.id,
+          proposedType: input.blockType,
+          ...graph,
+          blockDefinitions: input.blockDefinitions,
+        });
   if (!replacing && (!adjacent || !adjacent.ok)) {
     return {
       ok: false,
@@ -221,26 +218,25 @@ function commitCanonicalBlockCreationAtPlacement(
   if (!selection.ok) return selection;
   const replacingRestorativeDefault = Boolean(
     replacing &&
-      source?.parentId &&
-      (() => {
-        const parent = graph.blocks[source.parentId!];
-        const definition = parent
-          ? input.blockDefinitions[parent.type]
-          : undefined;
-        const relationship = definition
-          ? resolveRestorativeDefault(input.blockDefinitions, definition)
-          : null;
-        const rootTypes = creation.fragment.rootBlockIds.map(
-          (rootId) =>
-            creation.fragment.blocks.find((record) => record.id === rootId)!
-              .type,
-        );
-        return (
-          relationship?.defaultType === source.type &&
-          readDirectBlockIds(input.editor, source.parentId!).length === 1 &&
-          rootTypes.every((type) => type !== relationship.defaultType)
-        );
-      })(),
+    source?.parentId &&
+    (() => {
+      const parent = graph.blocks[source.parentId!];
+      const definition = parent
+        ? input.blockDefinitions[parent.type]
+        : undefined;
+      const relationship = definition
+        ? resolveRestorativeDefault(input.blockDefinitions, definition)
+        : null;
+      const rootTypes = creation.fragment.rootBlockIds.map(
+        (rootId) =>
+          creation.fragment.blocks.find((record) => record.id === rootId)!.type,
+      );
+      return (
+        relationship?.defaultType === source.type &&
+        readDirectBlockIds(input.editor, source.parentId!).length === 1 &&
+        rootTypes.every((type) => type !== relationship.defaultType)
+      );
+    })(),
   );
   const result = input.editor.transaction(() => {
     if (replacing && source) {
@@ -269,10 +265,10 @@ function commitCanonicalBlockCreationAtPlacement(
     ok: true,
     rootBlockId: creation.rootBlockId,
     selectionBlockId: creation.selectionBlockId,
-    changedBlockIds: Object.freeze([
+    changedBlockIds: [
       ...(source ? [source.id] : []),
       ...creation.fragment.blocks.map((block) => block.id),
-    ]),
+    ],
     transaction: result,
   };
 }

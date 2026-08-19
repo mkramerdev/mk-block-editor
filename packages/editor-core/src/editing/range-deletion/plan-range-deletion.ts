@@ -725,7 +725,7 @@ function success(
     ok: true,
     plan: {
       origin: rangeDeletionOrigin(intent),
-      operations: Object.freeze([...operations]),
+      operations: [...operations],
       ...(expectedBlocks.length === 0
         ? {}
         : {

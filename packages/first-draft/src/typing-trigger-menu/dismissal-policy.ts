@@ -96,15 +96,10 @@ export function advanceFirstDraftTypingTriggerDismissal(
     candidateCount: currentCount,
     unmatchedLetterStreak: streak,
   };
-  const doubleSpace =
-    appended.endsWith(" ") && current.query.endsWith("  ");
+  const doubleSpace = appended.endsWith(" ") && current.query.endsWith("  ");
   return result(
     state,
-    doubleSpace
-      ? "double-space"
-      : streak > 3
-        ? "unmatched-letters"
-        : null,
+    doubleSpace ? "double-space" : streak > 3 ? "unmatched-letters" : null,
   );
 }
 
@@ -112,5 +107,5 @@ function result(
   state: FirstDraftTypingTriggerDismissalState,
   reason: FirstDraftTypingTriggerDismissalResult["reason"],
 ): FirstDraftTypingTriggerDismissalResult {
-  return { state: Object.freeze(state), dismiss: reason !== null, reason };
+  return { state, dismiss: reason !== null, reason };
 }

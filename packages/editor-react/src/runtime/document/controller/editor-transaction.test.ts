@@ -230,9 +230,9 @@ function createTestEditor(
       };
     }
     preparedCommitCount += 1;
-    const prepared = Object.freeze({
+    const prepared = {
       kind: "validated-content-commit" as const,
-      affectedBlockIds: Object.freeze(
+      affectedBlockIds:
         preparedCommitCount <= (options.preparedNoChangeCount ?? 0)
           ? []
           : [
@@ -240,23 +240,20 @@ function createTestEditor(
                 input.changes.map((change) => change.baseToken.blockId),
               ),
             ],
-      ),
-      blocks: Object.freeze(
-        input.changes.map((change) => ({
-          blockId: change.baseToken.blockId,
-          blockType: change.baseToken.blockType,
-          contentOperations: change.operations,
-          inverseContentOperations: change.operations
-            .map((operation) => createInverseLogicalContentOperation(operation))
-            .filter(
-              (operation): operation is EditorLogicalContentOperation =>
-                operation !== null,
-            )
-            .reverse(),
-        })),
-      ),
-      removedBlocks: Object.freeze([]),
-    });
+      blocks: input.changes.map((change) => ({
+        blockId: change.baseToken.blockId,
+        blockType: change.baseToken.blockType,
+        contentOperations: change.operations,
+        inverseContentOperations: change.operations
+          .map((operation) => createInverseLogicalContentOperation(operation))
+          .filter(
+            (operation): operation is EditorLogicalContentOperation =>
+              operation !== null,
+          )
+          .reverse(),
+      })),
+      removedBlocks: [],
+    };
     preparedState.set(prepared, {
       input,
       before: new Map(
@@ -301,43 +298,41 @@ function createTestEditor(
       }
       if (next) content.set(change.baseToken.blockId, next);
     }
-    const applied = Object.freeze({
+    const applied = {
       kind: "applied-content-commit" as const,
       baseGraphRevision: state.input.graphRevision,
       graphRevision:
         state.input.resultingGraphRevision ?? state.input.graphRevision,
       affectedBlockIds: prepared.affectedBlockIds,
-      blocks: Object.freeze(
-        options.materializeAppliedBlocks
-          ? state.input.changes.map((change) => {
-              return Object.freeze({
-                blockId: change.baseToken.blockId,
-                blockType: change.baseToken.blockType,
-                baseToken: change.baseToken,
-                committedToken: {
-                  ...change.baseToken,
-                  contentRevision: change.baseToken.contentRevision + 1,
-                },
-                operationUpdate: {} as never,
-                contentOperations: change.operations,
-                inverseContentOperations: [...change.operations]
-                  .reverse()
-                  .map((operation) => {
-                    const inverse =
-                      createInverseLogicalContentOperation(operation);
-                    if (!inverse) {
-                      throw new Error(
-                        "test content preparation accepted a non-reversible operation",
-                      );
-                    }
-                    return inverse;
-                  }),
-              });
-            })
-          : [],
-      ),
+      blocks: options.materializeAppliedBlocks
+        ? state.input.changes.map((change) => {
+            return {
+              blockId: change.baseToken.blockId,
+              blockType: change.baseToken.blockType,
+              baseToken: change.baseToken,
+              committedToken: {
+                ...change.baseToken,
+                contentRevision: change.baseToken.contentRevision + 1,
+              },
+              operationUpdate: {} as never,
+              contentOperations: change.operations,
+              inverseContentOperations: [...change.operations]
+                .reverse()
+                .map((operation) => {
+                  const inverse =
+                    createInverseLogicalContentOperation(operation);
+                  if (!inverse) {
+                    throw new Error(
+                      "test content preparation accepted a non-reversible operation",
+                    );
+                  }
+                  return inverse;
+                }),
+            };
+          })
+        : [],
       origin: state.input.origin,
-    });
+    };
     return applied;
   });
   const publishContentCommit = vi.fn();
@@ -375,7 +370,7 @@ function createTestEditor(
         point.textOffset >= 0 &&
         point.textOffset <= richTextDocumentContentSize(next)
         ? { ok: true, textOffset: point.textOffset }
-          : { ok: false, reason: "invalid" };
+        : { ok: false, reason: "invalid" };
     },
     readValidatedBlockContent(prepared, blockId) {
       const state = preparedState.get(prepared);
@@ -383,9 +378,7 @@ function createTestEditor(
       const change = state.input.changes.find(
         (candidate) => candidate.baseToken.blockId === blockId,
       );
-      let next = change
-        ? state.before.get(blockId)
-        : content.get(blockId);
+      let next = change ? state.before.get(blockId) : content.get(blockId);
       for (const operation of change?.operations ?? []) {
         next = next
           ? (applyLogicalContentOperationToRichTextDocument(
@@ -867,8 +860,11 @@ describe("EditorImplementation active transaction", () => {
 
     expect(createAnchor).toHaveBeenCalledTimes(2);
     expect(
-      (fixture.editor as unknown as { readonly history: readonly EditorHistoryEntry[] })
-        .history,
+      (
+        fixture.editor as unknown as {
+          readonly history: readonly EditorHistoryEntry[];
+        }
+      ).history,
     ).toHaveLength(1);
     fixture.dispose();
   });
@@ -2500,12 +2496,12 @@ describe("EditorImplementation active transaction", () => {
     ).toBe(true);
     expect(observed).toEqual(["AlphaBravo", "removed-right"]);
     expect(validator).toHaveBeenCalledOnce();
-    expect(fixture.validateContentCommit.mock.invocationCallOrder[0]).toBeLessThan(
-      validator.mock.invocationCallOrder[0]!,
-    );
     expect(
-      validator.mock.invocationCallOrder[0],
-    ).toBeLessThan(fixture.commitContent.mock.invocationCallOrder[0]!);
+      fixture.validateContentCommit.mock.invocationCallOrder[0],
+    ).toBeLessThan(validator.mock.invocationCallOrder[0]!);
+    expect(validator.mock.invocationCallOrder[0]).toBeLessThan(
+      fixture.commitContent.mock.invocationCallOrder[0]!,
+    );
     fixture.dispose();
   });
 
@@ -2628,9 +2624,9 @@ describe("EditorImplementation active transaction", () => {
     expect(fixture.onCanonicalCommit).not.toHaveBeenCalled();
     expect(fixture.publications).not.toHaveBeenCalled();
     expect(fixture.validateContentCommit).toHaveBeenCalledTimes(1);
-      expect(fixture.commitContent).not.toHaveBeenCalled();
-      expect(fixture.publishContentCommit).not.toHaveBeenCalled();
-      expect(fixture.markInconsistent).not.toHaveBeenCalled();
+    expect(fixture.commitContent).not.toHaveBeenCalled();
+    expect(fixture.publishContentCommit).not.toHaveBeenCalled();
+    expect(fixture.markInconsistent).not.toHaveBeenCalled();
     fixture.dispose();
   });
 
@@ -2674,8 +2670,8 @@ describe("EditorImplementation active transaction", () => {
     expect(fixture.publications).not.toHaveBeenCalled();
     expect(fixture.validateContentCommit).toHaveBeenCalledTimes(1);
     expect(fixture.commitContent).toHaveBeenCalledTimes(1);
-      expect(fixture.publishContentCommit).not.toHaveBeenCalled();
-      expect(fixture.markInconsistent).not.toHaveBeenCalled();
+    expect(fixture.publishContentCommit).not.toHaveBeenCalled();
+    expect(fixture.markInconsistent).not.toHaveBeenCalled();
     fixture.dispose();
   });
 });
@@ -2758,9 +2754,9 @@ describe("EditorImplementation content selection presentation", () => {
 
     expect(result).toMatchObject({ ok: false, reason: "no-change" });
     expect(fixture.validateContentCommit).toHaveBeenCalledOnce();
-      expect(fixture.commitContent).not.toHaveBeenCalled();
-      expect(fixture.publishContentCommit).not.toHaveBeenCalled();
-      expect(fixture.markInconsistent).not.toHaveBeenCalled();
+    expect(fixture.commitContent).not.toHaveBeenCalled();
+    expect(fixture.publishContentCommit).not.toHaveBeenCalled();
+    expect(fixture.markInconsistent).not.toHaveBeenCalled();
     expect(fixture.editor.getEditorInfo().documentRevision).toBe(1);
     expect(fixture.editor.canUndo).toBe(false);
     expect(fixture.onCanonicalCommit).not.toHaveBeenCalled();

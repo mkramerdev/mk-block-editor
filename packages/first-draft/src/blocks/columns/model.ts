@@ -26,10 +26,8 @@ export function validateColumnMetadata(
   metadata: JsonObject | undefined,
 ): readonly string[] {
   return readColumnLayoutWeight(metadata) === null
-    ? Object.freeze([
-        "column metadata layoutWeight must be a positive finite integer",
-      ])
-    : Object.freeze([]);
+    ? ["column metadata layoutWeight must be a positive finite integer"]
+    : [];
 }
 
 export function columnWeightsToGridTracks(

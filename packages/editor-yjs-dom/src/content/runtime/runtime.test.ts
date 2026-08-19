@@ -189,7 +189,9 @@ describe("independent encoded Yjs block content", () => {
   });
 
   it("creates and resolves anchors only inside an explicitly owned context", () => {
-    const runtime = createYjsBlockContentRuntime(sourceFor({ [id(1)]: "anchor" }));
+    const runtime = createYjsBlockContentRuntime(
+      sourceFor({ [id(1)]: "anchor" }),
+    );
     expect(
       runtime.tryResolveTextAnchorInLiveContext({
         blockId: id(1),
@@ -343,7 +345,10 @@ function sourceFor(content: Readonly<Record<BlockId, string>>) {
     BlockId,
     EditorOpaqueContentCheckpoint
   >;
-  for (const [blockId, text] of Object.entries(content) as [BlockId, string][]) {
+  for (const [blockId, text] of Object.entries(content) as [
+    BlockId,
+    string,
+  ][]) {
     blockTypesById[blockId] = "paragraph";
     contentById[blockId] = richText(text);
     opaqueContentCheckpoints[blockId] = opaque(
@@ -376,12 +381,12 @@ function updateFromCheckpoint(
   try {
     const vector = encodeStateVector(doc);
     writeCanonicalYjsBlockContent(context, content, "test-update");
-    return Object.freeze({
+    return {
       kind: "operation",
       format: checkpoint.format,
       version: checkpoint.version,
       payload: EditorImmutableBinary.copyOf(encodeStateAsUpdate(doc, vector)),
-    });
+    };
   } finally {
     context.destroy();
   }
@@ -390,12 +395,12 @@ function updateFromCheckpoint(
 function opaque(
   checkpoint: ReturnType<typeof createYjsBlockContentCheckpoint>,
 ): EditorOpaqueContentCheckpoint {
-  return Object.freeze({
+  return {
     kind: "checkpoint",
     format: checkpoint.format,
     version: checkpoint.version,
     payloadBase64: Buffer.from(checkpoint.payload.copy()).toString("base64"),
-  });
+  };
 }
 
 function decodeBase64(value: string): Uint8Array {

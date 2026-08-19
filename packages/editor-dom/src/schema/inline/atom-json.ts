@@ -1,4 +1,8 @@
-import { cloneJsonValue, type JsonObject } from "@repo/editor-core/kernel";
+import {
+  cloneJsonValue,
+  type JsonObject,
+  type MutableJsonObject,
+} from "@repo/editor-core/kernel";
 import type {
   RichTextDocumentNodeJson,
   RichTextInlineNodeJson,
@@ -33,7 +37,9 @@ export function proseMirrorInlineFragmentToCanonicalJson(
   const inline = unwrapTextBlock(content);
   return inline.map((node, index) => {
     if (!isRecord(node)) {
-      throw new TypeError(`ProseMirror inline content[${index}] must be an object`);
+      throw new TypeError(
+        `ProseMirror inline content[${index}] must be an object`,
+      );
     }
     return mapJsonObject(
       node as JsonObject,
@@ -56,7 +62,7 @@ function mapJsonObject(
   value: JsonObject,
   direction: "canonical-to-prosemirror" | "prosemirror-to-canonical",
 ): JsonObject {
-  const mapped: JsonObject = {};
+  const mapped: MutableJsonObject = {};
   for (const [key, entry] of Object.entries(value)) {
     if (key === "content" && Array.isArray(entry)) {
       mapped.content = entry.map((child) =>
@@ -87,10 +93,7 @@ function mapJsonObject(
     delete mapped.attrs;
     mapped.metadata = metadata;
   }
-  if (
-    direction === "prosemirror-to-canonical" &&
-    mapped.type === "heading"
-  ) {
+  if (direction === "prosemirror-to-canonical" && mapped.type === "heading") {
     mapped.type = "paragraph";
     delete mapped.attrs;
   }

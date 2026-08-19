@@ -258,22 +258,18 @@ const testBlockSemantics: Readonly<Record<BlockType, BlockDefinition>> = {
   },
 };
 
-const testReadBlockDefinitions = Object.freeze(
-  Object.fromEntries(
-    Object.entries(testBlockSemantics).map(([type, definition]) => [
-      type,
-      { ...definition, renderer: testReadRenderer },
-    ]),
-  ),
+const testReadBlockDefinitions = Object.fromEntries(
+  Object.entries(testBlockSemantics).map(([type, definition]) => [
+    type,
+    { ...definition, renderer: testReadRenderer },
+  ]),
 ) as ReadEditorDefinition["blocks"];
 
-const testEditableBlockDefinitions = Object.freeze(
-  Object.fromEntries(
-    Object.entries(testBlockSemantics).map(([type, definition]) => [
-      type,
-      { ...definition, renderer: testEditableRenderer },
-    ]),
-  ),
+const testEditableBlockDefinitions = Object.fromEntries(
+  Object.entries(testBlockSemantics).map(([type, definition]) => [
+    type,
+    { ...definition, renderer: testEditableRenderer },
+  ]),
 ) as EditableEditorDefinition["blocks"];
 
 const testInlineMarks = [

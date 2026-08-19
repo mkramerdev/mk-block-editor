@@ -8,6 +8,7 @@ import {
   physicalEditorKeyChordSignature,
   type NormalizedEditorKeyChord,
 } from "./chord.ts";
+import { createImmutableMap } from "../definition/immutable-map.ts";
 
 export interface CompiledEditorKeybindings {
   readonly document: ReadonlyMap<NormalizedEditorKeyChord, EditorKeyBinding>;
@@ -72,8 +73,8 @@ export function compileEditorKeybindings(
   }
 
   return Object.freeze({
-    document: new ImmutableEditorKeybindingMap(documentBindings),
-    block: new ImmutableEditorKeybindingMap(blockBindings),
+    document: createImmutableMap(documentBindings),
+    block: createImmutableMap(blockBindings),
   });
 }
 
@@ -110,62 +111,4 @@ function assertValidBindingShape(
 
 function isEditorCommandScope(scope: unknown): scope is EditorCommandScope {
   return scope === "document" || scope === "block";
-}
-
-class ImmutableEditorKeybindingMap
-  implements ReadonlyMap<NormalizedEditorKeyChord, EditorKeyBinding>
-{
-  readonly #bindings: Map<NormalizedEditorKeyChord, EditorKeyBinding>;
-
-  constructor(bindings: Map<NormalizedEditorKeyChord, EditorKeyBinding>) {
-    this.#bindings = new Map(bindings);
-    Object.freeze(this);
-  }
-
-  get size(): number {
-    return this.#bindings.size;
-  }
-
-  get(key: NormalizedEditorKeyChord): EditorKeyBinding | undefined {
-    return this.#bindings.get(key);
-  }
-
-  has(key: NormalizedEditorKeyChord): boolean {
-    return this.#bindings.has(key);
-  }
-
-  forEach(
-    callbackfn: (
-      value: EditorKeyBinding,
-      key: NormalizedEditorKeyChord,
-      map: ReadonlyMap<NormalizedEditorKeyChord, EditorKeyBinding>,
-    ) => void,
-    thisArg?: unknown,
-  ): void {
-    this.#bindings.forEach((value, key) =>
-      callbackfn.call(thisArg, value, key, this),
-    );
-  }
-
-  entries(): MapIterator<[NormalizedEditorKeyChord, EditorKeyBinding]> {
-    return this.#bindings.entries();
-  }
-
-  keys(): MapIterator<NormalizedEditorKeyChord> {
-    return this.#bindings.keys();
-  }
-
-  values(): MapIterator<EditorKeyBinding> {
-    return this.#bindings.values();
-  }
-
-  [Symbol.iterator](): MapIterator<
-    [NormalizedEditorKeyChord, EditorKeyBinding]
-  > {
-    return this.#bindings[Symbol.iterator]();
-  }
-
-  get [Symbol.toStringTag](): string {
-    return "ImmutableEditorKeybindingMap";
-  }
 }

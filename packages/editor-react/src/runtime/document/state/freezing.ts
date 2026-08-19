@@ -2,7 +2,7 @@ import type { VersionedBlock } from "@repo/editor-core/document";
 import type { BlockDefinition } from "@repo/editor-core/definitions";
 import type { BlockType } from "@repo/editor-core/document";
 import type { BlockId } from "@repo/editor-core/kernel";
-import { jsonValuesEqual } from "@repo/editor-core/kernel";
+import { jsonValuesEqual, ownJsonValue } from "@repo/editor-core/kernel";
 import { normalizeBlockMetadata } from "@repo/editor-core/metadata";
 import { createVersionedBlockRecordOverlay } from "@repo/editor-core/editing";
 import type { EditorManifestState } from "./command-state.ts";
@@ -59,7 +59,7 @@ function freezeChangedBlocks(
   next: Readonly<Record<BlockId, VersionedBlock>>,
   previous: Readonly<Record<BlockId, VersionedBlock>>,
   changedBlockIds: readonly BlockId[],
-): Record<BlockId, VersionedBlock> {
+): Readonly<Record<BlockId, VersionedBlock>> {
   const overlay = createVersionedBlockRecordOverlay(previous);
   for (const blockId of new Set(changedBlockIds)) {
     const block = next[blockId];
@@ -72,13 +72,13 @@ function freezeChangedBlocks(
       ? previous[blockId]!
       : normalized;
   }
-  return overlay.seal() as Record<BlockId, VersionedBlock>;
+  return overlay.seal();
 }
 
 function freezeAllBlocks(
   next: Readonly<Record<BlockId, VersionedBlock>>,
   previous: Readonly<Record<BlockId, VersionedBlock>> | undefined,
-): Record<BlockId, VersionedBlock> {
+): Readonly<Record<BlockId, VersionedBlock>> {
   const candidate = Object.fromEntries(
     (Object.entries(next) as [BlockId, VersionedBlock][]).map(
       ([blockId, block]) => {
@@ -93,15 +93,18 @@ function freezeAllBlocks(
     ),
   ) as Record<BlockId, VersionedBlock>;
   return previous && recordReferencesEqual(candidate, previous)
-    ? (previous as Record<BlockId, VersionedBlock>)
+    ? previous
     : Object.freeze(candidate);
 }
 
 function freezeBlock(block: VersionedBlock): VersionedBlock {
   const metadata = normalizeBlockMetadata(block.metadata);
-  const normalized: VersionedBlock = { ...block };
-  if (metadata === undefined) delete normalized.metadata;
-  else normalized.metadata = Object.freeze(metadata);
+  const { metadata: _metadata, ...blockWithoutMetadata } = block;
+  void _metadata;
+  const normalized: VersionedBlock = {
+    ...blockWithoutMetadata,
+    ...(metadata === undefined ? {} : { metadata: ownJsonValue(metadata) }),
+  };
   return Object.freeze(normalized);
 }
 

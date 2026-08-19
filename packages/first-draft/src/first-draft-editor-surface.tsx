@@ -140,7 +140,7 @@ export function FirstDraftEditorSurface({
   const connectionInputs = useMemo<FirstDraftConnectionInputs | null>(
     () =>
       hasCollaboration
-        ? Object.freeze({
+        ? {
             webSocketUrl: requestedWebSocketUrl!,
             documentId: requestedDocumentId!,
             actorId: requestedActorId!,
@@ -150,7 +150,7 @@ export function FirstDraftEditorSurface({
               ? {}
               : { displayName: requestedDisplayName }),
             ...(requestedColor === undefined ? {} : { color: requestedColor }),
-          })
+          }
         : null,
     [
       hasCollaboration,

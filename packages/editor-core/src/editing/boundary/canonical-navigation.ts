@@ -81,15 +81,15 @@ export function findCanonicalMergeTarget(
         if (descended.candidate.kind === "atomic") {
           return { ok: false, reason: "blocked" };
         }
-        return Object.freeze({
+        return {
           ok: true,
           blockId: descended.candidate.block.id,
           content: descended.candidate.content,
           contentVersion: descended.candidate.version,
           originalLength: descended.candidate.length,
-          crossedAncestorIds: Object.freeze([...crossed]),
-          originAncestorIds: Object.freeze(ancestorIds(input.blocks, source)),
-        });
+          crossedAncestorIds: [...crossed],
+          originAncestorIds: ancestorIds(input.blocks, source),
+        };
       }
     }
     if (!cursor.parentId) break;

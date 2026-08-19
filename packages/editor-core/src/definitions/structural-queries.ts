@@ -24,10 +24,10 @@ export function resolveRestorativeDefault(
   }
   const replacementDefinition = blockDefinitions[defaultDefinition.replaceWith];
   if (replacementDefinition?.kind !== "text") return null;
-  return Object.freeze({
+  return {
     defaultType: definition.defaultContent,
     replacementType: defaultDefinition.replaceWith,
-  });
+  };
 }
 
 export function blockDefinitionAcceptsChildren(

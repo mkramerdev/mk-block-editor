@@ -170,15 +170,15 @@ export function resolveStructuralEditRange(
   if (blocks.length === 0) return null;
   const first = blocks[0]!;
   const last = blocks.at(-1)!;
-  return Object.freeze({
+  return {
     graphRevision: options.graphRevision,
     selectionRevision:
       options.snapshot.sourceSelectionRevision ??
       options.snapshot.selectionRevision,
-    blocks: Object.freeze(blocks),
+    blocks,
     start: boundaryFor(first, "start", options),
     end: boundaryFor(last, "end", options),
-  });
+  };
 }
 
 function selectionRemovesCompleteListItem(

@@ -6,15 +6,13 @@ import type {
 export function deleteRange(
   range: StructuralEditRange,
 ): StructuralTransactionOperation {
-  return Object.freeze({
+  return {
     kind: "deleteRange",
-    range: Object.freeze({
+    range: {
       ...range,
-      blocks: Object.freeze(
-        range.blocks.map((block) => Object.freeze({ ...block })),
-      ),
-      start: Object.freeze({ ...range.start }),
-      end: Object.freeze({ ...range.end }),
-    }),
-  });
+      blocks: range.blocks.map((block) => ({ ...block })),
+      start: { ...range.start },
+      end: { ...range.end },
+    },
+  };
 }

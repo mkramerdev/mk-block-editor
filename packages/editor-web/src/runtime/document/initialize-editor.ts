@@ -91,11 +91,7 @@ export function initializeEditableEditor({
   const commands = compiledDefinition.commands;
   const keybindings = compiledDefinition.keybindings;
   if (validatedSnapshot) {
-    if (validatedSnapshot.snapshot !== snapshot) {
-      throw new Error(
-        "Validated editor snapshot evidence does not match its snapshot",
-      );
-    }
+    snapshot = validatedSnapshot.snapshot;
   } else {
     assertValidEditorSnapshotForStartupOrRecovery(snapshot, compiledDefinition);
   }
@@ -282,13 +278,13 @@ export function initializeEditableEditor({
         const model = editor.readBlockSelectionModel(blockId);
         return Boolean(
           block &&
-            !block.tombstone &&
-            model?.projection.selectable &&
-            (kind === "text"
-              ? definition?.kind === "text" &&
-                model.projection.endpoint.kind === "content"
-              : definition?.kind === "atomic" &&
-                model.projection.endpoint.kind === "block"),
+          !block.tombstone &&
+          model?.projection.selectable &&
+          (kind === "text"
+            ? definition?.kind === "text" &&
+              model.projection.endpoint.kind === "content"
+            : definition?.kind === "atomic" &&
+              model.projection.endpoint.kind === "block"),
         );
       },
       consumePending(request) {
@@ -488,7 +484,7 @@ export function initializeEditableEditor({
           rootBlockIds: slice.rootBlockIds,
           childIdsByParentId: slice.childIdsByParentId,
           content: slice.content,
-          opaqueContentCheckpoints: Object.freeze(opaqueContentCheckpoints),
+          opaqueContentCheckpoints,
         };
       },
       setSelections(snapshot) {
@@ -804,7 +800,7 @@ function createRemoteEditorCommandState(
     ...current,
     blockGraphVersion: canonical.blockGraphVersion,
     blocks: { ...canonical.blocks },
-    rootBlockIds: Object.freeze([...canonical.rootBlockIds]),
+    rootBlockIds: [...canonical.rootBlockIds],
     childIdsByParentId: canonical.childIdsByParentId,
     updatedAt: Date.now(),
   };

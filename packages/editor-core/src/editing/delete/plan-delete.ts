@@ -76,13 +76,17 @@ export function planBlockBoundaryDelete(
 ): PlanBlockBoundaryDeleteResult {
   try {
     const survivor = liveBlock(input.blocks, input.selectionBlockId);
-    if (!survivor) return failure("missing-block", "focused block is unavailable");
+    if (!survivor)
+      return failure("missing-block", "focused block is unavailable");
     const definition = input.blockDefinitions[survivor.type];
     if (definition?.kind !== "text") {
       return failure("not-text", "focused block is not editable text");
     }
     if (!isRichTextDocument(input.content.content)) {
-      return failure("invalid-content", "focused block content is not rich text");
+      return failure(
+        "invalid-content",
+        "focused block content is not rich text",
+      );
     }
     if (survivor.contentVersion !== input.content.version) {
       return failure("stale-content", "focused block content version changed");
@@ -96,7 +100,10 @@ export function planBlockBoundaryDelete(
       to < from ||
       to > size
     ) {
-      return failure("invalid-selection", "selection is outside the focused block");
+      return failure(
+        "invalid-selection",
+        "selection is outside the focused block",
+      );
     }
     if (from !== size || to !== size) {
       return failure(
@@ -153,7 +160,7 @@ export function planBlockBoundaryDelete(
       handled: true,
       plan: {
         origin: "generic-delete",
-        operations: Object.freeze(operations),
+        operations,
         preconditions: {
           blocks: expectedBlocks.map((block) => ({
             blockId: block.id,
@@ -236,11 +243,7 @@ function planForwardCleanup(
           },
         }),
       ],
-      expectations: [
-        compound.wrapper,
-        compound.contentWrapper,
-        ...promoted,
-      ],
+      expectations: [compound.wrapper, compound.contentWrapper, ...promoted],
     };
   }
 
@@ -323,10 +326,13 @@ function compoundPrimaryContext(
   readonly wrapper: VersionedBlock;
   readonly contentWrapper: VersionedBlock;
 } | null {
-  const wrapper = donor.parentId ? liveBlock(input.blocks, donor.parentId) : null;
+  const wrapper = donor.parentId
+    ? liveBlock(input.blocks, donor.parentId)
+    : null;
   if (!wrapper) return null;
   const definition = input.blockDefinitions[wrapper.type];
-  const policy = definition?.kind === "wrapper" ? definition.compound : undefined;
+  const policy =
+    definition?.kind === "wrapper" ? definition.compound : undefined;
   if (!policy || donor.type !== policy.primaryTextChildType) return null;
   const children = liveChildren(input, wrapper.id);
   const contentWrapper = children[1];
@@ -350,7 +356,9 @@ function liveChildren(
       : (input.childIdsByParentId[parentId] ?? []);
   return ids
     .map((id) => input.blocks[id])
-    .filter((block): block is VersionedBlock => Boolean(block && !block.tombstone));
+    .filter((block): block is VersionedBlock =>
+      Boolean(block && !block.tombstone),
+    );
 }
 
 function liveBlock(
@@ -366,7 +374,7 @@ function uniqueBlocks(values: readonly VersionedBlock[]): VersionedBlock[] {
 }
 
 function failure(
-  reason: Extract<PlanBlockBoundaryDeleteResult, { ok: false }>['reason'],
+  reason: Extract<PlanBlockBoundaryDeleteResult, { ok: false }>["reason"],
   message: string,
 ): PlanBlockBoundaryDeleteResult {
   return { ok: false, reason, message };

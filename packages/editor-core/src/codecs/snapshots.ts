@@ -26,6 +26,7 @@ import { isStructuralKey } from "../kernel/identity/uuid.ts";
 import type { BlockId } from "../kernel/identity/ids.ts";
 import { EditorImmutableBinary } from "../kernel/content/encoded-content.ts";
 import { validateBlockMetadata } from "../metadata/block-metadata.ts";
+import { ownJsonValue } from "../kernel/json/json-value.ts";
 
 export interface EditorSnapshotValidationOptions {
   readonly blockDefinitions: Readonly<Record<BlockType, BlockDefinition>>;
@@ -91,22 +92,64 @@ export function validateEditorInstanceSnapshotAtBoundary(
   options: EditorSnapshotValidationOptions,
 ): ValidatedEditorInstanceSnapshot {
   assertValidEditorInstanceSnapshot(value, options);
-  const snapshot = value;
+  const source = value;
+  const blocks = Object.fromEntries(
+    Object.entries(source.blocks).map(([blockId, block]) => [
+      blockId,
+      Object.freeze({
+        ...block,
+        ...(block.metadata === undefined
+          ? {}
+          : { metadata: ownJsonValue(block.metadata) }),
+        tombstone:
+          block.tombstone === null
+            ? null
+            : Object.freeze({ ...block.tombstone }),
+      }),
+    ]),
+  ) as Record<BlockId, Block>;
+  const childIdsByParentId = Object.fromEntries(
+    Object.entries(source.childIdsByParentId).map(([parentId, childIds]) => [
+      parentId,
+      Object.freeze([...(childIds ?? [])]),
+    ]),
+  ) as Partial<Record<BlockId, readonly BlockId[]>>;
+  const content = Object.fromEntries(
+    Object.entries(source.content).flatMap(([blockId, projection]) =>
+      projection === undefined
+        ? []
+        : [[blockId, ownJsonValue(projection)] as const],
+    ),
+  ) as Partial<Record<BlockId, EditorTextBlockContent>>;
+  const opaqueContentCheckpoints = Object.fromEntries(
+    Object.entries(source.opaqueContentCheckpoints).map(
+      ([blockId, checkpoint]) => [
+        blockId,
+        checkpoint === undefined ? undefined : Object.freeze({ ...checkpoint }),
+      ],
+    ),
+  ) as EditorInstanceSnapshot["opaqueContentCheckpoints"];
+  const snapshot: EditorInstanceSnapshot = Object.freeze({
+    blockGraphVersion: source.blockGraphVersion,
+    blocks: Object.freeze(blocks),
+    rootBlockIds: Object.freeze([...source.rootBlockIds]),
+    childIdsByParentId: Object.freeze(childIdsByParentId),
+    content: Object.freeze(content),
+    opaqueContentCheckpoints: Object.freeze(opaqueContentCheckpoints),
+  });
   const canonicalContent = {} as Partial<
     Record<BlockId, EditorTextBlockContent>
   >;
   for (const [blockId, projection] of Object.entries(snapshot.content)) {
     const block = snapshot.blocks[blockId as BlockId];
     if (!block || projection === undefined) continue;
-    canonicalContent[blockId as BlockId] = normalizeRichTextDocument(
-      block.type,
-      projection,
-      {
+    canonicalContent[blockId as BlockId] = ownJsonValue(
+      normalizeRichTextDocument(block.type, projection, {
         inlineMarks: options.inlineMarks ?? primitiveInlineMarkDefinitions,
         ...(options.inlineAtoms === undefined
           ? {}
           : { inlineAtoms: options.inlineAtoms }),
-      },
+      }),
     );
   }
   return Object.freeze({
@@ -256,11 +299,14 @@ function isCanonicalBase64(value: unknown): value is string {
     typeof value !== "string" ||
     value.length === 0 ||
     value.length % 4 !== 0 ||
-    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(value)
+    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(
+      value,
+    )
   ) {
     return false;
   }
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  const alphabet =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
   if (value.endsWith("==")) {
     return (alphabet.indexOf(value[value.length - 3]!) & 15) === 0;
   }

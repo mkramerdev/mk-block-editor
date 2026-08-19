@@ -703,7 +703,7 @@ function rebaseBoundaryBlocks(
       ...(isEnd ? { endOffset, endTextAnchor: end.textAnchor! } : {}),
     };
   });
-  return changed ? Object.freeze(rebased) : blocks;
+  return changed ? rebased : blocks;
 }
 
 function fragmentDescriptorForRangeBlock(

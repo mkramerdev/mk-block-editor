@@ -2,7 +2,7 @@ import type { VersionedBlock } from "@repo/editor-core/document";
 import {
   cloneJsonValue,
   type BlockId,
-  type JsonObject,
+  type MutableJsonObject,
 } from "@repo/editor-core/kernel";
 import type {
   BlockMetadataDeletion,
@@ -32,7 +32,7 @@ export function createInverseBlockMetadataOperation(
     const block = blocks[blockId];
     if (!block || block.tombstone) return null;
     const metadata = block.metadata ?? {};
-    const values: JsonObject = {};
+    const values: MutableJsonObject = {};
     const absentFields: string[] = [];
     for (const field of fields) {
       if (Object.hasOwn(metadata, field)) {

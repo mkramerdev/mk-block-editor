@@ -4,12 +4,17 @@ export function createImmutableMap<K, V>(
   return new ImmutableMap(values);
 }
 
+export function createImmutableSet<T>(
+  values: ReadonlySet<T> | Iterable<T>,
+): ReadonlySet<T> {
+  return new ImmutableSet(values);
+}
+
 class ImmutableMap<K, V> implements ReadonlyMap<K, V> {
   readonly #values: Map<K, V>;
 
   constructor(values: ReadonlyMap<K, V> | Iterable<readonly [K, V]>) {
     this.#values = new Map(values);
-    Object.freeze(this);
   }
 
   get size(): number {
@@ -51,5 +56,50 @@ class ImmutableMap<K, V> implements ReadonlyMap<K, V> {
 
   get [Symbol.toStringTag](): string {
     return "ImmutableMap";
+  }
+}
+
+class ImmutableSet<T> implements ReadonlySet<T> {
+  readonly #values: Set<T>;
+
+  constructor(values: ReadonlySet<T> | Iterable<T>) {
+    this.#values = new Set(values);
+  }
+
+  get size(): number {
+    return this.#values.size;
+  }
+
+  has(value: T): boolean {
+    return this.#values.has(value);
+  }
+
+  forEach(
+    callbackfn: (value: T, value2: T, set: ReadonlySet<T>) => void,
+    thisArg?: unknown,
+  ): void {
+    this.#values.forEach((value) =>
+      callbackfn.call(thisArg, value, value, this),
+    );
+  }
+
+  entries(): SetIterator<[T, T]> {
+    return this.#values.entries();
+  }
+
+  keys(): SetIterator<T> {
+    return this.#values.keys();
+  }
+
+  values(): SetIterator<T> {
+    return this.#values.values();
+  }
+
+  [Symbol.iterator](): SetIterator<T> {
+    return this.#values[Symbol.iterator]();
+  }
+
+  get [Symbol.toStringTag](): string {
+    return "ImmutableSet";
   }
 }

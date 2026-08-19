@@ -8,12 +8,15 @@ export {
   cloneJsonValue,
   isJsonObject,
   jsonValuesEqual,
+  ownJsonValue,
   validateJsonObject,
 } from "../kernel/json/json-value.ts";
 export type {
   JsonObject,
   JsonPrimitive,
   JsonValue,
+  MutableJsonObject,
+  MutableJsonValue,
 } from "../kernel/json/json-value.ts";
 export { validateAllowedKeys } from "../kernel/json/allowed-keys.ts";
 export type { ContentVersion } from "../kernel/versioning/versions.ts";

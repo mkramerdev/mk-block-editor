@@ -23,7 +23,7 @@ export function resolveEditorClipboardImportLimits(
       );
     }
   }
-  return Object.freeze(resolved);
+  return resolved;
 }
 
 export function utf8ByteLength(value: string): number {

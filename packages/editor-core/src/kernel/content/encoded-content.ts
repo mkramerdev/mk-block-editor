@@ -20,7 +20,6 @@ export class EditorImmutableBinary {
 
   private constructor(bytes: Uint8Array) {
     this.#bytes = bytes;
-    Object.freeze(this);
   }
 
   static copyOf(bytes: Uint8Array): EditorImmutableBinary {

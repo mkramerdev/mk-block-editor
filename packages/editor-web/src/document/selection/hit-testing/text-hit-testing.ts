@@ -18,10 +18,10 @@ export function textPointFromPoint(
 ): EditorTextPointHit | null {
   const hit = createSemanticDomTextLayout(mount).hitTest(clientX, clientY);
   return hit
-    ? Object.freeze({
+    ? {
         offset: clampTextOffset(hit.offset, textLength),
         affinity: hit.affinity,
-      })
+      }
     : null;
 }
 

@@ -154,10 +154,10 @@ import type {
   EditorCommandAvailabilityReader,
   EditorInlineAtomUpdate,
   EditorMarkUpdate,
-    EditorTextDeletion,
-    EditorTextInsertion,
-    CanonicalEditorBlockPlacement,
-    CanonicalEditorBlockGraphChange,
+  EditorTextDeletion,
+  EditorTextInsertion,
+  CanonicalEditorBlockPlacement,
+  CanonicalEditorBlockGraphChange,
 } from "../api/contracts.ts";
 import type {
   EditorHistoryEntry,
@@ -887,7 +887,7 @@ export class EditorImplementation {
   ): EditorFocusActionResult {
     const releaseContentAccess =
       request.targetKind === "text"
-        ? this.options.acquireTextContentAccess?.(request.blockId) ?? null
+        ? (this.options.acquireTextContentAccess?.(request.blockId) ?? null)
         : null;
     try {
       return this.performNativeFocusRequestWithContentAccess(request);
@@ -1166,7 +1166,11 @@ export class EditorImplementation {
             selectedBlock.blockId,
           );
           if (!release)
-            return { ok: false, reason: "missing-block", blockId: selectedBlock.blockId };
+            return {
+              ok: false,
+              reason: "missing-block",
+              blockId: selectedBlock.blockId,
+            };
           acquired.add(selectedBlock.blockId);
           releases.push(release);
         }
@@ -1217,7 +1221,7 @@ export class EditorImplementation {
         markName: input.markName,
         action,
         ...(action === "add" ? { attrs: commandAttrs } : {}),
-        ranges: Object.freeze(ranges),
+        ranges,
       } as const;
       const transaction = this.transaction(() => {
         this.setTransactionSelection({ kind: "preserve" });
@@ -1948,15 +1952,12 @@ export class EditorImplementation {
       ? this.options.contentCommit!.commitContent(preparedContent)
       : null;
     try {
-      const committed = this.commitInitialBootstrap(
-        nextState,
-        {
-          candidateBlockIds: blockGraphPatchCandidateIds(mutation.patch),
-          contentChangedBlockIds: mutation.contentOperations.map(
-            (batch) => batch.blockId,
-          ),
-        },
-      );
+      const committed = this.commitInitialBootstrap(nextState, {
+        candidateBlockIds: blockGraphPatchCandidateIds(mutation.patch),
+        contentChangedBlockIds: mutation.contentOperations.map(
+          (batch) => batch.blockId,
+        ),
+      });
       if (appliedContent) {
         this.options.contentCommit!.publishContentCommit(appliedContent);
       }
@@ -1995,12 +1996,9 @@ export class EditorImplementation {
       childIdsByParentId: mutation.childIdsByParentId,
       updatedAt: data.updatedAt ?? Date.now(),
     };
-    return this.commitInitialBootstrap(
-      nextState,
-      {
-        candidateBlockIds: blockGraphPatchCandidateIds(mutation.patch),
-      },
-    );
+    return this.commitInitialBootstrap(nextState, {
+      candidateBlockIds: blockGraphPatchCandidateIds(mutation.patch),
+    });
   }
 
   replayLogicalBlockMetadataOperation(
@@ -2036,10 +2034,9 @@ export class EditorImplementation {
       ? this.options.contentCommit!.commitContent(preparedContent)
       : null;
     try {
-      const committed = this.commitInitialBootstrap(
-        nextState,
-        { candidateBlockIds: applied.affectedBlockIds },
-      );
+      const committed = this.commitInitialBootstrap(nextState, {
+        candidateBlockIds: applied.affectedBlockIds,
+      });
       if (appliedContent) {
         this.options.contentCommit!.publishContentCommit(appliedContent);
       }
@@ -2361,11 +2358,11 @@ export class EditorImplementation {
         ),
       ),
     );
-    return Object.freeze({
+    return {
       rootBlockIds: fragment.rootBlockIds,
       start: fragment.start,
       end: fragment.end,
-    });
+    };
   }
 
   deleteBlocks(input: EditorBlockDeletion): EditorBlockDeletionResult {
@@ -2477,7 +2474,7 @@ export class EditorImplementation {
         }),
       );
     }
-    return Object.freeze({ deletedBlockIds: Object.freeze([...deleted]) });
+    return { deletedBlockIds: [...deleted] };
   }
 
   replaceBlockTypes(replacements: readonly EditorBlockTypeReplacement[]): void {
@@ -2507,11 +2504,18 @@ export class EditorImplementation {
           `replaceBlockTypes target ${blockId} does not exist`,
         );
       }
-      const next: VersionedBlock = { ...block, type: blockType };
-      if (metadata === null) delete next.metadata;
-      else if (metadata !== undefined) {
-        next.metadata = cloneJsonValue(metadata);
-      }
+      const { metadata: currentMetadata, ...blockWithoutMetadata } = block;
+      const next: VersionedBlock = {
+        ...blockWithoutMetadata,
+        type: blockType,
+        ...(metadata === null
+          ? {}
+          : metadata === undefined
+            ? currentMetadata === undefined
+              ? {}
+              : { metadata: currentMetadata }
+            : { metadata: cloneJsonValue(metadata) }),
+      };
       return { block: next };
     });
     this.appendActiveTransactionOperation(
@@ -2722,10 +2726,10 @@ export class EditorImplementation {
       preview.selection.blockId === leftBlockId
         ? preview.selection.offset
         : 0;
-    return Object.freeze({
+    return {
       survivorBlockId: leftBlockId,
       joinOffset,
-    });
+    };
   }
 
   executeCoreBlockKeyBehavior(input: {
@@ -2879,9 +2883,7 @@ export class EditorImplementation {
       validateFinal: false,
     });
     if (!provisional.ok || !validateFinal) {
-      return provisional.ok
-        ? { ...provisional, defaultRootId }
-        : provisional;
+      return provisional.ok ? { ...provisional, defaultRootId } : provisional;
     }
     const shouldMaterializeDefaultRoot =
       provisional.transaction.rootBlockIds.length === 0;
@@ -2934,13 +2936,13 @@ export class EditorImplementation {
       childIdsByParentId: transaction.childIdsByParentId,
     };
     const operationInput = {
-            previousState: current,
-            requestedNextState,
-            contentOperations: transaction.contentOperations,
-            candidateBlockIds: transaction.affectedBlockIds,
-            targetBlockId: selectionBlockId(transaction.selection),
-            targetId: plan.origin,
-          };
+      previousState: current,
+      requestedNextState,
+      contentOperations: transaction.contentOperations,
+      candidateBlockIds: transaction.affectedBlockIds,
+      targetBlockId: selectionBlockId(transaction.selection),
+      targetId: plan.origin,
+    };
     const incrementalJoinHistory =
       origin === "local-command"
         ? createIncrementalTextJoinHistory(plan, current, transaction)
@@ -3454,12 +3456,12 @@ export class EditorImplementation {
       }
       return {
         ok: true,
-        point: Object.freeze({
+        point: {
           ...point,
           textOffset: point.textOffset,
           textAnchor: created.textAnchor,
           affinity,
-        }),
+        },
       };
     };
     const anchor = finalizePoint(selection.selection.anchor);
@@ -3473,14 +3475,14 @@ export class EditorImplementation {
     if (!focus.ok) return focus;
     return {
       ok: true,
-      selection: Object.freeze({
+      selection: {
         kind: "document",
-        selection: Object.freeze({
+        selection: {
           direction: selection.selection.direction,
           anchor: anchor.point,
           focus: focus.point,
-        }),
-      }),
+        },
+      },
     };
   }
 
@@ -3701,9 +3703,8 @@ export class EditorImplementation {
     let appliedContent: AppliedContentCommit | null = null;
     if (preparedContent) {
       try {
-        appliedContent = this.options.contentCommit!.commitContent(
-          preparedContent,
-        );
+        appliedContent =
+          this.options.contentCommit!.commitContent(preparedContent);
       } catch {
         return {
           ok: false,
@@ -4627,9 +4628,7 @@ export class EditorImplementation {
       targetKind: "atomic",
       graphRevision: this.getSelectionGraphRevision(),
       preventScroll: true,
-      ...(target.kind === "block-end"
-        ? { placement: "end" as const }
-        : {}),
+      ...(target.kind === "block-end" ? { placement: "end" as const } : {}),
     });
   }
 
@@ -4641,7 +4640,7 @@ export class EditorImplementation {
         : null;
     return Boolean(
       focus?.textAnchor &&
-        this.options.hasActiveTextProjection?.(focus.blockId),
+      this.options.hasActiveTextProjection?.(focus.blockId),
     );
   }
 
@@ -4760,7 +4759,7 @@ export class EditorImplementation {
         const descendant = graph.getBlock(textDescendant);
         const model = graph.readBlockSelectionModel(textDescendant);
         const releaseContentAccess = descendant
-          ? this.options.acquireTextContentAccess?.(descendant.id) ?? null
+          ? (this.options.acquireTextContentAccess?.(descendant.id) ?? null)
           : null;
         let created: ReturnType<
           NonNullable<
@@ -4769,12 +4768,12 @@ export class EditorImplementation {
         > | null;
         try {
           created = descendant
-            ? this.options.createSelectionTextAnchor?.({
+            ? (this.options.createSelectionTextAnchor?.({
                 blockId: descendant.id,
                 blockType: descendant.type,
                 textOffset: 0,
                 affinity: null,
-              }) ?? null
+              }) ?? null)
             : null;
         } finally {
           releaseContentAccess?.();
@@ -4818,40 +4817,40 @@ export class EditorImplementation {
         };
       }
       acquireHistoryContentAccess(block.id);
-        if (point.textAnchor && this.options.resolveSelectionTextAnchor) {
-          const resolved = resolveEditorSelectionTextAnchorPoint(
-            {
-              ...point,
-              blockType: block.type,
-              blockCategory: model.projection.category,
-            },
-            graph,
-            { resolveTextAnchor: this.options.resolveSelectionTextAnchor },
-          );
-          if (resolved.ok) {
-            return {
-              ...point,
-              blockType: block.type,
-              blockCategory: model.projection.category,
-              textAnchor: resolved.textAnchor,
-              textOffset: resolved.textOffset,
-              affinity: resolved.affinity,
-            };
-          }
+      if (point.textAnchor && this.options.resolveSelectionTextAnchor) {
+        const resolved = resolveEditorSelectionTextAnchorPoint(
+          {
+            ...point,
+            blockType: block.type,
+            blockCategory: model.projection.category,
+          },
+          graph,
+          { resolveTextAnchor: this.options.resolveSelectionTextAnchor },
+        );
+        if (resolved.ok) {
+          return {
+            ...point,
+            blockType: block.type,
+            blockCategory: model.projection.category,
+            textAnchor: resolved.textAnchor,
+            textOffset: resolved.textOffset,
+            affinity: resolved.affinity,
+          };
         }
+      }
 
-        const replayInputOffset = replayInputOperation
-          ? historyReplayPointMapping(
-              point,
-              historyReplayContentOperations(replayInputOperation),
-            ).inputOffset
-          : point.textOffset;
-        const created = this.options.createSelectionTextAnchor?.({
-          blockId: block.id,
-          blockType: block.type,
-          textOffset: replayInputOffset,
-          affinity: point.affinity,
-        });
+      const replayInputOffset = replayInputOperation
+        ? historyReplayPointMapping(
+            point,
+            historyReplayContentOperations(replayInputOperation),
+          ).inputOffset
+        : point.textOffset;
+      const created = this.options.createSelectionTextAnchor?.({
+        blockId: block.id,
+        blockType: block.type,
+        textOffset: replayInputOffset,
+        affinity: point.affinity,
+      });
       return created?.ok
         ? {
             ...point,
@@ -5031,7 +5030,7 @@ export class EditorImplementation {
       block &&
       !block.tombstone &&
       this.blockDefinitions[block.type]?.kind === "text"
-        ? this.options.acquireTextContentAccess?.(block.id) ?? null
+        ? (this.options.acquireTextContentAccess?.(block.id) ?? null)
         : null;
     try {
       return this.createSelectionEffectFromSuggestion(suggestion, blocks);
@@ -5231,8 +5230,9 @@ function createCanonicalGraphChangesFromStates(
     affected.filter((blockId) => {
       const before = previousState.blocks[blockId];
       const after = nextState.blocks[blockId];
-      return Boolean(before && !before.tombstone) &&
-        (!after || after.tombstone);
+      return (
+        Boolean(before && !before.tombstone) && (!after || after.tombstone)
+      );
     }),
   );
   const changes: CanonicalEditorBlockGraphChange[] = [...removed].map(
@@ -5276,11 +5276,7 @@ function createCanonicalGraphChangesFromStates(
       index,
     );
     const placement = structurallyChanged
-      ? canonicalReceiptPlacementFromState(
-          nextState,
-          after,
-          materialized!,
-        )
+      ? canonicalReceiptPlacementFromState(nextState, after, materialized!)
       : null;
     if (!before) {
       changes.push(
@@ -5328,12 +5324,7 @@ function canonicalReceiptPlacementFromState(
       -1,
       materialized,
     ),
-    nextSiblingId: nearestMaterializedSibling(
-      siblings,
-      index,
-      1,
-      materialized,
-    ),
+    nextSiblingId: nearestMaterializedSibling(siblings, index, 1, materialized),
   };
 }
 
@@ -5411,7 +5402,11 @@ function createCanonicalGraphChanges(
       );
       materialized!.add(after.id);
     } else if (before.tombstone) {
-      changes.push({ kind: "restore", blockId: after.id, placement: placement! });
+      changes.push({
+        kind: "restore",
+        blockId: after.id,
+        placement: placement!,
+      });
       materialized!.add(after.id);
     } else if (structurallyChanged) {
       changes.push({ kind: "move", blockId: after.id, placement: placement! });
@@ -5445,12 +5440,7 @@ function canonicalReceiptPlacement(
       -1,
       materialized,
     ),
-    nextSiblingId: nearestMaterializedSibling(
-      siblings,
-      index,
-      1,
-      materialized,
-    ),
+    nextSiblingId: nearestMaterializedSibling(siblings, index, 1, materialized),
   };
 }
 
@@ -5747,7 +5737,7 @@ function collectStructuralPolicyCandidateBlockIds(
     addLineage(previousState.blocks, blockId);
     addLineage(transaction.blocks, blockId);
   }
-  return Object.freeze([...candidateBlockIds]);
+  return [...candidateBlockIds];
 }
 
 function transactionHasChanges(
@@ -5883,11 +5873,7 @@ function createIncrementalTextJoinHistory(
     inverse: {
       kind: "structuralTransaction",
       origin: plan.origin,
-      graphOperations: [
-        ...removeCreated,
-        ...restoredBlocks,
-        ...movedBack,
-      ],
+      graphOperations: [...removeCreated, ...restoredBlocks, ...movedBack],
       contentOperations: restoredContentOperations,
       contentOrder: "after-graph",
     },
@@ -6043,7 +6029,9 @@ function mergePreparedInverseContentOperations(
   prepared: ValidatedContentCommit,
   excludedBlockIds: readonly BlockId[] = [],
 ): readonly EditorLogicalContentOperation[] {
-  const occupiedBlockIds = new Set(existing.map((operation) => operation.blockId));
+  const occupiedBlockIds = new Set(
+    existing.map((operation) => operation.blockId),
+  );
   const excluded = new Set(excludedBlockIds);
   const preparedOperations = [
     ...[...prepared.blocks]

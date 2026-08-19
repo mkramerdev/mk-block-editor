@@ -29,13 +29,13 @@ export function readEditorBlockSelectionTarget(
   if (!block || block.tombstone) return null;
   const selection = graph.readBlockSelectionModel(blockId);
   if (!selection) return null;
-  return Object.freeze({
+  return {
     block,
     selection,
     category: selection.projection.category,
     canStartSelection: selection.projection.canStartSelection,
     selectable: selection.projection.selectable,
-  });
+  };
 }
 
 export function canStartSelectionFromBlock(

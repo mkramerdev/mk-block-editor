@@ -193,8 +193,12 @@ describe("editor document geometry owner", () => {
       { left: 10, top: 40, width: 60, height: 16 },
       { left: 10, top: 60, width: 15, height: 16 },
     ]);
-    expect(Object.isFrozen(measured)).toBe(true);
     expect(hostRect).toHaveBeenCalledTimes(1);
+    (measured as { left: number }[])[0]!.left = 999;
+    expect(
+      owner.reader.readTextRangeRects(blockId, { from: 0, to: 10 })[0]?.left,
+    ).toBe(20);
+    expect(hostRect).toHaveBeenCalledTimes(2);
   });
 
   it("synthesizes visible geometry when a selected hard break has no browser rectangles", () => {
@@ -203,21 +207,21 @@ describe("editor document geometry owner", () => {
     textRoot.style.lineHeight = "18px";
     mockTextUnitRangeRects(rect(110, 210, 8, 18));
 
-    expect(owner.reader.readTextRangeRects(blockId, { from: 1, to: 2 })).toEqual([
-      { left: 18, top: 10, width: 1, height: 18 },
-    ]);
+    expect(
+      owner.reader.readTextRangeRects(blockId, { from: 1, to: 2 }),
+    ).toEqual([{ left: 18, top: 10, width: 1, height: 18 }]);
   });
 
   it("widens a zero-width browser hard-break rectangle", () => {
     const owner = createEditorDocumentGeometryOwner();
     mountTextGeometry(owner, blockId, "a<br>b");
-    vi.mocked(Range.prototype.getClientRects).mockImplementation(() =>
-      [rect(118, 210, 0, 18)] as unknown as DOMRectList,
+    vi.mocked(Range.prototype.getClientRects).mockImplementation(
+      () => [rect(118, 210, 0, 18)] as unknown as DOMRectList,
     );
 
-    expect(owner.reader.readTextRangeRects(blockId, { from: 1, to: 2 })).toEqual([
-      { left: 18, top: 10, width: 1, height: 18 },
-    ]);
+    expect(
+      owner.reader.readTextRangeRects(blockId, { from: 1, to: 2 }),
+    ).toEqual([{ left: 18, top: 10, width: 1, height: 18 }]);
   });
 
   it("paints consecutive hard breaks on distinct measured line-height rows", () => {
@@ -226,7 +230,9 @@ describe("editor document geometry owner", () => {
     textRoot.style.lineHeight = "18px";
     mockTextUnitRangeRects(rect(110, 210, 8, 18));
 
-    expect(owner.reader.readTextRangeRects(blockId, { from: 1, to: 3 })).toEqual([
+    expect(
+      owner.reader.readTextRangeRects(blockId, { from: 1, to: 3 }),
+    ).toEqual([
       { left: 18, top: 10, width: 1, height: 18 },
       { left: 10, top: 28, width: 1, height: 18 },
     ]);
@@ -243,9 +249,9 @@ describe("editor document geometry owner", () => {
     mockTextUnitRangeRects(rect(110, 210, 8, 18));
 
     expect(owner.reader.readTextCanonicalLength(blockId)).toBe(2);
-    expect(owner.reader.readTextRangeRects(blockId, { from: 1, to: 2 })).toEqual([
-      { left: 18, top: 10, width: 1, height: 18 },
-    ]);
+    expect(
+      owner.reader.readTextRangeRects(blockId, { from: 1, to: 2 }),
+    ).toEqual([{ left: 18, top: 10, width: 1, height: 18 }]);
   });
 
   it("distinguishes vertical movement, visual boundaries, mappings, and unavailable roots", () => {
@@ -276,9 +282,9 @@ describe("editor document geometry owner", () => {
     expect(
       owner.reader.moveTextVertically(secondBlockId, 0, "down", null),
     ).toEqual({ kind: "unavailable", reason: "text-root-unmounted" });
-    expect(
-      owner.reader.mapTextToVisualRow(secondBlockId, "first", 20),
-    ).toEqual({ kind: "unavailable", reason: "text-root-unmounted" });
+    expect(owner.reader.mapTextToVisualRow(secondBlockId, "first", 20)).toEqual(
+      { kind: "unavailable", reason: "text-root-unmounted" },
+    );
   });
 
   it("reads current text-node boundaries after a synchronous projection change", () => {
@@ -307,7 +313,9 @@ describe("editor document geometry owner", () => {
     vi.mocked(Range.prototype.getClientRects).mockImplementation(function (
       this: Range,
     ) {
-      return [rect(100 + this.startOffset * 8, 200, 1, 18)] as unknown as DOMRectList;
+      return [
+        rect(100 + this.startOffset * 8, 200, 1, 18),
+      ] as unknown as DOMRectList;
     });
     expect(owner.reader.mapTextToVisualRow(blockId, "first", 108)).toEqual({
       kind: "mapped",
@@ -336,9 +344,9 @@ describe("editor document geometry owner", () => {
     replacement.dataset.editorTextRoot = "true";
     replacement.textContent = "replacement";
 
-    expect(
-      owner.registration.updateMountedTextRoot(blockId, replacement),
-    ).toBe(true);
+    expect(owner.registration.updateMountedTextRoot(blockId, replacement)).toBe(
+      true,
+    );
     expect(owner.reader.readTextCanonicalLength(blockId)).toBe(11);
 
     const foreignShell = connectedElement("div", first.surface.parentElement!);

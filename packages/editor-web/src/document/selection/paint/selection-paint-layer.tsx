@@ -260,27 +260,23 @@ function createSelectionPaintModel(
   const localPlan = derived?.ok ? derived.plan : null;
   const subjects: SelectionPaintSubject[] = [];
   if (transientPointerPaint) {
-    subjects.push(
-      Object.freeze({
-        id: "local-selection",
-        kind: "local",
-        color: null,
-        sourceRevision: transientPointerPaint.revision,
-        primitives: transientPointerPaint.primitives,
-        caret: null,
-      }),
-    );
+    subjects.push({
+      id: "local-selection",
+      kind: "local",
+      color: null,
+      sourceRevision: transientPointerPaint.revision,
+      primitives: transientPointerPaint.primitives,
+      caret: null,
+    });
   } else if (localPlan?.kind === "document") {
-    subjects.push(
-      Object.freeze({
-        id: "local-selection",
-        kind: "local",
-        color: null,
-        sourceRevision: localPlan.sourceSelectionRevision,
-        primitives: localPlan.primitives,
-        caret: null,
-      }),
-    );
+    subjects.push({
+      id: "local-selection",
+      kind: "local",
+      color: null,
+      sourceRevision: localPlan.sourceSelectionRevision,
+      primitives: localPlan.primitives,
+      caret: null,
+    });
   }
   for (const record of additionalSelections) {
     if (!record.active || record.resolution !== "resolved") continue;
@@ -299,31 +295,28 @@ function createSelectionPaintModel(
       selection.focusTarget.kind === "text" &&
       selection.anchor.blockId === selection.focus.blockId &&
       selection.anchor.textOffset === selection.focus.textOffset;
-    subjects.push(
-      Object.freeze({
-        id: record.subject,
-        kind: "additional",
-        color: record.color,
-        sourceRevision: record.watermark,
-        primitives: collapsedText ? emptyPrimitives : primitives.primitives,
-        caret:
-          collapsedText && selection.focusTarget.kind === "text"
-            ? Object.freeze({
-                blockId: selection.focusTarget.blockId,
-                offset: selection.focusTarget.point.textOffset,
-                affinity: selection.focusTarget.point.affinity,
-              })
-            : null,
-      }),
-    );
+    subjects.push({
+      id: record.subject,
+      kind: "additional",
+      color: record.color,
+      sourceRevision: record.watermark,
+      primitives: collapsedText ? emptyPrimitives : primitives.primitives,
+      caret:
+        collapsedText && selection.focusTarget.kind === "text"
+          ? {
+              blockId: selection.focusTarget.blockId,
+              offset: selection.focusTarget.point.textOffset,
+              affinity: selection.focusTarget.point.affinity,
+            }
+          : null,
+    });
   }
-  return Object.freeze({
-    subjects:
-      subjects.length === 0 ? emptyPaintSubjects : Object.freeze(subjects),
+  return {
+    subjects: subjects.length === 0 ? emptyPaintSubjects : subjects,
     localPlan,
     localPlanResult:
       derived === null ? undefined : derived.ok ? "ok" : derived.reason,
-  });
+  };
 }
 
 function measureSelectionPaintSubjects(
@@ -353,7 +346,7 @@ function measureSelectionPaintSubjects(
       rendered.push(...measurePrimitive(geometry, subject, primitive));
     }
   }
-  return rendered.length === 0 ? emptyRenderedPaint : Object.freeze(rendered);
+  return rendered.length === 0 ? emptyRenderedPaint : rendered;
 }
 
 function measurePrimitive(
@@ -439,7 +432,7 @@ function paintItem(
   rect: EditorDocumentRect,
   index: number,
 ): RenderedSelectionPaint {
-  return Object.freeze({
+  return {
     key: [subject.id, blockId, paintKind, target ?? "", index].join("|"),
     subjectId: subject.id,
     subjectKind: subject.kind,
@@ -449,7 +442,7 @@ function paintItem(
     paintKind,
     target,
     rect,
-  });
+  };
 }
 
 function paintStyle(item: RenderedSelectionPaint): CSSProperties {
@@ -485,13 +478,13 @@ function renderedPaintEqual(
       const other = right[index];
       return Boolean(
         other &&
-          item.key === other.key &&
-          item.color === other.color &&
-          item.sourceRevision === other.sourceRevision &&
-          item.rect.left === other.rect.left &&
-          item.rect.top === other.rect.top &&
-          item.rect.width === other.rect.width &&
-          item.rect.height === other.rect.height,
+        item.key === other.key &&
+        item.color === other.color &&
+        item.sourceRevision === other.sourceRevision &&
+        item.rect.left === other.rect.left &&
+        item.rect.top === other.rect.top &&
+        item.rect.width === other.rect.width &&
+        item.rect.height === other.rect.height,
       );
     })
   );

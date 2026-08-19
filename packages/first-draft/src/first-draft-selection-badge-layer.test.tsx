@@ -1,7 +1,13 @@
 import { act, render } from "@testing-library/react";
 import type { BlockId } from "@repo/editor-core/kernel";
-import { toCollaborationSubjectKey, type EditorDocumentRect } from "@repo/editor-web/document-runtime";
-import { type AdditionalSelectionRecord, type CollaborationSubject } from "@repo/editor-web/editor";
+import {
+  toCollaborationSubjectKey,
+  type EditorDocumentRect,
+} from "@repo/editor-web/document-runtime";
+import {
+  type AdditionalSelectionRecord,
+  type CollaborationSubject,
+} from "@repo/editor-web/editor";
 import { type EditableEditor } from "@repo/editor-web/editor";
 import { initializeTestEditableEditor as initializeEditableEditor } from "./test-editor.ts";
 import { describe, expect, it, vi } from "vitest";
@@ -142,9 +148,7 @@ describe("FirstDraftSelectionBadgeLayer", () => {
     const geometry = geometryStore(() => rect(4, 8, 1, 14));
     const editor = badgeEditor([], geometry);
 
-    render(
-      <FirstDraftSelectionBadgeLayer editor={editor} participants={[]} />,
-    );
+    render(<FirstDraftSelectionBadgeLayer editor={editor} participants={[]} />);
 
     expect(geometry.listenerCount()).toBe(0);
   });
@@ -422,9 +426,7 @@ function badgeEditor(
 }
 
 function selectionStore(initial: readonly AdditionalSelectionRecord[]) {
-  let snapshot = Object.freeze([
-    ...initial,
-  ]) as readonly AdditionalSelectionRecord[];
+  let snapshot: readonly AdditionalSelectionRecord[] = [...initial];
   const listeners = new Set<() => void>();
   return {
     getSnapshot: () => snapshot,
@@ -433,7 +435,7 @@ function selectionStore(initial: readonly AdditionalSelectionRecord[]) {
       return () => listeners.delete(listener);
     },
     set(next: readonly AdditionalSelectionRecord[]) {
-      snapshot = Object.freeze([...next]);
+      snapshot = [...next];
       for (const listener of listeners) listener();
     },
   };

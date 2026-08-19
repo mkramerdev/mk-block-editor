@@ -22,7 +22,7 @@ export function collectEditorSelectionTraversalIds(
     for (const childId of graph.getChildBlockIds(blockId)) visit(childId);
   };
   for (const rootId of graph.getRootBlockIds()) visit(rootId);
-  return Object.freeze(ordered);
+  return ordered;
 }
 
 export function compareEditorSelectionOrder(
@@ -67,11 +67,7 @@ export function readDirectEditorSelectionTargets(
     parentId === null
       ? graph.getRootBlockIds()
       : graph.getChildBlockIds(parentId);
-  return Object.freeze(
-    blockIds
-      .map((blockId) => readEditorBlockSelectionTarget(graph, blockId))
-      .filter(
-        (target): target is EditorBlockSelectionTarget => target !== null,
-      ),
-  );
+  return blockIds
+    .map((blockId) => readEditorBlockSelectionTarget(graph, blockId))
+    .filter((target): target is EditorBlockSelectionTarget => target !== null);
 }

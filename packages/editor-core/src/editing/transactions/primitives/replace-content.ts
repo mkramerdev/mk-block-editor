@@ -12,5 +12,5 @@ export function replaceContent(input: {
   readonly value: TransactionContentInput;
   readonly operation?: EditorLogicalContentOperation;
 }): StructuralTransactionOperation {
-  return Object.freeze({ kind: "replaceContent", ...input });
+  return { kind: "replaceContent", ...input };
 }

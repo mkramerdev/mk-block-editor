@@ -53,16 +53,14 @@ export interface CanonicalFragmentValidationOptions {
   readonly blockDefinitions?: Readonly<Record<BlockType, BlockDefinition>>;
 }
 
-export interface CreateCanonicalBlockFragmentOptions
-  extends CanonicalFragmentValidationOptions {
+export interface CreateCanonicalBlockFragmentOptions extends CanonicalFragmentValidationOptions {
   readonly blocks: readonly CanonicalBlockRecord[];
   readonly rootBlockIds: readonly BlockId[];
   readonly start: CanonicalFragmentBoundary;
   readonly end: CanonicalFragmentBoundary;
 }
 
-export interface DuplicateCanonicalBlockSubtreesOptions
-  extends CanonicalFragmentValidationOptions {
+export interface DuplicateCanonicalBlockSubtreesOptions extends CanonicalFragmentValidationOptions {
   readonly blocks: Readonly<Record<BlockId, Block>>;
   readonly childIdsByParentId: Readonly<
     Partial<Record<BlockId, readonly BlockId[]>>
@@ -74,8 +72,7 @@ export interface DuplicateCanonicalBlockSubtreesOptions
   ) => RichTextDocumentNodeJson | null;
 }
 
-export interface MaterializeCanonicalBlockCreationOptions
-  extends CanonicalFragmentValidationOptions {
+export interface MaterializeCanonicalBlockCreationOptions extends CanonicalFragmentValidationOptions {
   readonly type: BlockType;
   readonly metadata?: JsonObject;
   readonly defaultContentCount?: number;
@@ -101,7 +98,7 @@ export function createCanonicalBlockRecord(
     parentId: options.parentId,
     metadata: options.metadata,
   });
-  return Object.freeze({
+  return {
     id: block.id,
     type: block.type,
     parentId: block.parentId,
@@ -112,7 +109,7 @@ export function createCanonicalBlockRecord(
     ...(options.plainText === undefined
       ? {}
       : { plainText: options.plainText }),
-  });
+  };
 }
 
 /**
@@ -123,13 +120,13 @@ export function createCanonicalBlockFragment(
   options: CreateCanonicalBlockFragmentOptions,
 ): CanonicalBlockFragment {
   const fragment: CanonicalBlockFragment = {
-    blocks: Object.freeze([...options.blocks]),
-    rootBlockIds: Object.freeze([...options.rootBlockIds]),
-    start: Object.freeze({ ...options.start }),
-    end: Object.freeze({ ...options.end }),
+    blocks: [...options.blocks],
+    rootBlockIds: [...options.rootBlockIds],
+    start: { ...options.start },
+    end: { ...options.end },
   };
   assertValidCanonicalBlockFragment(fragment, options);
-  return Object.freeze(fragment);
+  return fragment;
 }
 
 /**
@@ -167,7 +164,8 @@ export function materializeCanonicalBlockCreation(
       };
     }
     const isInitialTextTarget =
-      options.initialText !== undefined && node.id === creation.selectionBlockId;
+      options.initialText !== undefined &&
+      node.id === creation.selectionBlockId;
     const isRoot = node.id === creation.rootBlockId;
     const content = isInitialTextTarget
       ? createBlockRichTextContentFromPlainText(node.type, options.initialText!)
@@ -196,11 +194,11 @@ export function materializeCanonicalBlockCreation(
     end: { kind: "block", blockId: creation.rootBlockId },
     blockDefinitions: options.blockDefinitions,
   });
-  return Object.freeze({
+  return {
     fragment,
     rootBlockId: creation.rootBlockId,
     selectionBlockId: creation.selectionBlockId,
-  });
+  };
 }
 
 /** Materializes complete live subtrees with entirely new detached identities. */
@@ -449,10 +447,7 @@ function validateRecords(
       if (definition.parents) {
         const parent =
           block.parentId === null ? null : blockById.get(block.parentId);
-        if (
-          !parent ||
-          !definition.parents.allowed.includes(parent.type)
-        ) {
+        if (!parent || !definition.parents.allowed.includes(parent.type)) {
           errors.push(
             `fragment block ${block.id} has invalid direct parent for type ${block.type}`,
           );

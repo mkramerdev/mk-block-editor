@@ -1,7 +1,4 @@
-import {
-  XmlElement,
-  XmlText,
-} from "yjs";
+import { XmlElement, XmlText } from "yjs";
 import type { EditorYjsFragmentContext } from "../fragments/contracts.ts";
 import type {
   RichTextDocumentNodeJson,
@@ -130,7 +127,10 @@ export function writeCanonicalYjsBlockContent(
   const current = readCanonicalYjsTextType(context);
   if (!current) {
     if (context.fragment.length > 0) {
-      context.doc.transact(() => context.fragment.delete(0, context.fragment.length), origin);
+      context.doc.transact(
+        () => context.fragment.delete(0, context.fragment.length),
+        origin,
+      );
     }
     ensureCanonicalYjsBlockContent(context, content, origin);
     return;
@@ -138,22 +138,29 @@ export function writeCanonicalYjsBlockContent(
   const before = unitsFromDelta(current.toDelta());
   const after = canonicalUnits(content);
   let prefix = 0;
-  while (prefix < before.length && prefix < after.length && unitEqual(before[prefix]!, after[prefix]!)) prefix += 1;
+  while (
+    prefix < before.length &&
+    prefix < after.length &&
+    unitEqual(before[prefix]!, after[prefix]!)
+  )
+    prefix += 1;
   let suffix = 0;
   while (
     suffix < before.length - prefix &&
     suffix < after.length - prefix &&
-    unitEqual(before[before.length - suffix - 1]!, after[after.length - suffix - 1]!)
-  ) suffix += 1;
-  const remove = before.slice(prefix, before.length - suffix).reduce(
-    (length, unit) => length + unit.text.length,
-    0,
-  );
+    unitEqual(
+      before[before.length - suffix - 1]!,
+      after[after.length - suffix - 1]!,
+    )
+  )
+    suffix += 1;
+  const remove = before
+    .slice(prefix, before.length - suffix)
+    .reduce((length, unit) => length + unit.text.length, 0);
   const insert = after.slice(prefix, after.length - suffix);
-  const insertionIndex = before.slice(0, prefix).reduce(
-    (length, unit) => length + unit.text.length,
-    0,
-  );
+  const insertionIndex = before
+    .slice(0, prefix)
+    .reduce((length, unit) => length + unit.text.length, 0);
   context.doc.transact(() => {
     if (remove > 0) current.delete(insertionIndex, remove);
     insertUnits(current, insertionIndex, insert);
@@ -171,16 +178,25 @@ export function readCanonicalYjsBlockContent(
     if (unit.attributes.atom) {
       const atom = parseAtom(unit.attributes.atom);
       if (!atom) return null;
-      inline.push({ ...atom, ...(marks.length === 0 ? {} : { marks }) } as RichTextAtomNodeJson);
+      inline.push({
+        ...atom,
+        ...(marks.length === 0 ? {} : { marks }),
+      } as RichTextAtomNodeJson);
     } else if (unit.attributes.hardBreak === "1") {
-      inline.push({ type: "hard_break", ...(marks.length === 0 ? {} : { marks }) });
+      inline.push({
+        type: "hard_break",
+        ...(marks.length === 0 ? {} : { marks }),
+      });
     } else {
       const previous = inline.at(-1);
       if (
         previous?.type === "text" &&
         JSON.stringify(previous.marks ?? []) === JSON.stringify(marks)
       ) {
-        previous.text += unit.text;
+        inline[inline.length - 1] = {
+          ...previous,
+          text: previous.text + unit.text,
+        };
       } else {
         inline.push({
           type: "text",
@@ -192,7 +208,12 @@ export function readCanonicalYjsBlockContent(
   }
   return {
     type: "doc",
-    content: [{ type: "paragraph", ...(inline.length === 0 ? {} : { content: inline }) }],
+    content: [
+      {
+        type: "paragraph",
+        ...(inline.length === 0 ? {} : { content: inline }),
+      },
+    ],
   };
 }
 
@@ -200,7 +221,7 @@ export function readCanonicalYjsBlockPlainText(
   context: EditorYjsFragmentContext,
 ): string {
   return unitsFromDelta(readCanonicalYjsTextType(context)?.toDelta() ?? [])
-    .map((unit) => unit.attributes.atom ? "\uFFFC" : unit.text)
+    .map((unit) => (unit.attributes.atom ? "\uFFFC" : unit.text))
     .join("");
 }
 
@@ -214,7 +235,8 @@ export function readCanonicalYjsTextType(
     root.nodeName !== ROOT_NAME ||
     root.getAttribute("version") !== FORMAT_VERSION ||
     root.length !== 1
-  ) return null;
+  )
+    return null;
   const text = root.get(0);
   return text instanceof XmlText ? text : null;
 }
@@ -224,11 +246,11 @@ export function canonicalOffsetToYjsIndex(
   offset: number,
 ): number | null {
   const units = unitsFromDelta(text.toDelta());
-  if (!Number.isSafeInteger(offset) || offset < 0 || offset > units.length) return null;
-  return units.slice(0, offset).reduce(
-    (index, unit) => index + unit.text.length,
-    0,
-  );
+  if (!Number.isSafeInteger(offset) || offset < 0 || offset > units.length)
+    return null;
+  return units
+    .slice(0, offset)
+    .reduce((index, unit) => index + unit.text.length, 0);
 }
 
 export function yjsIndexToCanonicalOffset(
@@ -257,9 +279,13 @@ function canonicalUnits(content: RichTextDocumentNodeJson): CanonicalUnit[] {
         attributes.hardBreak = "1";
         units.push({ text: "\n", attributes });
       } else if (inline.type === "text") {
-        for (const character of [...(inline as RichTextTextNodeJson).text]) units.push({ text: character, attributes });
+        for (const character of [...(inline as RichTextTextNodeJson).text])
+          units.push({ text: character, attributes });
       } else {
-        attributes.atom = JSON.stringify({ type: inline.type, metadata: inline.metadata });
+        attributes.atom = JSON.stringify({
+          type: inline.type,
+          metadata: inline.metadata,
+        });
         units.push({ text: "\uFFFC", attributes });
       }
     }
@@ -281,22 +307,22 @@ function canonicalInlineUnits(
   });
 }
 
-function operationOffsets(
-  operation: EditorLogicalContentOperation,
-): { readonly from: number; readonly to: number } {
+function operationOffsets(operation: EditorLogicalContentOperation): {
+  readonly from: number;
+  readonly to: number;
+} {
   return operation.kind === "insertInlineContent"
     ? { from: operation.position.offset, to: operation.position.offset }
     : { from: operation.range.from.offset, to: operation.range.to.offset };
 }
 
-function canonicalDocumentYjsLength(
-  content: RichTextDocumentNodeJson,
-): number {
+function canonicalDocumentYjsLength(content: RichTextDocumentNodeJson): number {
   let length = 0;
   for (const node of content.content[0]?.content ?? []) {
-    length += node.type === "text" && typeof node.text === "string"
-      ? node.text.length
-      : 1;
+    length +=
+      node.type === "text" && typeof node.text === "string"
+        ? node.text.length
+        : 1;
   }
   return length;
 }
@@ -311,7 +337,8 @@ function canonicalDocumentYjsRange(
     !Number.isSafeInteger(to) ||
     from < 0 ||
     to < from
-  ) return null;
+  )
+    return null;
   const inline = content.content[0]?.content ?? [];
   if (inline.length === 1) {
     const node = inline[0];
@@ -370,7 +397,8 @@ function markFormatRuns(
       sliceRichTextDocument("paragraph", content, from, to),
     ),
   );
-  const runs: Array<{ index: number; length: number; marks: string | null }> = [];
+  const runs: Array<{ index: number; length: number; marks: string | null }> =
+    [];
   let index = startIndex;
   for (const unit of units) {
     const marks = unit.attributes.marks ?? null;
@@ -389,7 +417,9 @@ function markFormatRuns(
   return runs;
 }
 
-function unitsFromDelta(delta: ReturnType<XmlText["toDelta"]>): CanonicalUnit[] {
+function unitsFromDelta(
+  delta: ReturnType<XmlText["toDelta"]>,
+): CanonicalUnit[] {
   const units: CanonicalUnit[] = [];
   for (const part of delta) {
     if (typeof part.insert !== "string") continue;
@@ -398,12 +428,17 @@ function unitsFromDelta(delta: ReturnType<XmlText["toDelta"]>): CanonicalUnit[] 
         typeof value === "string" ? [[key, value]] : [],
       ),
     );
-    for (const character of [...part.insert]) units.push({ text: character, attributes });
+    for (const character of [...part.insert])
+      units.push({ text: character, attributes });
   }
   return units;
 }
 
-function insertUnits(text: XmlText, at: number, units: readonly CanonicalUnit[]): void {
+function insertUnits(
+  text: XmlText,
+  at: number,
+  units: readonly CanonicalUnit[],
+): void {
   let index = at;
   for (const unit of units) {
     text.insert(index, unit.text, unit.attributes);
@@ -412,14 +447,17 @@ function insertUnits(text: XmlText, at: number, units: readonly CanonicalUnit[])
 }
 
 function unitEqual(left: CanonicalUnit, right: CanonicalUnit): boolean {
-  return left.text === right.text && JSON.stringify(left.attributes) === JSON.stringify(right.attributes);
+  return (
+    left.text === right.text &&
+    JSON.stringify(left.attributes) === JSON.stringify(right.attributes)
+  );
 }
 
 function parseMarks(value: string | undefined): RichTextMarkJson[] {
   if (!value) return [];
   try {
     const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed as RichTextMarkJson[] : [];
+    return Array.isArray(parsed) ? (parsed as RichTextMarkJson[]) : [];
   } catch {
     return [];
   }
@@ -428,8 +466,14 @@ function parseMarks(value: string | undefined): RichTextMarkJson[] {
 function parseAtom(value: string): RichTextAtomNodeJson | null {
   try {
     const parsed = JSON.parse(value) as { type?: unknown; metadata?: unknown };
-    return typeof parsed.type === "string" && parsed.metadata && typeof parsed.metadata === "object" && !Array.isArray(parsed.metadata)
-      ? { type: parsed.type, metadata: parsed.metadata as Record<string, never> }
+    return typeof parsed.type === "string" &&
+      parsed.metadata &&
+      typeof parsed.metadata === "object" &&
+      !Array.isArray(parsed.metadata)
+      ? {
+          type: parsed.type,
+          metadata: parsed.metadata as Record<string, never>,
+        }
       : null;
   } catch {
     return null;

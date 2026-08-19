@@ -22,7 +22,9 @@ describe("typing trigger sessions", () => {
       trigger: "/",
       isAllowed: (context: { readonly textBeforeTrigger: string }) => {
         const preceding = Array.from(context.textBeforeTrigger).at(-1);
-        return preceding === undefined || preceding === " " || preceding === "\n";
+        return (
+          preceding === undefined || preceding === " " || preceding === "\n"
+        );
       },
     };
     const cases = [
@@ -41,7 +43,10 @@ describe("typing trigger sessions", () => {
 
     const hardBreakId = "trigger-hard-break" as BlockId;
     const hardBreakEditor = initializeTestEditableEditor({
-      definition: { ...testEditableEditorDefinition, typingTriggers: [trigger] },
+      definition: {
+        ...testEditableEditorDefinition,
+        typingTriggers: [trigger],
+      },
       snapshot: createTestEditorSnapshot([
         {
           id: hardBreakId,
@@ -51,10 +56,7 @@ describe("typing trigger sessions", () => {
             content: [
               {
                 type: "paragraph",
-                content: [
-                  { type: "text", text: "x" },
-                  { type: "hard_break" },
-                ],
+                content: [{ type: "text", text: "x" }, { type: "hard_break" }],
               },
             ],
           },
@@ -300,26 +302,27 @@ describe("typing trigger sessions", () => {
     editor.dispose();
   });
 
-  it("runs isAllowed with frozen canonical context", () => {
+  it("does not let isAllowed mutate the editor-owned session", () => {
     const blockId = "typing-trigger-allowed" as BlockId;
-    const isAllowed = vi.fn(() => false);
+    const isAllowed = vi.fn((context: unknown) => {
+      const mutable = context as {
+        trigger: string;
+        triggerRange: { from: number; to: number };
+      };
+      mutable.trigger = "#";
+      mutable.triggerRange.from = 99;
+      return true;
+    });
     const editor = createEditor(blockId, "x ", [
       { id: "mention", trigger: "@", isAllowed },
     ]);
     settleCaret(editor, blockId, 2);
     expect(typeAtCommittedSelection(editor, "@")).toBe(true);
-    expect(editor.getTypingTriggerSession()).toBeNull();
-    expect(isAllowed).toHaveBeenCalledWith({
-      blockId,
-      blockType: "paragraph",
+    expect(editor.getTypingTriggerSession()).toMatchObject({
       trigger: "@",
-      triggerRange: { from: 2, to: 3 },
-      textBeforeTrigger: "x ",
+      range: { from: 2, to: 3 },
     });
-    expect(Object.isFrozen(isAllowed.mock.calls[0]?.[0])).toBe(true);
-    expect(Object.isFrozen(isAllowed.mock.calls[0]?.[0].triggerRange)).toBe(
-      true,
-    );
+    expect(isAllowed).toHaveBeenCalledOnce();
     editor.dispose();
   });
 
@@ -632,9 +635,9 @@ describe("typing trigger sessions", () => {
       blockId,
       materialized.fragment.rootBlockIds[0],
     ]);
-    expect(
-      editor.getBlock(materialized.fragment.rootBlockIds[0]!)?.type,
-    ).toBe("heading");
+    expect(editor.getBlock(materialized.fragment.rootBlockIds[0]!)?.type).toBe(
+      "heading",
+    );
     expect(changes).toHaveBeenCalledOnce();
 
     expect(editor.undo()).toEqual({ status: "applied" });
