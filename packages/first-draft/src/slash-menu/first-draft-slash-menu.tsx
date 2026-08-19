@@ -203,6 +203,7 @@ export function FirstDraftSlashMenu({
       aria-label="Insert a First Draft block"
       aria-activedescendant={activeOptionId}
       data-editor-ui="true"
+      data-editor-preserve-selection="true"
       data-first-draft-slash-menu="true"
       data-first-draft-slash-session-id={slashSession.id}
       data-first-draft-slash-source-block={slashSession.blockId}

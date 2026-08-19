@@ -59,6 +59,7 @@ export function useNativeSelectionSynchronization({
     const list = listElement;
     const currentPresentation = selectionController.getPresentationSnapshot();
     if (!list || currentPresentation.composition) return;
+    if (list.dataset.editorCanonicalSelectionClearPending === "true") return;
     if (nativeInteractiveControlOwnsSelection(list)) return;
     const selection = list.ownerDocument.getSelection();
     if (!selection?.anchorNode || !selection.focusNode) return;

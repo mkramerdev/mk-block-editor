@@ -54,6 +54,11 @@ describe("FirstDraftSlashMenu", () => {
         interactions={interaction.port}
       />,
     );
+    expect(
+      screen
+        .getByRole("listbox", { hidden: true })
+        .getAttribute("data-editor-preserve-selection"),
+    ).toBe("true");
     const options = screen.getAllByRole("option", { hidden: true });
     expect(selectedOptions(options)).toHaveLength(1);
     expect(options[0]?.getAttribute("aria-selected")).toBe("true");

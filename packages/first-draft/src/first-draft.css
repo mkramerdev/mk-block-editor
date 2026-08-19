@@ -587,15 +587,6 @@
   gap: 0.5rem;
 }
 
-.first-draft-example .list-item-block__item[data-list-kind="ordered"] {
-  counter-increment: first-draft-ordered-list-item;
-}
-
-.first-draft-example
-  ol[data-editor-block-type="orderedList"][data-editor-block-shell="true"] {
-  counter-reset: first-draft-ordered-list-item;
-}
-
 .first-draft-example .list-item-block__marker {
   display: grid;
   min-block-size: 1.25rem;
@@ -609,8 +600,7 @@
 
 .first-draft-example
   .list-item-block__item[data-list-kind="ordered"]
-  > .list-item-block__marker::before {
-  content: counter(first-draft-ordered-list-item) ".";
+  > .list-item-block__marker {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }

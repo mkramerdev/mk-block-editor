@@ -81,6 +81,7 @@ export function FirstDraftSelectionLinkForm({
     <form
       className="first-draft-selection-link-form"
       data-editor-ui="true"
+      data-editor-preserve-selection="true"
       aria-label="Edit link"
       onSubmit={apply}
       onKeyDown={(event) => {

@@ -168,6 +168,47 @@ describe("document interaction router", () => {
     expect(editorOwner.scroll).toHaveBeenCalledOnce();
     unregister();
   });
+
+  it("retains the active owner for an explicitly selection-preserving subtree", () => {
+    const editor = appendEditor("editor");
+    const editorOwner = owner(editor.list);
+    const preserve = document.createElement("div");
+    preserve.dataset.editorPreserveSelection = "true";
+    const button = document.createElement("button");
+    preserve.append(button);
+    document.body.append(preserve);
+    const unregister = registerDocumentInteractionOwner(document, editorOwner);
+
+    editor.editable.dispatchEvent(pointerEvent("pointerdown", 41));
+    button.dispatchEvent(pointerEvent("pointerdown", 42));
+
+    expect(editorOwner.releaseInteraction).not.toHaveBeenCalled();
+    expect(editorOwner.pointerdown).toHaveBeenCalledTimes(2);
+    unregister();
+  });
+
+  it("does not transfer or release selection ownership for a secondary button", () => {
+    const first = appendEditor("first");
+    const second = appendEditor("second");
+    const firstOwner = owner(first.list);
+    const secondOwner = owner(second.list);
+    const unregisterFirst = registerDocumentInteractionOwner(
+      document,
+      firstOwner,
+    );
+    const unregisterSecond = registerDocumentInteractionOwner(
+      document,
+      secondOwner,
+    );
+
+    first.editable.dispatchEvent(pointerEvent("pointerdown", 51));
+    second.editable.dispatchEvent(pointerEvent("pointerdown", 52, 2));
+
+    expect(firstOwner.releaseInteraction).not.toHaveBeenCalled();
+    expect(secondOwner.pointerdown).not.toHaveBeenCalled();
+    unregisterSecond();
+    unregisterFirst();
+  });
 });
 
 function appendEditor(label: string): {
@@ -210,8 +251,13 @@ function beforeInput(inputType: "historyUndo" | "historyRedo"): InputEvent {
   });
 }
 
-function pointerEvent(type: string, pointerId: number): PointerEvent {
+function pointerEvent(
+  type: string,
+  pointerId: number,
+  button = 0,
+): PointerEvent {
   const event = new Event(type, { bubbles: true }) as PointerEvent;
   Object.defineProperty(event, "pointerId", { value: pointerId });
+  Object.defineProperty(event, "button", { value: button });
   return event;
 }

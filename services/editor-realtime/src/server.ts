@@ -4,6 +4,7 @@ import {
   type Server as HttpServer,
   type ServerResponse,
 } from "node:http";
+import { isDeepStrictEqual } from "node:util";
 import {
   decodeFirstDraftMessage,
   encodeFirstDraftMessage,
@@ -35,6 +36,13 @@ import {
 } from "./config.ts";
 
 const EDITOR_REALTIME_PATH = "/editor-realtime";
+export const EDITOR_SELECTION_PRESENCE_INACTIVITY_MS = 30_000;
+
+export interface EditorRealtimeTimeoutScheduler {
+  now(): number;
+  setTimeout(callback: () => void, delayMs: number): unknown;
+  clearTimeout(handle: unknown): void;
+}
 
 interface ClientState {
   readonly socket: WebSocket;
@@ -49,7 +57,16 @@ interface ClientState {
 interface DocumentRoom {
   readonly clients: Set<ClientState>;
   readonly participants: Map<string, FirstDraftParticipantPresence>;
-  readonly selections: Map<string, FirstDraftSelectionPresence>;
+  readonly selections: Map<string, SelectionPresenceState>;
+  readonly selectionPresenceScheduler: EditorRealtimeTimeoutScheduler;
+}
+
+interface SelectionPresenceState {
+  latest: FirstDraftSelectionPresence;
+  active: boolean;
+  deadline: number | null;
+  generation: number;
+  timer: unknown | null;
 }
 
 export interface EditorRealtimeProtocolDiagnostic {
@@ -82,6 +99,7 @@ export interface CreateEditorRealtimeServerOptions {
   readonly readiness?: EditorRealtimeReadiness;
   readonly config?: EditorRealtimeConfig;
   readonly authenticator?: EditorRealtimeAuthenticator;
+  readonly selectionPresenceScheduler?: EditorRealtimeTimeoutScheduler;
   readonly onProtocolDiagnostic?: (
     diagnostic: EditorRealtimeProtocolDiagnostic,
   ) => void;
@@ -105,6 +123,8 @@ export async function startEditorRealtimeServer(
   const config = options.config ?? loadEditorRealtimeConfig();
   const authenticator =
     options.authenticator ?? createEditorRealtimeAuthenticator(config);
+  const selectionPresenceScheduler =
+    options.selectionPresenceScheduler ?? systemTimeoutScheduler;
   const clients = new Set<ClientState>();
   const rooms = new Map<string, DocumentRoom>();
   const inFlightPersistence = new Set<Promise<void>>();
@@ -144,6 +164,7 @@ export async function startEditorRealtimeServer(
         data,
         isBinary,
         authenticator,
+        selectionPresenceScheduler,
         rooms,
         persistence: options.persistence,
         documentLoader: options.documentLoader,
@@ -180,7 +201,13 @@ export async function startEditorRealtimeServer(
       rooms.get(documentId)?.clients.size ?? 0,
     persistenceTailCount: () => persistenceTails.size,
     close: () =>
-      closeServer(httpServer, webSocketServer, clients, inFlightPersistence),
+      closeServer(
+        httpServer,
+        webSocketServer,
+        clients,
+        rooms,
+        inFlightPersistence,
+      ),
   };
 }
 
@@ -189,6 +216,7 @@ async function handleSocketMessage(input: {
   readonly data: WebSocket.RawData;
   readonly isBinary: boolean;
   readonly authenticator: EditorRealtimeAuthenticator;
+  readonly selectionPresenceScheduler: EditorRealtimeTimeoutScheduler;
   readonly rooms: Map<string, DocumentRoom>;
   readonly persistence: FirstDraftTransactionPersistence;
   readonly documentLoader: FirstDraftDocumentLoader;
@@ -264,6 +292,7 @@ async function handleSocketMessage(input: {
       state,
       message.documentId,
       input.documentLoader,
+      input.selectionPresenceScheduler,
       input.onProtocolDiagnostic,
     );
     return;
@@ -474,6 +503,7 @@ async function subscribeToDocument(
   state: ClientState,
   documentId: string,
   documentLoader: FirstDraftDocumentLoader,
+  selectionPresenceScheduler: EditorRealtimeTimeoutScheduler,
   onProtocolDiagnostic?: (diagnostic: EditorRealtimeProtocolDiagnostic) => void,
 ): Promise<void> {
   if (!authorizedDocument(state, documentId)) {
@@ -496,7 +526,7 @@ async function subscribeToDocument(
     });
     return;
   }
-  const room = ensureRoom(rooms, documentId);
+  const room = ensureRoom(rooms, documentId, selectionPresenceScheduler);
   room.clients.add(state);
   state.subscriptionLoading = true;
   state.acceptedReplayQueue = [];
@@ -505,7 +535,7 @@ async function subscribeToDocument(
   if (state.finalized) return;
   if (!loaded.ok) {
     room.clients.delete(state);
-    if (room.clients.size === 0) rooms.delete(documentId);
+    if (room.clients.size === 0) deleteRoom(rooms, documentId, room);
     state.acceptedReplayQueue = [];
     reportProtocolError({
       state,
@@ -631,7 +661,7 @@ function applyParticipantUpdate(
     active: message.active,
     metadata: message.metadata,
   });
-  if (!message.active) room.selections.delete(key);
+  if (!message.active) removeSelectionPresence(room, key);
   broadcastMessage(room, state, message);
   if (message.active) sendSnapshots(state.socket, message.documentId, room);
   else broadcastSelectionSnapshot(room, message.documentId, state);
@@ -648,10 +678,13 @@ function applySelectionUpdate(
   if (!room) return;
   const key = subjectKey(message.subject);
   const previous = room.selections.get(key);
-  if (previous && message.selectionRevision <= previous.selectionRevision) {
+  if (
+    previous &&
+    message.selectionRevision <= previous.latest.selectionRevision
+  ) {
     if (
-      message.selectionRevision === previous.selectionRevision &&
-      JSON.stringify(message.selection) !== JSON.stringify(previous.selection)
+      message.selectionRevision === previous.latest.selectionRevision &&
+      !isDeepStrictEqual(message.selection, previous.latest.selection)
     ) {
       reportProtocolError({
         state,
@@ -668,7 +701,12 @@ function applySelectionUpdate(
     selectionRevision: message.selectionRevision,
     selection: message.selection,
   } satisfies FirstDraftSelectionPresence;
-  room.selections.set(key, next);
+  if (previous && isDeepStrictEqual(next.selection, previous.latest.selection)) {
+    previous.latest = next;
+    if (previous.active) broadcastMessage(room, state, message);
+    return;
+  }
+  activateSelectionPresence(room, message.documentId, key, next);
   broadcastMessage(room, state, message);
 }
 
@@ -719,6 +757,7 @@ function subjectKey(subject: FirstDraftCollaborationSubject): string {
 function ensureRoom(
   rooms: Map<string, DocumentRoom>,
   documentId: string,
+  selectionPresenceScheduler: EditorRealtimeTimeoutScheduler,
 ): DocumentRoom {
   let room = rooms.get(documentId);
   if (!room) {
@@ -726,6 +765,7 @@ function ensureRoom(
       clients: new Set(),
       participants: new Map(),
       selections: new Map(),
+      selectionPresenceScheduler,
     };
     rooms.set(documentId, room);
   }
@@ -747,7 +787,7 @@ function sendSnapshots(
   sendFirstDraftMessage(socket, {
     type: "first-draft-selection-snapshot",
     documentId,
-    selections: [...room.selections.values()],
+    selections: activeSelectionPresences(room),
   });
 }
 
@@ -759,7 +799,7 @@ function broadcastSelectionSnapshot(
   const message = {
     type: "first-draft-selection-snapshot" as const,
     documentId,
-    selections: [...room.selections.values()],
+    selections: activeSelectionPresences(room),
   };
   for (const client of room.clients) {
     if (client === excluded) continue;
@@ -838,7 +878,7 @@ function removeSessionFromRoom(
   const key = subjectKey(session);
   const participant = room.participants.get(key);
   room.participants.delete(key);
-  room.selections.delete(key);
+  removeSelectionPresence(room, key);
   if (participant?.active) {
     const leave: FirstDraftParticipantUpdateMessage = {
       type: "first-draft-participant-update",
@@ -851,7 +891,8 @@ function removeSessionFromRoom(
     for (const peer of room.clients) sendFirstDraftMessage(peer.socket, leave);
   }
   broadcastSelectionSnapshot(room, session.documentId);
-  if (room.clients.size === 0) rooms.delete(session.documentId);
+  if (room.clients.size === 0)
+    deleteRoom(rooms, session.documentId, room);
 }
 
 async function handleHttpRequest(
@@ -941,8 +982,10 @@ function closeServer(
   httpServer: HttpServer,
   webSocketServer: WebSocketServer,
   clients: ReadonlySet<ClientState>,
+  rooms: Map<string, DocumentRoom>,
   inFlightPersistence: ReadonlySet<Promise<void>>,
 ): Promise<void> {
+  for (const [documentId, room] of rooms) deleteRoom(rooms, documentId, room);
   for (const client of clients) client.socket.close(1001, "server shutdown");
   return new Promise<void>((resolve) => {
     webSocketServer.close(() => httpServer.close(() => resolve()));
@@ -950,3 +993,92 @@ function closeServer(
     .then(() => Promise.allSettled(inFlightPersistence))
     .then(() => undefined);
 }
+
+function activateSelectionPresence(
+  room: DocumentRoom,
+  documentId: string,
+  key: string,
+  latest: FirstDraftSelectionPresence,
+): void {
+  const previous = room.selections.get(key);
+  if (previous?.timer !== null && previous?.timer !== undefined) {
+    room.selectionPresenceScheduler.clearTimeout(previous.timer);
+  }
+  const generation = (previous?.generation ?? 0) + 1;
+  const deadline =
+    room.selectionPresenceScheduler.now() +
+    EDITOR_SELECTION_PRESENCE_INACTIVITY_MS;
+  const next: SelectionPresenceState = {
+    latest,
+    active: true,
+    deadline,
+    generation,
+    timer: null,
+  };
+  room.selections.set(key, next);
+  const expire = () => {
+    const current = room.selections.get(key);
+    if (
+      current !== next ||
+      !current.active ||
+      current.generation !== generation ||
+      current.deadline !== deadline
+    ) {
+      return;
+    }
+    const remaining = deadline - room.selectionPresenceScheduler.now();
+    if (remaining > 0) {
+      current.timer = room.selectionPresenceScheduler.setTimeout(
+        expire,
+        remaining,
+      );
+      return;
+    }
+    current.active = false;
+    current.deadline = null;
+    current.timer = null;
+    broadcastSelectionSnapshot(room, documentId);
+  };
+  next.timer = room.selectionPresenceScheduler.setTimeout(
+    expire,
+    EDITOR_SELECTION_PRESENCE_INACTIVITY_MS,
+  );
+}
+
+function activeSelectionPresences(
+  room: DocumentRoom,
+): FirstDraftSelectionPresence[] {
+  return [...room.selections.values()]
+    .filter((selection) => selection.active)
+    .map((selection) => selection.latest);
+}
+
+function removeSelectionPresence(room: DocumentRoom, key: string): void {
+  const selection = room.selections.get(key);
+  if (!selection) return;
+  if (selection.timer !== null) {
+    room.selectionPresenceScheduler.clearTimeout(selection.timer);
+  }
+  room.selections.delete(key);
+}
+
+function deleteRoom(
+  rooms: Map<string, DocumentRoom>,
+  documentId: string,
+  room: DocumentRoom,
+): void {
+  for (const key of room.selections.keys()) removeSelectionPresence(room, key);
+  rooms.delete(documentId);
+}
+
+const systemTimeoutScheduler: EditorRealtimeTimeoutScheduler = {
+  now: () => Date.now(),
+  setTimeout(callback, delayMs) {
+    const timer = setTimeout(callback, delayMs);
+    timer.unref();
+    return timer;
+  },
+  clearTimeout(handle) {
+    clearTimeout(handle as ReturnType<typeof setTimeout>);
+  },
+};

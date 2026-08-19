@@ -373,6 +373,20 @@ describe("First Draft real pointer activation allocation contract", () => {
           ?.closest("[data-editor-block-id]")
           ?.getAttribute("data-editor-block-id"),
       ).toBe(afterList);
+
+      const wrapperPadding = blockElement(rendered.container, bulletList);
+      act(() =>
+        wrapperPadding.dispatchEvent(pointerEvent("pointerdown", 22, 82, 10)),
+      );
+      expect(editor.selectionController.getCanonicalSnapshot()).toMatchObject({
+        kind: "none",
+      });
+      expectNoListItemSurfacePaint(rendered.container);
+      expect(editor.readBlockSelectionModel(bulletList)).toMatchObject({
+        id: "wrapper",
+        coverage: { selected: "none" },
+        projection: { canStartSelection: false, selectable: false },
+      });
     } finally {
       if (originalClientRects) {
         Object.defineProperty(
@@ -386,6 +400,218 @@ describe("First Draft real pointer activation allocation contract", () => {
       rendered.unmount();
       editor.dispose();
     }
+  });
+
+  it("deletes a settled pointer range across list items without gesture content leases", () => {
+    const bootstrap = createFirstDraftBootstrapFromSnapshot({
+      documentId: "list-pointer-delete-document",
+      revision: 0,
+      snapshot: createListPointerSnapshot(),
+    });
+    const changes = vi.fn();
+    const viewState = createFirstDraftViewStateStore();
+    let runtime: YjsBlockContentRuntime | null = null;
+    const definition = {
+      ...createFirstDraftEditorDefinition(viewState),
+      content: {
+        createRuntime: (source) => {
+          runtime = createYjsBlockContentRuntime(source);
+          return runtime;
+        },
+      },
+    } satisfies EditableEditorDefinition;
+    const editor = initializeEditableEditor({
+      compiledDefinition: compileCanonicalEditorDefinition(definition),
+      snapshot: bootstrap.snapshot,
+      validatedSnapshot: bootstrap,
+      onChange: changes,
+      onChangeError: (error) => {
+        throw error;
+      },
+      createTransactionId: () => crypto.randomUUID(),
+    });
+    const rendered = render(
+      <FirstDraftViewStateProvider store={viewState}>
+        <div data-editor-interaction-scope="true">
+          <FirstDraftBlockHoverProvider enabled>
+            <EditorDocument editor={editor} />
+          </FirstDraftBlockHoverProvider>
+        </div>
+      </FirstDraftViewStateProvider>,
+    );
+    const list = rendered.container.querySelector<HTMLElement>(
+      '[data-editor-block-list-root="true"]',
+    );
+    if (!list || !runtime) throw new Error("Missing pointer deletion runtime");
+    Object.defineProperties(list, {
+      setPointerCapture: { configurable: true, value: vi.fn() },
+      hasPointerCapture: { configurable: true, value: vi.fn(() => true) },
+      releasePointerCapture: { configurable: true, value: vi.fn() },
+    });
+    installListSelectionGeometry(rendered.container);
+    const originalClientRects = Object.getOwnPropertyDescriptor(
+      Range.prototype,
+      "getClientRects",
+    );
+    Object.defineProperty(Range.prototype, "getClientRects", {
+      configurable: true,
+      value: vi.fn(() => [selectionRectangle(40, 0, 120, 18)]),
+    });
+
+    try {
+      const pointerId = 41;
+      dispatchPointerDown(rendered.container, bulletTextA, pointerId, true);
+      dispatchPointerMoveTo(
+        rendered.container,
+        bulletTextB,
+        pointerId,
+        70,
+        108,
+      );
+      dispatchPointerUpAt(
+        rendered.container,
+        bulletTextB,
+        pointerId,
+        70,
+        108,
+      );
+
+      const committed = editor.selectionController.getCommittedSnapshot();
+      expect(committed?.kind).toBe("document");
+      expect(committed?.endpoints.anchor?.blockId).toBe(bulletTextA);
+      expect(committed?.endpoints.head?.blockId).toBe(bulletTextB);
+      expect(committed?.endpoints.anchor?.blockId).not.toBe(
+        committed?.endpoints.head?.blockId,
+      );
+      expect(runtime.getLiveBlockContentCount()).toBe(1);
+      const activeView = rendered.container.querySelector<HTMLElement>(
+        ".ProseMirror",
+      );
+      if (!activeView) throw new Error("Missing active text projection");
+      const deleteEvent = new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        key: "Delete",
+      });
+
+      act(() => activeView.dispatchEvent(deleteEvent));
+
+      expect(deleteEvent.defaultPrevented).toBe(true);
+      expect(editor.getBlock(bulletItemA)).toBeNull();
+      expect(editor.getBlock(bulletTextA)).toBeNull();
+      expect(editor.getChildBlockIds(bulletList)).toEqual([bulletItemB]);
+      expect(changes).toHaveBeenCalledOnce();
+      expect(editor.undo()).toEqual({ status: "applied" });
+      expect(editor.getChildBlockIds(bulletList)).toEqual([
+        bulletItemA,
+        bulletItemB,
+      ]);
+      expect(editor.getBlock(bulletTextA)).not.toBeNull();
+      expect(editor.redo()).toEqual({ status: "applied" });
+      expect(editor.getChildBlockIds(bulletList)).toEqual([bulletItemB]);
+    } finally {
+      if (originalClientRects) {
+        Object.defineProperty(
+          Range.prototype,
+          "getClientRects",
+          originalClientRects,
+        );
+      } else {
+        Reflect.deleteProperty(Range.prototype, "getClientRects");
+      }
+      rendered.unmount();
+      editor.dispose();
+    }
+  });
+
+  it("clears a cross-block canonical range and its paint from unclaimed editor whitespace exactly once", () => {
+    const bootstrap = createFirstDraftBootstrapFromSnapshot({
+      documentId: "unclaimed-pointer-clear-document",
+      revision: 0,
+      snapshot: createPointerSnapshot(),
+    });
+    const changes = vi.fn();
+    const viewState = createFirstDraftViewStateStore();
+    const editor = initializeEditableEditor({
+      compiledDefinition: compileCanonicalEditorDefinition(
+        createFirstDraftEditorDefinition(viewState),
+      ),
+      snapshot: bootstrap.snapshot,
+      validatedSnapshot: bootstrap,
+      onChange: changes,
+      onChangeError: (error) => {
+        throw error;
+      },
+      createTransactionId: () => crypto.randomUUID(),
+    });
+    const rendered = render(
+      <FirstDraftViewStateProvider store={viewState}>
+        <section data-editor-interaction-scope="true">
+          <div data-testid="editor-whitespace" />
+          <FirstDraftBlockHoverProvider enabled>
+            <EditorDocument editor={editor} />
+          </FirstDraftBlockHoverProvider>
+        </section>
+      </FirstDraftViewStateProvider>,
+    );
+    const implementation = editor as unknown as EditorImplementation;
+    const list = rendered.container.querySelector<HTMLElement>(
+      '[data-editor-block-list-root="true"]',
+    );
+    if (!list) throw new Error("Missing editor block list");
+    Object.defineProperties(list, {
+      setPointerCapture: { configurable: true, value: vi.fn() },
+      hasPointerCapture: { configurable: true, value: vi.fn(() => true) },
+      releasePointerCapture: { configurable: true, value: vi.fn() },
+    });
+    const blockBText = blockElement(rendered.container, blockB).querySelector<HTMLElement>(
+      '[data-editor-text-root="true"]',
+    );
+    if (!blockBText) throw new Error("Missing second text root");
+    installTestRect(blockBText);
+    dispatchPointerDown(rendered.container, blockA, 30, true);
+    dispatchPointerMoveToElement(blockBText, 30, 12, 12);
+    dispatchPointerUp(rendered.container, blockB, 30);
+    expect(implementation.selectionController.getCanonicalSnapshot()).toMatchObject(
+      { kind: "document" },
+    );
+    expect(implementation.selectionController.localPaint.getSnapshot()).toMatchObject(
+      { kind: "range" },
+    );
+    const textRoot = blockElement(rendered.container, blockA).querySelector(
+      '[data-editor-text-root="true"]',
+    );
+    if (!textRoot) throw new Error("Missing text root for native range");
+    const nativeRange = document.createRange();
+    nativeRange.selectNodeContents(textRoot);
+    document.getSelection()?.removeAllRanges();
+    document.getSelection()?.addRange(nativeRange);
+    const publications = vi.fn();
+    implementation.selectionController.subscribeStandaloneSettlements(
+      publications,
+    );
+    const whitespace = rendered.getByTestId("editor-whitespace");
+
+    act(() => {
+      whitespace.dispatchEvent(pointerEvent("pointerdown", 31, 1));
+      whitespace.dispatchEvent(pointerEvent("pointerdown", 32, 1));
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+
+    expect(implementation.selectionController.getCanonicalSnapshot()).toMatchObject(
+      { kind: "none" },
+    );
+    expect(implementation.selectionController.localPaint.getSnapshot()).toEqual({
+      kind: "none",
+    });
+    expect(
+      rendered.container.querySelector("[data-editor-selection-paint]"),
+    ).toBeNull();
+    expect(document.getSelection()?.rangeCount).toBe(0);
+    expect(publications).toHaveBeenCalledOnce();
+    expect(changes).not.toHaveBeenCalled();
+    rendered.unmount();
+    editor.dispose();
   });
 
   it("reads current multi-block formatting from projections and hydrates only at captured-command execution", () => {

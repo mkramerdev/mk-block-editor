@@ -70,6 +70,11 @@ describe("FirstDraftMentionMenu", () => {
     expect(screen.queryByRole("listbox")).toBeNull();
 
     fixture.setSession(session("mention", ""));
+    expect(
+      screen
+        .getByRole("listbox", { hidden: true })
+        .getAttribute("data-editor-preserve-selection"),
+    ).toBe("true");
     const options = screen.getAllByRole("option", { hidden: true });
     expect(selectedOptions(options)).toHaveLength(1);
     expect(options[0]?.id).toBe("first-draft-mention-option-person-001");

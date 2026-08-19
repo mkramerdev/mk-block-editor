@@ -80,6 +80,132 @@ const listCases: readonly ListCase[] = [
 describe("First Draft canonical list-item range deletion", () => {
   afterEach(cleanup);
 
+  it("projects four ordered markers as DOM text and renumbers immediately after leading deletion", () => {
+    const listCase = listCases[0]!;
+    const fourItemIds = [...listCase.itemIds, id("fd-ordered-4")] as const;
+    const fourTextIds = [...listCase.textIds, listCase.extraTextId] as const;
+    const fixture = renderListFixture(
+      listCase,
+      createFourItemOrderedListSnapshot(),
+    );
+    const survivingText = fourTextIds
+      .slice(2)
+      .map((textId) => fixture.editor.readBlockPlainText(textId, "paragraph"));
+    const survivingMetadata = fourItemIds
+      .slice(2)
+      .map((itemId) => fixture.editor.getBlock(itemId)?.metadata);
+
+    expect(renderedOrderedItems(fixture.container)).toEqual([
+      { id: fourItemIds[0], marker: "1.", ariaHidden: "true" },
+      { id: fourItemIds[1], marker: "2.", ariaHidden: "true" },
+      { id: fourItemIds[2], marker: "3.", ariaHidden: "true" },
+      { id: fourItemIds[3], marker: "4.", ariaHidden: "true" },
+    ]);
+    expect(fixture.container.querySelectorAll("ol")).toHaveLength(1);
+
+    commitCompleteLeadingItemsSelection(
+      fixture,
+      fourTextIds[0],
+      fourTextIds[1],
+    );
+    fireEvent.keyDown(fixture.activeTextView, { key: "Backspace" });
+
+    expect(fixture.editor.getChildBlockIds(listCase.containerId)).toEqual(
+      fourItemIds.slice(2),
+    );
+    for (const removedId of [
+      fourItemIds[0],
+      fourTextIds[0],
+      fourItemIds[1],
+      fourTextIds[1],
+    ]) {
+      expect(fixture.editor.getBlock(removedId)).toBeNull();
+    }
+    expect(renderedOrderedItems(fixture.container)).toEqual([
+      { id: fourItemIds[2], marker: "1.", ariaHidden: "true" },
+      { id: fourItemIds[3], marker: "2.", ariaHidden: "true" },
+    ]);
+    expect(
+      fourTextIds
+        .slice(2)
+        .map((textId) =>
+          fixture.editor.readBlockPlainText(textId, "paragraph"),
+        ),
+    ).toEqual(survivingText);
+    expect(
+      fourItemIds
+        .slice(2)
+        .map((itemId) => fixture.editor.getBlock(itemId)?.metadata),
+    ).toEqual(survivingMetadata);
+    for (const itemId of fourItemIds.slice(2)) {
+      expect(
+        fixture.editor.getBlock(itemId)?.metadata ?? {},
+      ).not.toHaveProperty("ordinal");
+    }
+
+    act(() => expect(fixture.editor.undo()).toEqual({ status: "applied" }));
+    expect(fixture.editor.getChildBlockIds(listCase.containerId)).toEqual(
+      fourItemIds,
+    );
+    expect(
+      renderedOrderedItems(fixture.container).map(({ marker }) => marker),
+    ).toEqual(["1.", "2.", "3.", "4."]);
+    expect(
+      fixture.editor.selectionController.getCommittedSnapshot()?.endpoints,
+    ).toMatchObject({
+      anchor: { blockId: fourTextIds[0], textOffset: 0 },
+      head: { blockId: fourTextIds[1] },
+    });
+    act(() => expect(fixture.editor.redo()).toEqual({ status: "applied" }));
+    expect(fixture.editor.getChildBlockIds(listCase.containerId)).toEqual(
+      fourItemIds.slice(2),
+    );
+    expect(
+      renderedOrderedItems(fixture.container).map(({ marker }) => marker),
+    ).toEqual(["1.", "2."]);
+    expect(
+      fixture.editor.selectionController.getCommittedSnapshot()?.endpoints,
+    ).toMatchObject({
+      anchor: { blockId: fourTextIds[2], textOffset: 0 },
+      head: { blockId: fourTextIds[2], textOffset: 0 },
+    });
+
+    fixture.dispose();
+  });
+
+  it("keeps the first two ordered ordinals unchanged after deleting the final two items", () => {
+    const listCase = listCases[0]!;
+    const itemIds = [...listCase.itemIds, id("fd-ordered-4")] as const;
+    const textIds = [...listCase.textIds, listCase.extraTextId] as const;
+    const fixture = renderListFixture(
+      listCase,
+      createFourItemOrderedListSnapshot(),
+    );
+    const firstTwoText = textIds
+      .slice(0, 2)
+      .map((textId) => fixture.editor.readBlockPlainText(textId, "paragraph"));
+
+    commitCompleteLeadingItemsSelection(fixture, textIds[2], textIds[3]);
+    fireEvent.keyDown(fixture.activeTextView, { key: "Delete" });
+
+    expect(fixture.editor.getChildBlockIds(listCase.containerId)).toEqual(
+      itemIds.slice(0, 2),
+    );
+    expect(renderedOrderedItems(fixture.container)).toEqual([
+      { id: itemIds[0], marker: "1.", ariaHidden: "true" },
+      { id: itemIds[1], marker: "2.", ariaHidden: "true" },
+    ]);
+    expect(
+      textIds
+        .slice(0, 2)
+        .map((textId) =>
+          fixture.editor.readBlockPlainText(textId, "paragraph"),
+        ),
+    ).toEqual(firstTwoText);
+
+    fixture.dispose();
+  });
+
   it.each(listCases)(
     "removes the complete middle $name item and preserves its siblings",
     (listCase) => {
@@ -89,12 +215,12 @@ describe("First Draft canonical list-item range deletion", () => {
       const firstMetadata = fixture.editor.getBlock(firstItem)?.metadata;
       const lastMetadata = fixture.editor.getBlock(lastItem)?.metadata;
 
-      const selectionHold = commitCompleteMiddleItemSelection(
+      commitCompleteMiddleItemSelection(
         fixture,
         listCase,
+        listCase.name === "bullet list" ? "backward" : "forward",
       );
       fireEvent.keyDown(fixture.activeTextView, { key: "Delete" });
-      selectionHold.release();
 
       expect(fixture.editor.getChildBlockIds(listCase.containerId)).toEqual([
         firstItem,
@@ -111,41 +237,57 @@ describe("First Draft canonical list-item range deletion", () => {
         firstItem,
         lastItem,
       ]);
+      if (listCase.htmlListTag === "ol") {
+        expect(
+          renderedOrderedItems(fixture.container).map(({ marker }) => marker),
+        ).toEqual(["1.", "2."]);
+      }
 
       fixture.dispose();
     },
   );
 
-  it("cuts a complete item as a list-shaped fragment before removing it", () => {
+  it("cuts leading ordered items as a list-shaped fragment and renumbers survivors", () => {
     const listCase = listCases[0]!;
-    const fixture = renderListFixture(listCase);
-    const selectionHold = commitCompleteMiddleItemSelection(fixture, listCase);
+    const itemIds = [...listCase.itemIds, id("fd-ordered-4")] as const;
+    const textIds = [...listCase.textIds, listCase.extraTextId] as const;
+    const fixture = renderListFixture(
+      listCase,
+      createFourItemOrderedListSnapshot(),
+    );
+    commitCompleteLeadingItemsSelection(fixture, textIds[0], textIds[1]);
     const clipboard = new MemoryDataTransfer();
     const event = clipboardEvent("cut", clipboard);
 
     act(() => fixture.activeTextView.dispatchEvent(event));
-    selectionHold.release();
 
     expect(event.defaultPrevented).toBe(true);
     expect(clipboard.getData("text/plain")).toContain(
-      "Add ten external research partners",
+      "Invite five internal project teams",
     );
     expect(clipboard.getData("text/html")).toContain(
       `<${listCase.htmlListTag}`,
     );
     expect(clipboard.getData("text/html")).toContain("<li");
-    expect(fixture.editor.getBlock(listCase.itemIds[1])).toBeNull();
+    expect(fixture.editor.getBlock(itemIds[0])).toBeNull();
+    expect(fixture.editor.getBlock(itemIds[1])).toBeNull();
     expect(fixture.editor.getChildBlockIds(listCase.containerId)).toEqual([
-      listCase.itemIds[0],
-      listCase.itemIds[2],
+      itemIds[2],
+      itemIds[3],
     ]);
+    expect(
+      renderedOrderedItems(fixture.container).map(({ marker }) => marker),
+    ).toEqual(["1.", "2."]);
+    expect(clipboard.getData("text/html")).not.toContain("ordinal");
 
     fixture.dispose();
   });
 });
 
-function renderListFixture(listCase: ListCase) {
-  const snapshot = createListSnapshot(listCase);
+function renderListFixture(
+  listCase: ListCase,
+  snapshot = createListSnapshot(listCase),
+) {
   const bootstrap = createFirstDraftBootstrapFromSnapshot({
     documentId: `list-deletion-${listCase.name.replaceAll(" ", "-")}`,
     revision: 0,
@@ -211,6 +353,64 @@ function renderListFixture(listCase: ListCase) {
   };
 }
 
+function createFourItemOrderedListSnapshot(): EditorInstanceSnapshot {
+  const source = createFirstDraftSnapshot();
+  const containerId = id("fd-ordered-list");
+  const itemIds = [
+    id("fd-ordered-1"),
+    id("fd-ordered-2"),
+    id("fd-ordered-3"),
+    id("fd-ordered-4"),
+  ] as const;
+  const textIds = [
+    id("fd-ordered-1-text"),
+    id("fd-ordered-2-text"),
+    id("fd-ordered-3-text"),
+    id("fd-paragraph-before-checklist"),
+  ] as const;
+  const fourthItem = {
+    ...source.blocks[itemIds[2]]!,
+    id: itemIds[3],
+    parentId: containerId,
+  };
+  const blocks = {
+    [containerId]: source.blocks[containerId]!,
+    [itemIds[0]]: source.blocks[itemIds[0]]!,
+    [textIds[0]]: source.blocks[textIds[0]]!,
+    [itemIds[1]]: source.blocks[itemIds[1]]!,
+    [textIds[1]]: source.blocks[textIds[1]]!,
+    [itemIds[2]]: source.blocks[itemIds[2]]!,
+    [textIds[2]]: source.blocks[textIds[2]]!,
+    [itemIds[3]]: fourthItem,
+    [textIds[3]]: {
+      ...source.blocks[textIds[3]]!,
+      parentId: itemIds[3],
+    },
+  };
+
+  return {
+    ...source,
+    blocks,
+    rootBlockIds: [containerId],
+    childIdsByParentId: {
+      [containerId]: [...itemIds],
+      [itemIds[0]]: [textIds[0]],
+      [itemIds[1]]: [textIds[1]],
+      [itemIds[2]]: [textIds[2]],
+      [itemIds[3]]: [textIds[3]],
+    },
+    content: Object.fromEntries(
+      textIds.map((blockId) => [blockId, source.content[blockId]!]),
+    ),
+    opaqueContentCheckpoints: Object.fromEntries(
+      textIds.map((blockId) => [
+        blockId,
+        source.opaqueContentCheckpoints[blockId]!,
+      ]),
+    ),
+  };
+}
+
 function createListSnapshot(listCase: ListCase): EditorInstanceSnapshot {
   const source = createFirstDraftSnapshot();
   const [firstItem, middleItem, lastItem] = listCase.itemIds;
@@ -260,23 +460,52 @@ function createListSnapshot(listCase: ListCase): EditorInstanceSnapshot {
 function commitCompleteMiddleItemSelection(
   fixture: ReturnType<typeof renderListFixture>,
   listCase: ListCase,
+  direction: "forward" | "backward" = "forward",
 ) {
   const end = richTextDocumentContentSize(
     fixture.snapshot.content[listCase.extraTextId]!,
   );
   const hold = fixture.contentRuntime.acquireBlockContent(
-    listCase.textIds[1],
+    direction === "forward" ? listCase.textIds[1] : listCase.extraTextId,
     "paragraph",
     "canonical-transaction",
   );
-  commitSelection(
-    fixture.editor,
-    listCase.textIds[1],
-    0,
-    listCase.extraTextId,
-    end,
+  if (direction === "forward") {
+    commitSelection(
+      fixture.editor,
+      listCase.textIds[1],
+      0,
+      listCase.extraTextId,
+      end,
+    );
+  } else {
+    commitSelection(
+      fixture.editor,
+      listCase.extraTextId,
+      end,
+      listCase.textIds[1],
+      0,
+      "backward",
+    );
+  }
+  hold.release();
+}
+
+function commitCompleteLeadingItemsSelection(
+  fixture: ReturnType<typeof renderListFixture>,
+  firstTextId: BlockId,
+  secondTextId: BlockId,
+) {
+  const end = richTextDocumentContentSize(
+    fixture.snapshot.content[secondTextId]!,
   );
-  return hold;
+  const hold = fixture.contentRuntime.acquireBlockContent(
+    firstTextId,
+    "paragraph",
+    "canonical-transaction",
+  );
+  commitSelection(fixture.editor, firstTextId, 0, secondTextId, end);
+  hold.release();
 }
 
 function commitSelection(
@@ -285,12 +514,13 @@ function commitSelection(
   anchorOffset: number,
   focusBlockId: BlockId,
   focusOffset: number,
+  direction: "forward" | "backward" = "forward",
 ): void {
   act(() => {
     const anchor = captureTextPoint(editor, anchorBlockId, anchorOffset);
     const focus = captureTextPoint(editor, focusBlockId, focusOffset);
     const settlement = editor.selectionController.commitCanonicalSelection(
-      { direction: "forward", anchor, focus },
+      { direction, anchor, focus },
       editor,
       editor.getSelectionGraphRevision(),
       {
@@ -333,6 +563,28 @@ function renderedItemIds(
       ?.getAttribute("data-editor-block-id");
     if (!idValue) throw new Error("Rendered list item has no block shell");
     return idValue as BlockId;
+  });
+}
+
+function renderedOrderedItems(container: HTMLElement) {
+  const list = container.querySelector<HTMLOListElement>(
+    'ol[data-editor-block-type="orderedList"]',
+  );
+  if (!list) throw new Error("Missing ordered list");
+  return [...list.children].map((element) => {
+    if (!(element instanceof HTMLLIElement)) {
+      throw new Error("Ordered-list direct child is not an li");
+    }
+    const itemId = element.getAttribute("data-editor-block-id");
+    const marker = element.querySelector<HTMLElement>(
+      ".list-item-block__marker",
+    );
+    if (!itemId || !marker) throw new Error("Missing ordered item marker");
+    return {
+      id: itemId as BlockId,
+      marker: marker.textContent,
+      ariaHidden: marker.getAttribute("aria-hidden"),
+    };
   });
 }
 

@@ -503,6 +503,33 @@ describe("native selection synchronization", () => {
     list.remove();
     outside.remove();
   });
+
+  it("does not recreate canonical selection while pointer clear owns the native boundary", () => {
+    const selectionController = createSelectionController();
+    const fixture = createInternalHostTextFixture(selectionController);
+    installNativeSelection(fixture.text, 1, 4);
+    fixture.list.dataset.editorCanonicalSelectionClearPending = "true";
+    const hook = renderHook(() =>
+      useNativeSelectionSynchronization({
+        listElement: fixture.list,
+        editor: fixture.editor,
+        contentRuntime: fixture.contentRuntime,
+        selectionController,
+        presentation: presentation(null),
+        textAnchorResolver: passthroughTextAnchorResolver,
+      }),
+    );
+
+    document.dispatchEvent(new Event("selectionchange"));
+
+    expect(selectionController.getCanonicalSnapshot()).toMatchObject({
+      kind: "none",
+    });
+    hook.unmount();
+    delete fixture.list.dataset.editorCanonicalSelectionClearPending;
+    document.getSelection()?.removeAllRanges();
+    fixture.list.remove();
+  });
 });
 
 const passthroughTextAnchorResolver: EditorSelectionTextAnchorResolver = {

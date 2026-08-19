@@ -18,6 +18,29 @@ selection state.
 Both outbound routes carry the explicit selection-or-none representation. They
 share one session selection-revision sequence in the realtime envelope.
 
+## Remote selection presence leases
+
+The realtime server, not the browser client or paint layer, owns remote
+selection inactivity. Each subject's first valid stable selection starts a
+30,000 ms lease. A structurally different stable selection restarts the lease;
+the selection revision is excluded from that comparison. A newer revision that
+carries the same stable value advances the server's ordering tombstone without
+moving the deadline.
+
+At the deadline the server marks only that subject's selection presence
+inactive and broadcasts an authoritative selection snapshot that excludes it.
+Participant connection presence remains active. The server retains the latest
+selection revision and stable value after expiry, so stale revisions remain
+rejected and identical newer publications cannot reactivate the selection. A
+different valid value reactivates it immediately with a new lease. Explicit
+`{ kind: "none" }` is one such stable value; it is never an inactivity marker.
+
+Clients replace their additional-selection input from each authoritative
+selection snapshot. That replacement cannot clear or mutate the sender's
+canonical local selection. Lease timers are generation-checked, canceled on
+participant/session/room/server teardown, and unreferenced in production so
+they cannot retain the realtime process.
+
 ## Document layer stack
 
 The shared, PM-free `EditorDocument` mounts exactly one built-in layer before

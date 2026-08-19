@@ -262,6 +262,67 @@ describe("global selection gesture ownership", () => {
     fixture.dispose();
   });
 
+  it("replaces an existing canonical selection without an intermediate none publication", () => {
+    const fixture = pointerGestureFixture();
+    const priorAnchor = createEditorSelectionTextAnchor({
+      codec: "pointer-test",
+      payload: { encoded: "MQ==", assoc: 0 },
+    });
+    if (!priorAnchor.ok) throw new Error(priorAnchor.message);
+    const prior = createEditorLogicalSelectionPoint({
+      graph: fixture.options.editor,
+      blockId: "text" as BlockId,
+      textOffset: 1,
+      textAnchor: priorAnchor.textAnchor,
+    });
+    if (!prior) throw new Error("Prior pointer point is invalid");
+    fixture.options.selectionController.commitSelectionPoint(
+      prior,
+      fixture.options.editor,
+      1,
+      { publication: { kind: "silent" }, cause: "focus" },
+    );
+    const publications = vi.fn();
+    fixture.options.selectionController.subscribeStandaloneSettlements(
+      publications,
+    );
+    const clearSelection = vi.spyOn(
+      fixture.options.selectionController,
+      "clearSelection",
+    );
+    const hook = renderHook(() => useGlobalSelectionGestures(fixture.options));
+
+    act(() => {
+      fixture.text.dispatchEvent(
+        pointerEvent("pointerdown", {
+          pointerId: 10,
+          clientX: 10,
+          clientY: 10,
+        }),
+      );
+      document.dispatchEvent(
+        pointerEvent("pointerup", {
+          pointerId: 10,
+          clientX: 10,
+          clientY: 10,
+        }),
+      );
+    });
+
+    expect(clearSelection).not.toHaveBeenCalled();
+    expect(publications).toHaveBeenCalledOnce();
+    expect(
+      fixture.options.selectionController.getCanonicalSnapshot(),
+    ).toMatchObject({
+      kind: "document",
+      snapshot: {
+        documentSelection: { focus: { blockId: "text", textOffset: 0 } },
+      },
+    });
+    hook.unmount();
+    fixture.dispose();
+  });
+
   it("retargets a pending click from the final pointerup hit before its only settlement", () => {
     const fixture = pointerGestureFixture();
     const finalPoint = {
@@ -990,40 +1051,170 @@ describe("global selection gesture ownership", () => {
     ["input", {}],
     ["object control", { editorObjectUi: "true" }],
     ["resize handle", { editorUi: "true" }],
+  ])(
+    "clears selection without claiming pointer selection from a %s",
+    (_name, dataset) => {
+      const fixture = pointerGestureFixture();
+      fixture.options.selectionController.commitSelectionPoint(
+        fixture.point,
+        fixture.options.editor,
+        1,
+        { publication: { kind: "silent" }, cause: "focus" },
+      );
+      const publications = vi.fn();
+      fixture.options.selectionController.subscribeStandaloneSettlements(
+        publications,
+      );
+      const control = document.createElement(
+        _name === "input" ? "input" : _name === "button" ? "button" : "div",
+      );
+      Object.assign(control.dataset, dataset);
+      fixture.text.append(control);
+      const hook = renderHook(() =>
+        useGlobalSelectionGestures(fixture.options),
+      );
+
+      const down = pointerEvent("pointerdown", {
+        pointerId: 15,
+        clientX: 10,
+        clientY: 10,
+      });
+      act(() => control.dispatchEvent(down));
+      act(() =>
+        control.dispatchEvent(
+          new MouseEvent("click", {
+            bubbles: true,
+            cancelable: true,
+            button: 0,
+            clientX: 10,
+            clientY: 10,
+          }),
+        ),
+      );
+
+      expect(down.defaultPrevented).toBe(false);
+      expect(fixture.setPointerCapture).not.toHaveBeenCalled();
+      expect(fixture.extendSelection).not.toHaveBeenCalled();
+      expect(fixture.requestPresentation).not.toHaveBeenCalled();
+      expect(
+        fixture.list.dataset.editorTextSelectionDragActive,
+      ).toBeUndefined();
+      expect(
+        fixture.options.selectionController.getCanonicalSnapshot(),
+      ).toEqual(expect.objectContaining({ kind: "none" }));
+      expect(publications).toHaveBeenCalledOnce();
+      hook.unmount();
+      fixture.dispose();
+    },
+  );
+
+  it.each([
     ["block-internal host", { editorBlockInternalSelectionHost: "true" }],
-  ])("does not claim pointer selection from a %s", (_name, dataset) => {
+    ["selection consumer", { editorPreserveSelection: "true" }],
+  ])(
+    "delegates pointer ownership to a %s without clearing",
+    (_name, dataset) => {
+      const fixture = pointerGestureFixture();
+      const clearSelection = vi.spyOn(
+        fixture.options.selectionController,
+        "clearSelection",
+      );
+      const control = document.createElement("div");
+      Object.assign(control.dataset, dataset);
+      fixture.text.append(control);
+      const hook = renderHook(() =>
+        useGlobalSelectionGestures(fixture.options),
+      );
+
+      act(() =>
+        control.dispatchEvent(
+          pointerEvent("pointerdown", {
+            pointerId: 16,
+            clientX: 10,
+            clientY: 10,
+          }),
+        ),
+      );
+
+      expect(clearSelection).not.toHaveBeenCalled();
+      expect(fixture.extendSelection).not.toHaveBeenCalled();
+      hook.unmount();
+      fixture.dispose();
+    },
+  );
+
+  it("clears selection on block-list whitespace and failed start hit testing", () => {
     const fixture = pointerGestureFixture();
-    const control = document.createElement(
-      _name === "input" ? "input" : _name === "button" ? "button" : "div",
+    fixture.options.selectionController.commitSelectionPoint(
+      fixture.point,
+      fixture.options.editor,
+      1,
+      { publication: { kind: "silent" }, cause: "focus" },
     );
-    Object.assign(control.dataset, dataset);
-    fixture.text.append(control);
+    fixture.resolvePointerHit.mockReturnValueOnce(null);
     const hook = renderHook(() => useGlobalSelectionGestures(fixture.options));
 
-    const down = pointerEvent("pointerdown", {
-      pointerId: 15,
-      clientX: 10,
-      clientY: 10,
-    });
-    act(() => control.dispatchEvent(down));
     act(() =>
-      control.dispatchEvent(
-        new MouseEvent("click", {
-          bubbles: true,
-          cancelable: true,
-          button: 0,
-          clientX: 10,
-          clientY: 10,
+      fixture.list.dispatchEvent(
+        pointerEvent("pointerdown", {
+          pointerId: 17,
+          clientX: 100,
+          clientY: 100,
         }),
       ),
     );
 
-    expect(down.defaultPrevented).toBe(false);
-    expect(fixture.setPointerCapture).not.toHaveBeenCalled();
+    expect(fixture.options.selectionController.getCanonicalSnapshot()).toEqual(
+      expect.objectContaining({ kind: "none" }),
+    );
     expect(fixture.extendSelection).not.toHaveBeenCalled();
-    expect(fixture.requestPresentation).not.toHaveBeenCalled();
-    expect(fixture.list.dataset.editorTextSelectionDragActive).toBeUndefined();
     hook.unmount();
+    fixture.dispose();
+  });
+
+  it("clears selection inside the interaction scope but outside the block list", () => {
+    const fixture = pointerGestureFixture();
+    const scope = document.createElement("section");
+    scope.dataset.editorInteractionScope = "true";
+    const surface = document.createElement("div");
+    scope.append(fixture.list, surface);
+    document.body.append(scope);
+    fixture.options.selectionController.commitSelectionPoint(
+      fixture.point,
+      fixture.options.editor,
+      1,
+      { publication: { kind: "silent" }, cause: "focus" },
+    );
+    const publications = vi.fn();
+    fixture.options.selectionController.subscribeStandaloneSettlements(
+      publications,
+    );
+    const hook = renderHook(() => useGlobalSelectionGestures(fixture.options));
+
+    act(() => {
+      surface.dispatchEvent(
+        pointerEvent("pointerdown", {
+          pointerId: 18,
+          clientX: 100,
+          clientY: 100,
+        }),
+      );
+      surface.dispatchEvent(
+        pointerEvent("pointerdown", {
+          pointerId: 19,
+          clientX: 100,
+          clientY: 100,
+        }),
+      );
+    });
+
+    expect(fixture.options.selectionController.getCanonicalSnapshot()).toEqual(
+      expect.objectContaining({ kind: "none" }),
+    );
+    expect(publications).toHaveBeenCalledOnce();
+    expect(fixture.options.editor.blurEditor).toHaveBeenCalledTimes(2);
+    hook.unmount();
+    scope.remove();
     fixture.dispose();
   });
 
@@ -1061,7 +1252,7 @@ describe("global selection gesture ownership", () => {
     fixture.dispose();
   });
 
-  it("releases native focus and projection on outside pointer-down while retaining canonical selection", () => {
+  it("clears canonical selection before releasing native focus on outside pointer-down", () => {
     const fixture = gestureFixture({ composition: null });
     const outside = document.createElement("button");
     const selectedText = document.createTextNode("selected");
@@ -1075,18 +1266,26 @@ describe("global selection gesture ownership", () => {
 
     act(() =>
       fixture.options.listElement.dispatchEvent(
-        new Event("pointerdown", { bubbles: true, cancelable: true }),
+        new KeyboardEvent("keydown", { key: "x", bubbles: true }),
       ),
     );
 
     act(() =>
       outside.dispatchEvent(
-        new Event("pointerdown", { bubbles: true, cancelable: true }),
+        pointerEvent("pointerdown", {
+          pointerId: 19,
+          clientX: 1,
+          clientY: 1,
+        }),
       ),
     );
 
     expect(fixture.blurEditor).toHaveBeenCalledOnce();
-    expect(fixture.cancel).not.toHaveBeenCalled();
+    expect(fixture.cancel).toHaveBeenCalledOnce();
+    expect(fixture.cancel).toHaveBeenCalledWith({
+      publication: { kind: "standalone-local" },
+      cause: "pointer",
+    });
     expect(nativeSelection?.rangeCount).toBe(0);
     hook.unmount();
     outside.remove();
@@ -1148,6 +1347,102 @@ describe("global selection gesture ownership", () => {
 
     expect(event.defaultPrevented).toBe(false);
     expect(fixture.captureStructuralSelection).not.toHaveBeenCalled();
+    hook.unmount();
+    fixture.dispose();
+  });
+
+  it.each(["Delete", "Backspace"])(
+    "owns cross-block %s even when the structural transaction rejects",
+    (key) => {
+      const fixture = gestureFixture({ composition: null });
+      const firstId = "first" as BlockId;
+      const secondId = "second" as BlockId;
+      vi.spyOn(
+        fixture.options.selectionController,
+        "getCommittedSnapshot",
+      ).mockReturnValue({
+        revision: 2,
+        endpoints: {
+          anchor: { blockId: firstId, textOffset: 1 },
+          head: { blockId: secondId, textOffset: 2 },
+        },
+      } as never);
+      fixture.captureStructuralSelection.mockReturnValue({
+        isCurrent: () => true,
+        range: {
+          graphRevision: 1,
+          selectionRevision: 2,
+          blocks: [],
+          start: { kind: "text", blockId: firstId, offset: 1 },
+          end: { kind: "text", blockId: secondId, offset: 2 },
+        },
+      } as never);
+      const executeStructuralRangeDeletion = vi.fn(() => ({
+        ok: false,
+        reason: "content-operations-rejected",
+        contentResult: { ok: false, applied: 0, failures: [] },
+      }));
+      Object.assign(fixture.options.editor, {
+        definition: { blocks: {} },
+        executeStructuralRangeDeletion,
+      });
+      const hook = renderHook(() =>
+        useGlobalSelectionGestures(fixture.options),
+      );
+      const event = new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        key,
+      });
+
+      act(() => fixture.options.listElement.dispatchEvent(event));
+
+      expect(event.defaultPrevented).toBe(true);
+      expect(executeStructuralRangeDeletion).toHaveBeenCalledOnce();
+      hook.unmount();
+      fixture.dispose();
+    },
+  );
+
+  it("leaves a noncollapsed same-block text deletion to ProseMirror", () => {
+    const fixture = gestureFixture({ composition: null });
+    const blockId = "text" as BlockId;
+    vi.spyOn(
+      fixture.options.selectionController,
+      "getCommittedSnapshot",
+    ).mockReturnValue({
+      revision: 2,
+      endpoints: {
+        anchor: { blockId, textOffset: 1 },
+        head: { blockId, textOffset: 3 },
+      },
+    } as never);
+    fixture.captureStructuralSelection.mockReturnValue({
+      isCurrent: () => true,
+      range: {
+        graphRevision: 1,
+        selectionRevision: 2,
+        blocks: [],
+        start: { kind: "text", blockId, offset: 1 },
+        end: { kind: "text", blockId, offset: 3 },
+      },
+    } as never);
+    const executeStructuralRangeDeletion = vi.fn();
+    Object.assign(fixture.options.editor, {
+      definition: { blocks: {} },
+      executeStructuralRangeDeletion,
+    });
+    const hook = renderHook(() => useGlobalSelectionGestures(fixture.options));
+    const event = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key: "Delete",
+    });
+
+    act(() => fixture.options.listElement.dispatchEvent(event));
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(executeStructuralRangeDeletion).not.toHaveBeenCalled();
     hook.unmount();
     fixture.dispose();
   });

@@ -2,6 +2,7 @@ import {
   editorBlockListRootSelector,
   isInSameEditorInteractionScope,
 } from "../dom-markers.ts";
+import { pointerEventPreservesEditorSelection } from "./interactive-targets.ts";
 
 export interface DocumentInteractionOwner {
   readonly list: HTMLElement;
@@ -52,7 +53,14 @@ function createRouter(doc: Document): DocumentInteractionRouter {
     dispose: () => undefined,
   };
   const pointerdown = (event: PointerEvent) => {
-    const owner = resolveTargetOwner(router, event.target);
+    // Secondary buttons neither begin a selection gesture nor transfer the
+    // active editor's canonical-selection ownership.
+    if (event.button !== 0) return;
+    const owner =
+      resolveTargetOwner(router, event.target) ??
+      (pointerEventPreservesEditorSelection(event)
+        ? router.activeOwner
+        : null);
     if (owner) {
       activateOwner(router, owner);
       router.pointerOwners.set(event.pointerId, owner);

@@ -3412,78 +3412,124 @@ export class EditorImplementation {
     if (selection.kind !== "document") return { ok: true, selection };
     const contentOperations = historyReplayContentOperations(replayOperation);
     if (contentOperations.length === 0) return { ok: true, selection };
-    const finalizePoint = (
-      point: EditorLogicalSelectionPoint,
-    ):
-      | { readonly ok: true; readonly point: EditorLogicalSelectionPoint }
-      | { readonly ok: false; readonly message: string } => {
-      if (!point.textAnchor) return { ok: true, point };
-      const replayMapping = historyReplayPointMapping(point, contentOperations);
-      const affinity = replayMapping.affinity;
-      if (affinity === point.affinity) return { ok: true, point };
-      if (
-        !this.options.resolveSelectionTextAnchor ||
-        !this.options.createSelectionTextAnchor
-      ) {
-        return {
-          ok: false,
-          message: `History replay anchor services are unavailable for ${point.blockId}`,
-        };
-      }
-      const resolved = resolveEditorSelectionTextAnchorPoint(point, graph, {
-        resolveTextAnchor: this.options.resolveSelectionTextAnchor,
-      });
-      if (!resolved.ok) {
-        return {
-          ok: false,
-          message: `History replay anchor could not be resolved for ${point.blockId}`,
-        };
-      }
-      const created = this.options.createSelectionTextAnchor({
-        blockId: resolved.blockId,
-        blockType: point.blockType,
-        textOffset:
-          currentContentSide === "replay-input"
-            ? replayMapping.inputOffset
-            : point.textOffset,
-        affinity,
-      });
-      if (!created.ok) {
-        return {
-          ok: false,
-          message: `History replay anchor could not be created for ${point.blockId}`,
-        };
-      }
-      return {
-        ok: true,
-        point: {
-          ...point,
-          textOffset: point.textOffset,
-          textAnchor: created.textAnchor,
-          affinity,
-        },
-      };
-    };
-    const anchor = finalizePoint(selection.selection.anchor);
-    if (!anchor.ok) return anchor;
-    const focus = sameLogicalSelectionPoint(
+    const points = sameLogicalSelectionPoint(
       selection.selection.anchor,
       selection.selection.focus,
     )
-      ? anchor
-      : finalizePoint(selection.selection.focus);
-    if (!focus.ok) return focus;
-    return {
-      ok: true,
-      selection: {
-        kind: "document",
+      ? [selection.selection.anchor]
+      : [selection.selection.anchor, selection.selection.focus];
+    const contentAccessBlockIds = new Set<BlockId>();
+    const contentAccessReleases = new Map<BlockId, () => void>();
+    try {
+      for (const point of points) {
+        if (!point.textAnchor || contentAccessBlockIds.has(point.blockId)) {
+          continue;
+        }
+        const replayMapping = historyReplayPointMapping(
+          point,
+          contentOperations,
+        );
+        if (replayMapping.affinity === point.affinity) continue;
+        const acquire = this.options.acquireTextContentAccess;
+        if (!acquire) continue;
+        contentAccessBlockIds.add(point.blockId);
+        const release = acquire(point.blockId);
+        if (release) {
+          contentAccessReleases.set(point.blockId, release);
+          continue;
+        }
+        const liveBlock = this.getBlock(point.blockId);
+        const targetBlock = graph.getBlock(point.blockId);
+        const introducedContentIsAlreadyPrepared =
+          (!liveBlock || liveBlock.tombstone) &&
+          Boolean(targetBlock && !targetBlock.tombstone);
+        if (!introducedContentIsAlreadyPrepared) {
+          return {
+            ok: false,
+            message: `History replay content access could not be acquired for ${point.blockId}`,
+          };
+        }
+      }
+      const finalizePoint = (
+        point: EditorLogicalSelectionPoint,
+      ):
+        | { readonly ok: true; readonly point: EditorLogicalSelectionPoint }
+        | { readonly ok: false; readonly message: string } => {
+        if (!point.textAnchor) return { ok: true, point };
+        const replayMapping = historyReplayPointMapping(
+          point,
+          contentOperations,
+        );
+        const affinity = replayMapping.affinity;
+        if (affinity === point.affinity) return { ok: true, point };
+        if (
+          !this.options.resolveSelectionTextAnchor ||
+          !this.options.createSelectionTextAnchor
+        ) {
+          return {
+            ok: false,
+            message: `History replay anchor services are unavailable for ${point.blockId}`,
+          };
+        }
+        const resolved = resolveEditorSelectionTextAnchorPoint(point, graph, {
+          resolveTextAnchor: this.options.resolveSelectionTextAnchor,
+        });
+        if (!resolved.ok) {
+          return {
+            ok: false,
+            message: `History replay anchor could not be resolved for ${point.blockId}`,
+          };
+        }
+        const created = this.options.createSelectionTextAnchor({
+          blockId: resolved.blockId,
+          blockType: point.blockType,
+          textOffset:
+            currentContentSide === "replay-input"
+              ? replayMapping.inputOffset
+              : point.textOffset,
+          affinity,
+        });
+        if (!created.ok) {
+          return {
+            ok: false,
+            message: `History replay anchor could not be created for ${point.blockId}`,
+          };
+        }
+        return {
+          ok: true,
+          point: {
+            ...point,
+            textOffset: point.textOffset,
+            textAnchor: created.textAnchor,
+            affinity,
+          },
+        };
+      };
+      const anchor = finalizePoint(selection.selection.anchor);
+      if (!anchor.ok) return anchor;
+      const focus = sameLogicalSelectionPoint(
+        selection.selection.anchor,
+        selection.selection.focus,
+      )
+        ? anchor
+        : finalizePoint(selection.selection.focus);
+      if (!focus.ok) return focus;
+      return {
+        ok: true,
         selection: {
-          direction: selection.selection.direction,
-          anchor: anchor.point,
-          focus: focus.point,
+          kind: "document",
+          selection: {
+            direction: selection.selection.direction,
+            anchor: anchor.point,
+            focus: focus.point,
+          },
         },
-      },
-    };
+      };
+    } finally {
+      for (const release of [...contentAccessReleases.values()].reverse()) {
+        release();
+      }
+    }
   }
 
   private historySelectionEffect(

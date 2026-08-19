@@ -28,8 +28,10 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import {
+  EDITOR_SELECTION_PRESENCE_INACTIVITY_MS,
   startEditorRealtimeServer,
   type EditorRealtimeServer,
+  type EditorRealtimeTimeoutScheduler,
 } from "./server.ts";
 
 const authenticationToken = "dev-editor-realtime-token";
@@ -340,6 +342,232 @@ describe("the sole editor realtime WebSocket service", () => {
     });
     await expect(cleared).resolves.toMatchObject({ selections: [] });
     expect(server.documentSessionCount(documentOne)).toBe(1);
+  });
+
+  it("expires unchanged selection presence at 30 seconds without expiring its participant", async () => {
+    const scheduler = manualTimeoutScheduler();
+    server = await startTestEditorRealtimeServer({
+      config: testConfig(),
+      persistence: acceptingPersistence(),
+      selectionPresenceScheduler: scheduler,
+    });
+    const identityA = session("lease-a", documentOne);
+    const identityB = session("lease-b", documentOne);
+    const socketA = await connectSession(server, identityA);
+    const socketB = await connectSession(server, identityB);
+    sockets.push(socketA, socketB);
+    socketA.send(
+      encodeFirstDraftMessage(participantMessage(identityA, 0, true)),
+    );
+    const initial = waitForMessage(
+      socketB,
+      (message) => message.type === "first-draft-selection-update",
+    );
+    socketA.send(
+      encodeFirstDraftMessage(selectionMessage(identityA, 0, blockSelection())),
+    );
+    await initial;
+    expect(scheduler.pendingCount()).toBe(1);
+
+    scheduler.advanceBy(10_000);
+    const identical = waitForMessage(
+      socketB,
+      (message) =>
+        message.type === "first-draft-selection-update" &&
+        message.selectionRevision === 1,
+    );
+    socketA.send(
+      encodeFirstDraftMessage(selectionMessage(identityA, 1, blockSelection())),
+    );
+    await identical;
+    scheduler.advanceBy(19_999);
+    const beforeExpiry = expectNoMessage(
+      socketB,
+      (message) => message.type === "first-draft-selection-snapshot",
+      25,
+    );
+    await beforeExpiry;
+
+    const expired = waitForMessage(
+      socketB,
+      (message) => message.type === "first-draft-selection-snapshot",
+    );
+    scheduler.advanceBy(1);
+    await expect(expired).resolves.toMatchObject({ selections: [] });
+    expect(scheduler.now()).toBe(EDITOR_SELECTION_PRESENCE_INACTIVITY_MS);
+    expect(scheduler.pendingCount()).toBe(0);
+
+    const identityC = session("lease-c", documentOne);
+    const socketC = await openSocket(server);
+    sockets.push(socketC);
+    await authenticateSession(socketC, identityC);
+    const [, participantSnapshot, expiredSelectionSnapshot] =
+      await subscribeSession(socketC, identityC);
+    expect(participantSnapshot).toMatchObject({
+      participants: [
+        expect.objectContaining({ subject: subject(identityA), active: true }),
+      ],
+    });
+    expect(expiredSelectionSnapshot).toMatchObject({ selections: [] });
+    expect(server.documentSessionCount(documentOne)).toBe(3);
+
+    const identicalAfterExpiry = expectNoMessage(
+      socketB,
+      (message) =>
+        message.type === "first-draft-selection-update" ||
+        message.type === "first-draft-selection-snapshot",
+      25,
+    );
+    socketA.send(
+      encodeFirstDraftMessage(selectionMessage(identityA, 2, blockSelection())),
+    );
+    await identicalAfterExpiry;
+    expect(scheduler.pendingCount()).toBe(0);
+
+    const staleAfterExpiry = expectNoMessage(
+      socketB,
+      (message) =>
+        message.type === "first-draft-selection-update" ||
+        message.type === "first-draft-selection-snapshot",
+      25,
+    );
+    socketA.send(
+      encodeFirstDraftMessage(selectionMessage(identityA, 1, { kind: "none" })),
+    );
+    await staleAfterExpiry;
+    const conflictAfterExpiry = waitForMessage(
+      socketA,
+      (message) =>
+        message.type === "first-draft-protocol-error" &&
+        message.code === "selection-revision-conflict",
+    );
+    const conflictSilence = expectNoMessage(
+      socketB,
+      (message) =>
+        message.type === "first-draft-selection-update" ||
+        message.type === "first-draft-selection-snapshot",
+      25,
+    );
+    socketA.send(
+      encodeFirstDraftMessage(selectionMessage(identityA, 2, { kind: "none" })),
+    );
+    await conflictAfterExpiry;
+    await conflictSilence;
+
+    const reactivated = waitForMessage(
+      socketB,
+      (message) =>
+        message.type === "first-draft-selection-update" &&
+        message.selectionRevision === 3,
+    );
+    socketA.send(
+      encodeFirstDraftMessage(selectionMessage(identityA, 3, { kind: "none" })),
+    );
+    await expect(reactivated).resolves.toMatchObject({
+      selection: { kind: "none" },
+    });
+    expect(scheduler.pendingCount()).toBe(1);
+  });
+
+  it("renews the lease only when the stable selection value changes", async () => {
+    const scheduler = manualTimeoutScheduler();
+    server = await startTestEditorRealtimeServer({
+      config: testConfig(),
+      persistence: acceptingPersistence(),
+      selectionPresenceScheduler: scheduler,
+    });
+    const identityA = session("renew-a", documentOne);
+    const identityB = session("renew-b", documentOne);
+    const socketA = await connectSession(server, identityA);
+    const socketB = await connectSession(server, identityB);
+    sockets.push(socketA, socketB);
+    const initial = waitForMessage(
+      socketB,
+      (message) => message.type === "first-draft-selection-update",
+    );
+    socketA.send(
+      encodeFirstDraftMessage(selectionMessage(identityA, 0, blockSelection())),
+    );
+    await initial;
+    scheduler.advanceBy(29_000);
+    const changed = waitForMessage(
+      socketB,
+      (message) =>
+        message.type === "first-draft-selection-update" &&
+        message.selectionRevision === 1,
+    );
+    socketA.send(
+      encodeFirstDraftMessage(selectionMessage(identityA, 1, { kind: "none" })),
+    );
+    await changed;
+    expect(scheduler.pendingCount()).toBe(1);
+
+    scheduler.advanceBy(1_000);
+    await expectNoMessage(
+      socketB,
+      (message) => message.type === "first-draft-selection-snapshot",
+      25,
+    );
+    scheduler.advanceBy(28_999);
+    await expectNoMessage(
+      socketB,
+      (message) => message.type === "first-draft-selection-snapshot",
+      25,
+    );
+    const expired = waitForMessage(
+      socketB,
+      (message) => message.type === "first-draft-selection-snapshot",
+    );
+    scheduler.advanceBy(1);
+    await expect(expired).resolves.toMatchObject({ selections: [] });
+    expect(scheduler.now()).toBe(59_000);
+  });
+
+  it("cancels selection leases on disconnect and server shutdown", async () => {
+    const scheduler = manualTimeoutScheduler();
+    server = await startTestEditorRealtimeServer({
+      config: testConfig(),
+      persistence: acceptingPersistence(),
+      selectionPresenceScheduler: scheduler,
+    });
+    const identityA = session("cleanup-a", documentOne);
+    const identityB = session("cleanup-b", documentOne);
+    const socketA = await connectSession(server, identityA);
+    const socketB = await connectSession(server, identityB);
+    sockets.push(socketA, socketB);
+    const initial = waitForMessage(
+      socketB,
+      (message) => message.type === "first-draft-selection-update",
+    );
+    socketA.send(
+      encodeFirstDraftMessage(selectionMessage(identityA, 0, blockSelection())),
+    );
+    await initial;
+    expect(scheduler.pendingCount()).toBe(1);
+    const disconnected = waitForMessage(
+      socketB,
+      (message) => message.type === "first-draft-selection-snapshot",
+    );
+    await closeSocket(socketA);
+    await disconnected;
+    expect(scheduler.pendingCount()).toBe(0);
+    const callbackCount = scheduler.callbackCount();
+    scheduler.advanceBy(EDITOR_SELECTION_PRESENCE_INACTIVITY_MS);
+    expect(scheduler.callbackCount()).toBe(callbackCount);
+
+    const identityC = session("cleanup-c", documentOne);
+    const socketC = await connectSession(server, identityC);
+    sockets.push(socketC);
+    socketC.send(
+      encodeFirstDraftMessage(selectionMessage(identityC, 0, blockSelection())),
+    );
+    await waitFor(() => scheduler.pendingCount() === 1);
+    await server.close();
+    server = null;
+    expect(scheduler.pendingCount()).toBe(0);
+    const shutdownCallbackCount = scheduler.callbackCount();
+    scheduler.advanceBy(EDITOR_SELECTION_PRESENCE_INACTIVITY_MS);
+    expect(scheduler.callbackCount()).toBe(shutdownCallbackCount);
   });
 
   it("isolates presence by document and keeps it live while persistence is blocked", async () => {
@@ -1402,6 +1630,48 @@ function acceptingPersistence(): FirstDraftTransactionPersistence {
         transaction,
       };
     },
+  };
+}
+
+function manualTimeoutScheduler(): EditorRealtimeTimeoutScheduler & {
+  advanceBy(milliseconds: number): void;
+  pendingCount(): number;
+  callbackCount(): number;
+} {
+  let currentTime = 0;
+  let nextId = 1;
+  let callbacks = 0;
+  const tasks = new Map<
+    number,
+    { readonly deadline: number; readonly callback: () => void }
+  >();
+  return {
+    now: () => currentTime,
+    setTimeout(callback, delayMs) {
+      const id = nextId++;
+      tasks.set(id, { deadline: currentTime + delayMs, callback });
+      return id;
+    },
+    clearTimeout(handle) {
+      if (typeof handle === "number") tasks.delete(handle);
+    },
+    advanceBy(milliseconds) {
+      currentTime += milliseconds;
+      while (true) {
+        const due = [...tasks.entries()]
+          .filter(([, task]) => task.deadline <= currentTime)
+          .sort(
+            ([leftId, left], [rightId, right]) =>
+              left.deadline - right.deadline || leftId - rightId,
+          )[0];
+        if (!due) return;
+        tasks.delete(due[0]);
+        callbacks += 1;
+        due[1].callback();
+      }
+    },
+    pendingCount: () => tasks.size,
+    callbackCount: () => callbacks,
   };
 }
 

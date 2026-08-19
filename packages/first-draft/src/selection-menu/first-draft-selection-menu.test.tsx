@@ -186,6 +186,11 @@ describe("FirstDraftSelectionMenu", () => {
         "data-first-draft-selection-menu",
       ),
     ).toBe("true");
+    expect(
+      screen.getByLabelText("Text formatting").getAttribute(
+        "data-editor-preserve-selection",
+      ),
+    ).toBe("true");
     expect(screen.getByLabelText("Bold").getAttribute("aria-pressed")).toBe(
       "false",
     );
@@ -264,6 +269,11 @@ describe("FirstDraftSelectionMenu", () => {
     expect(document.activeElement).toBe(link);
 
     fireEvent.click(link);
+    expect(
+      screen
+        .getByLabelText("Edit link")
+        .getAttribute("data-editor-preserve-selection"),
+    ).toBe("true");
     fireEvent.keyDown(screen.getByLabelText("URL"), { key: "Escape" });
     expect(screen.queryByRole("form", { name: "Edit link" })).toBeNull();
     expect(document.activeElement).toBe(link);

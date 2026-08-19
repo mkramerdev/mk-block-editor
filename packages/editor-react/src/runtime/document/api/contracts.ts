@@ -240,9 +240,9 @@ export interface InitializeEditorImplementationOptions {
       }
     | { readonly ok: false };
   /**
-   * Operation-coordinator scope used while a text focus request creates its
-   * canonical anchor and installs the active presentation. Low-level anchor
-   * codecs never acquire content themselves.
+   * Operation-coordinator scope used while text focus or history preparation
+   * resolves and creates canonical anchors. Low-level anchor codecs never
+   * acquire content themselves.
    */
   acquireTextContentAccess?: (blockId: BlockId) => (() => void) | null;
   maximumHistoryEntries?: number;

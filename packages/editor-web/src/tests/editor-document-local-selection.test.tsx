@@ -213,6 +213,41 @@ describe("editor-owned standalone selection publication", () => {
     editor.dispose();
   });
 
+  it("clears a block-internal selection when a primary pointer leaves its subsystem", () => {
+    const onChange = vi.fn();
+    const onStandaloneSettlement = vi.fn();
+    const editor = initializeEditableEditor({
+      definition: internalSelectionDefinition,
+      snapshot: createTestEditorSnapshot([{ id: firstId, type: "divider" }]),
+      onChange,
+    });
+    editor.selectionController.subscribeStandaloneSettlements(
+      onStandaloneSettlement,
+    );
+    const view = render(<EditorDocument editor={editor} />);
+    const internalControl = view.getByTestId("commit-internal-selection");
+    fireEvent.pointerDown(internalControl, { button: 0, pointerId: 71 });
+    fireEvent.click(internalControl);
+    expect(editor.selectionController.getCanonicalSnapshot()).toMatchObject({
+      kind: "block-internal",
+    });
+    onStandaloneSettlement.mockClear();
+    const outside = document.createElement("button");
+    document.body.append(outside);
+
+    fireEvent.pointerDown(outside, { button: 0, pointerId: 72 });
+
+    expect(editor.selectionController.getCanonicalSnapshot()).toMatchObject({
+      kind: "none",
+    });
+    expect(onStandaloneSettlement).toHaveBeenCalledOnce();
+    expect(onStandaloneSettlement).toHaveBeenCalledWith({ kind: "none" });
+    expect(onChange).not.toHaveBeenCalled();
+    outside.remove();
+    view.unmount();
+    editor.dispose();
+  });
+
   it("publishes an explicit standalone none when local selection is cleared", () => {
     const onChange = vi.fn();
     const onStandaloneSettlement = vi.fn();

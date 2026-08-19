@@ -210,6 +210,7 @@ export function FirstDraftMentionMenu({
       aria-label="Mention people"
       aria-activedescendant={activeOptionId}
       data-editor-ui="true"
+      data-editor-preserve-selection="true"
       data-first-draft-mention-menu="true"
       data-first-draft-mention-session-id={mentionSession.id}
       data-first-draft-mention-source-block={mentionSession.blockId}

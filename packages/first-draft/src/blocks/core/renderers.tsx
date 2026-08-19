@@ -24,6 +24,10 @@ import {
   useSetHoveredFirstDraftBlockId,
 } from "../../block-controls/index.ts";
 import { useCollapsed } from "../view-state.tsx";
+import {
+  OrderedListNumberingProvider,
+  useOrderedListItemOrdinal,
+} from "./ordered-list-numbering.tsx";
 
 type Props = FirstDraftBlockRendererProps;
 
@@ -77,6 +81,11 @@ export function ListItemRenderer({ block, editor, children }: Props) {
   const setHoveredBlockId = useSetHoveredFirstDraftBlockId();
   const delegatedIds = useDelegatedIds(block.id, primaryBlock?.id);
   const ordered = block.type === "orderedListItem";
+  const ordinal = useOrderedListItemOrdinal(
+    block.id,
+    block.parentId ?? null,
+    ordered,
+  );
   return (
     <>
       <FirstDraftBlockChrome
@@ -97,15 +106,27 @@ export function ListItemRenderer({ block, editor, children }: Props) {
           )
         }
       >
-        <span className="list-item-block__marker" aria-hidden="true" />
+        <span className="list-item-block__marker" aria-hidden="true">
+          {ordinal === null ? null : `${ordinal}.`}
+        </span>
         <div className="list-item-block__content">{elements}</div>
       </div>
     </>
   );
 }
 
-export function ListContainerRenderer({ children }: Props): ReactNode {
-  return children;
+export function ListContainerRenderer({
+  block,
+  editor,
+  children,
+}: Props): ReactNode {
+  return block.type === "orderedList" ? (
+    <OrderedListNumberingProvider containerId={block.id} editor={editor}>
+      {children}
+    </OrderedListNumberingProvider>
+  ) : (
+    children
+  );
 }
 
 export function ChecklistContainerRenderer({ children }: Props): ReactNode {

@@ -1361,7 +1361,11 @@ describe("First Draft ephemeral presence", () => {
       clientId: "client-b",
       sessionId: "session-b",
     };
+    expect(
+      editor.focusText(textBlockId, { offset: 2, preventScroll: true }),
+    ).toEqual({ status: "pending" });
     const canonicalBefore = editor.selectionController.getCanonicalSnapshot();
+    expect(canonicalBefore).toMatchObject({ kind: "document" });
     const textBefore = editor.readBlockPlainText(textBlockId, "paragraph");
     const framesBeforeRemoteSelections = socket.frames.length;
     socket.receive(
@@ -1406,6 +1410,23 @@ describe("First Draft ephemeral presence", () => {
         blockId: "fd-table",
       });
     }
+    socket.receive(
+      encodeFirstDraftMessage({
+        type: "first-draft-selection-snapshot",
+        documentId: "document-one",
+        selections: [],
+      }),
+    );
+    expect(editor.additionalSelections.getSnapshot()).toEqual([
+      expect.objectContaining({
+        active: false,
+        resolution: "inactive",
+        resolvedSelection: null,
+      }),
+    ]);
+    expect(editor.selectionController.getCanonicalSnapshot()).toBe(
+      canonicalBefore,
+    );
     socket.receive(
       encodeFirstDraftMessage({
         type: "first-draft-selection-update",

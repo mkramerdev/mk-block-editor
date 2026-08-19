@@ -296,7 +296,7 @@ describe("First Draft semantic block-control ownership", () => {
 });
 
 describe("First Draft canonical plus insertion", () => {
-  it("keeps every grip event inert against document and selection state", () => {
+  it("keeps grip events content-inert while primary pointer-down clears selection", () => {
     const onChange = vi.fn();
     const fixture = renderFirstDraft({ onChange });
     const sourceId = id("fd-paragraph-intro");
@@ -312,8 +312,10 @@ describe("First Draft canonical plus insertion", () => {
     const sourceTextRoot = fixture.editor.readActiveTextView()!.dom;
     expect(sourceProjection.hidden).toBe(true);
     const rootsBefore = fixture.editor.getRootBlockIds();
-    const selectionBefore =
-      fixture.editor.selectionController.getCanonicalSnapshot();
+    const selectionSettlements = vi.fn();
+    fixture.editor.selectionController.subscribeStandaloneSettlements(
+      selectionSettlements,
+    );
     fireEvent.pointerMove(sourceTextRoot);
     const grip = singleControls(fixture.container)!.querySelector<HTMLElement>(
       ".first-draft-block-drag-handle",
@@ -326,10 +328,11 @@ describe("First Draft canonical plus insertion", () => {
     fireEvent.keyDown(grip, { key: "Enter" });
 
     expect(fixture.editor.getRootBlockIds()).toEqual(rootsBefore);
-    expect(fixture.editor.selectionController.getCanonicalSnapshot()).toEqual(
-      selectionBefore,
+    expect(fixture.editor.selectionController.getCanonicalSnapshot()).toMatchObject(
+      { kind: "none" },
     );
-    expect(document.activeElement).toBe(sourceTextRoot);
+    expect(selectionSettlements).toHaveBeenCalledOnce();
+    expect(selectionSettlements).toHaveBeenCalledWith({ kind: "none" });
     expect(onChange).not.toHaveBeenCalled();
   });
 

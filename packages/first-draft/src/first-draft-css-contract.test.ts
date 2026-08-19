@@ -50,4 +50,20 @@ describe("First Draft text focus ownership", () => {
     expect(editorDocument).not.toMatch(/overflow-y:\s*(?:auto|scroll)/u);
     expect(css).not.toContain("first-draft-block-hover-tracker");
   });
+
+  it("keeps custom ordered markers without CSS-counter numbering", () => {
+    expect(css).not.toContain("counter-reset: first-draft-ordered-list-item");
+    expect(css).not.toContain(
+      "counter-increment: first-draft-ordered-list-item",
+    );
+    expect(css).not.toContain(
+      'content: counter(first-draft-ordered-list-item) "."',
+    );
+    expect(css).toMatch(
+      /\.first-draft-example\s+\.list-item-block__marker\s*\{[\s\S]*?user-select:\s*none/u,
+    );
+    expect(css).toMatch(
+      /\.first-draft-example[\s\S]*?\[data-list-kind="ordered"\][\s\S]*?>\s*\.list-item-block__marker\s*\{[\s\S]*?font-variant-numeric:\s*tabular-nums/u,
+    );
+  });
 });

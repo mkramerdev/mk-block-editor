@@ -195,6 +195,7 @@ function EditableFirstDraftSelectionMenu({
       role="toolbar"
       aria-label="Text formatting"
       data-editor-ui="true"
+      data-editor-preserve-selection="true"
       data-first-draft-selection-menu="true"
       data-placement={position?.placement}
       style={style}

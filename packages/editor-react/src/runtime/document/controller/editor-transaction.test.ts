@@ -443,6 +443,12 @@ function createTestEditor(
             affinity: point.affinity,
           }),
     createSelectionTextAnchor: (input) => {
+      if (
+        options.selectionAnchorRequiresContentAccess &&
+        !contentAccessCounts.has(input.blockId)
+      ) {
+        return { ok: false as const };
+      }
       if (options.selectionAnchorRuntime) {
         return options.selectionAnchorRuntime.create(input);
       }
@@ -2329,6 +2335,7 @@ describe("EditorImplementation active transaction", () => {
       ]),
       materializeAppliedBlocks: true,
       selectionAnchorRuntime: anchorRuntime,
+      selectionAnchorRequiresContentAccess: true,
       onCanonicalCommit: (commit) => commits.push(commit),
     });
     const standaloneSelections: unknown[] = [];
@@ -2341,7 +2348,7 @@ describe("EditorImplementation active transaction", () => {
     });
     expect(
       fixture.editor.selectionController.commitCanonicalSelection(
-        anchorRuntime.selection(right.id, 0, "backward"),
+        anchorRuntime.selection(right.id, 0, null),
         fixture.editor,
         fixture.editor.getSelectionGraphRevision(),
         { publication: { kind: "standalone-local" }, cause: "keyboard" },
@@ -2360,6 +2367,13 @@ describe("EditorImplementation active transaction", () => {
     expect(fixture.editor.getRootBlockIds()).toEqual([left.id]);
     expect(readContentText(fixture, left.id)).toBe("AlphaBravo");
     expect(fixture.editor.getBlock(right.id)).toBeNull();
+    expect(fixture.acquireTextContentAccess).toHaveBeenCalledWith(right.id);
+    expect(
+      fixture.acquireTextContentAccess.mock.calls.filter(
+        ([blockId]) => blockId === right.id,
+      ),
+    ).toHaveLength(1);
+    expect(fixture.readTextContentAccessCount(right.id)).toBe(0);
     expect(transactionSelectionOffsets(commits[0]!)).toEqual({
       before: { blockId: right.id, offset: 0 },
       after: { blockId: left.id, offset: 5 },
@@ -2387,6 +2401,7 @@ describe("EditorImplementation active transaction", () => {
     expect(commits[0]).not.toHaveProperty("optimisticState");
     expect(commits[0]).not.toHaveProperty("blockSlice");
     expect(standaloneSelections).toHaveLength(1);
+    expect(fixture.readTextContentAccessCount(right.id)).toBe(0);
     const recorded = (
       fixture.editor as unknown as {
         readonly history: readonly EditorHistoryEntry[];

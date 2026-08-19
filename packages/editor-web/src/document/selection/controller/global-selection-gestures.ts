@@ -37,6 +37,7 @@ import { createEditorDocumentInputRouting } from "../../../runtime/keybindings/d
 import type { EditorBlockDomRegistryReader } from "../../blocks/block-dom-registry.ts";
 import { registerDocumentInteractionOwner } from "../../interaction/document-interaction-router.ts";
 import { routeEditorDocumentKeydown } from "../../interaction/document-layer-keydown-routing.ts";
+import { pointerEventPreservesEditorSelection } from "../../interaction/interactive-targets.ts";
 import {
   resolveEditorSelectionPointerHit,
   type EditorSelectionPointerHit,
@@ -260,6 +261,22 @@ export function useGlobalSelectionGestures({
       setTextSelectionDragActive(list, false);
       if (endedSelectionDrag) onSelectionDragEnd?.(endedSelectionDrag);
     };
+    const clearSelectionForPointer = () => {
+      finishPointer();
+      selectionController.resetKeyboardNavigation();
+      clearKeyboardSelectionActive(list);
+      list.dataset.editorCanonicalSelectionClearPending = "true";
+      try {
+        selectionController.clearSelection({
+          publication: { kind: "standalone-local" },
+          cause: "pointer",
+        });
+        if (editor.editable) editor.blurEditor();
+        clearNativeSelection(doc);
+      } finally {
+        delete list.dataset.editorCanonicalSelectionClearPending;
+      }
+    };
     const beginActiveDrag = (resource: BrowserPointerResource): boolean => {
       if (
         !editor.editable ||
@@ -286,21 +303,33 @@ export function useGlobalSelectionGestures({
     const pointerdown = (event: PointerEvent) => {
       suppressCompletedDragClick = false;
       if (pointer) finishPointer();
-      if (
-        !editor.editable ||
-        event.button !== 0 ||
-        isPointerEventFromEditorInteractiveControl(event, list)
-      )
-        return;
+      if (event.button !== 0) return;
+      if (pointerEventPreservesEditorSelection(event)) return;
       const target = pointerEventTargetElement(event);
-      if (!target || !list.contains(target)) return;
+      if (!target || !list.contains(target)) {
+        clearSelectionForPointer();
+        return;
+      }
       if (
-        target.closest('[data-editor-block-internal-selection-host="true"]')
+        pointerEventPathMatches(
+          event,
+          '[data-editor-block-internal-selection-host="true"]',
+        )
       ) {
         return;
       }
+      if (
+        !editor.editable ||
+        isPointerEventFromEditorInteractiveControl(event, list)
+      ) {
+        clearSelectionForPointer();
+        return;
+      }
       const hit = resolveHit(event.target, event.clientX, event.clientY, true);
-      if (!hit) return;
+      if (!hit) {
+        clearSelectionForPointer();
+        return;
+      }
       const graphRevision = editor.getSelectionGraphRevision();
       const candidate = pointerCandidateFromHit(
         hit,
@@ -540,9 +569,17 @@ export function useGlobalSelectionGestures({
       if (doc.visibilityState === "hidden") documentLoss();
     };
     const releaseInteractionOwner = () => {
-      finishPointer();
-      if (editor.editable) editor.blurEditor();
-      clearNativeSelection(doc);
+      clearSelectionForPointer();
+    };
+    const interactionOwnerPointerdown = (event: PointerEvent) => {
+      if (
+        event.button !== 0 ||
+        pointerEventPreservesEditorSelection(event) ||
+        pointerEventPathContains(event, list)
+      ) {
+        return;
+      }
+      clearSelectionForPointer();
     };
     const keydown = (event: KeyboardEvent) => {
       const eventTarget = event.target instanceof Element ? event.target : null;
@@ -688,6 +725,7 @@ export function useGlobalSelectionGestures({
         committedSelectionIsNoncollapsed(
           selectionController.getCommittedSnapshot(),
         ) &&
+        !event.isComposing &&
         !event.shiftKey &&
         !event.altKey &&
         !event.ctrlKey &&
@@ -703,6 +741,8 @@ export function useGlobalSelectionGestures({
         ) {
           return;
         }
+        event.preventDefault();
+        event.stopPropagation();
         const result = editor.executeStructuralRangeDeletion(capture.range, {
           intent: "delete",
           provenance: null,
@@ -711,8 +751,6 @@ export function useGlobalSelectionGestures({
             editor.definition.selectionFragment?.resolveVisibleChildBlockIds,
         });
         if (!result.ok) return;
-        event.preventDefault();
-        event.stopPropagation();
         return;
       }
       if (
@@ -934,7 +972,7 @@ export function useGlobalSelectionGestures({
     const unregisterInteractionOwner = registerDocumentInteractionOwner(doc, {
       list,
       releaseInteraction: releaseInteractionOwner,
-      pointerdown: () => undefined,
+      pointerdown: interactionOwnerPointerdown,
       pointermove,
       pointerup,
       pointercancel,
@@ -989,6 +1027,23 @@ export function useGlobalSelectionGestures({
     selectionController,
     shouldPublishSelectionDrag,
   ]);
+}
+
+function pointerEventPathContains(event: Event, element: Element): boolean {
+  const path = event.composedPath?.() ?? [];
+  if (path.includes(element)) return true;
+  const target = pointerEventTargetElement(event);
+  return Boolean(target && element.contains(target));
+}
+
+function pointerEventPathMatches(event: Event, selector: string): boolean {
+  const path = event.composedPath?.() ?? [];
+  if (
+    path.some((target) => target instanceof Element && target.matches(selector))
+  ) {
+    return true;
+  }
+  return Boolean(pointerEventTargetElement(event)?.closest(selector));
 }
 
 function materializeSelectionDragSnapshot(

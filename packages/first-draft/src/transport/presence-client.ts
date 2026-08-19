@@ -201,6 +201,9 @@ export function attachFirstDraftPresence(
       return;
     }
     if (message.type === "first-draft-selection-snapshot") {
+      // The server snapshot is the authoritative set of currently leased
+      // remote selections. Replacing this map removes expired presence without
+      // touching the editor's canonical/local selection controller.
       selections.clear();
       for (const selection of message.selections) {
         selections.set(subjectKey(selection.subject), selection);
