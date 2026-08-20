@@ -44,6 +44,7 @@ export { createEditorSelectionDragDiagnosticPayload } from "../selection/control
 export { validateEditorSelectionInvalidation } from "../selection/controller/invalidation.ts";
 export { blockInternalSelectionSubsystemId } from "../selection/model/types.ts";
 export {
+  editorStableSelectionsEqual,
   projectCanonicalSelectionToStable,
   projectCanonicalSelectionToTransaction,
   projectTransactionSelectionToStable,

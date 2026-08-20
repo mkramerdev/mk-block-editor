@@ -5,6 +5,12 @@ Draft collaborative example. In development it listens at
 `http://127.0.0.1:4455`; clients connect to
 `ws://127.0.0.1:4455/editor-realtime`.
 
+This is an anonymous public-demo collaboration service. A client declares its
+actor, client, session, and document identity in the initial protocol frame.
+The service binds the socket to that session, enforces message consistency,
+and isolates document rooms. It does not authenticate users or provide access
+control, so it must only expose data intended for public demonstration.
+
 ## Configuration
 
 The default development PostgreSQL connection is
@@ -16,15 +22,6 @@ The default development PostgreSQL connection is
 - `EDITOR_DOCUMENT_POSTGRES_URL`
 - `EDITOR_REALTIME_HOST`
 - `EDITOR_REALTIME_PORT`
-- `EDITOR_REALTIME_AUTH_MODE`
-- `EDITOR_REALTIME_DEV_SHARED_TOKEN`
-- `EDITOR_REALTIME_JWKS_URL`
-- `EDITOR_REALTIME_JWT_ISSUER`
-- `EDITOR_REALTIME_JWT_AUDIENCE`
-
-Development defaults to `EDITOR_REALTIME_AUTH_MODE=dev-shared` and token
-`dev-editor-realtime-token`. The `jwt-jwks` values are parsed, but the current
-JWT/JWKS authenticator is not implemented and rejects connections.
 
 ## Run locally
 
@@ -34,7 +31,7 @@ From the repository root:
 pnpm install
 docker compose up -d editor-db
 pnpm db:reset:first-draft
-pnpm --filter @repo/editor-realtime dev
+pnpm dev:realtime
 ```
 
 The reset command recreates the local database, installs the schema, and seeds

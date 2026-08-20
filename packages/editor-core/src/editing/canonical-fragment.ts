@@ -42,6 +42,7 @@ export interface CanonicalBlockFragment {
 }
 
 export interface CreateCanonicalBlockRecordOptions {
+  readonly id?: BlockId;
   readonly type: BlockType;
   readonly parentId?: BlockId | null;
   readonly metadata?: JsonObject;
@@ -90,11 +91,17 @@ export interface MaterializedCanonicalBlockCreation {
   readonly selectionBlockId: BlockId | null;
 }
 
+export interface ReidentifyCanonicalBlockFragmentOptions extends CanonicalFragmentValidationOptions {
+  readonly fragment: CanonicalBlockFragment;
+  readonly allocateBlockId: () => BlockId;
+}
+
 /** Creates one detached canonical record with an ordinary newly allocated block ID. */
 export function createCanonicalBlockRecord(
   options: CreateCanonicalBlockRecordOptions,
 ): CanonicalBlockRecord {
   const block = createBlockRecord({
+    ...(options.id === undefined ? {} : { id: options.id }),
     type: options.type,
     parentId: options.parentId,
     metadata: options.metadata,
@@ -128,6 +135,67 @@ export function createCanonicalBlockFragment(
   };
   assertValidCanonicalBlockFragment(fragment, options);
   return fragment;
+}
+
+/**
+ * Reidentifies detached structure for one destination-owned insertion attempt.
+ * Content and metadata remain immutable shared values; only structural identity
+ * records and fragment boundaries are replaced.
+ */
+export function reidentifyCanonicalBlockFragment(
+  options: ReidentifyCanonicalBlockFragmentOptions,
+): CanonicalBlockFragment {
+  assertValidCanonicalBlockFragment(options.fragment, options);
+  const sourceIds = new Set(options.fragment.blocks.map((block) => block.id));
+  const allocatedIds = new Set<BlockId>();
+  const mappedIds = new Map<BlockId, BlockId>();
+  for (const block of options.fragment.blocks) {
+    const allocated = options.allocateBlockId();
+    if (sourceIds.has(allocated)) {
+      throw new Error(
+        `fragment reidentification reused source block id ${allocated}`,
+      );
+    }
+    if (allocatedIds.has(allocated)) {
+      throw new Error(
+        `fragment reidentification allocated duplicate block id ${allocated}`,
+      );
+    }
+    allocatedIds.add(allocated);
+    mappedIds.set(block.id, allocated);
+  }
+
+  const mapId = (sourceId: BlockId): BlockId => {
+    const mapped = mappedIds.get(sourceId);
+    if (!mapped) {
+      throw new Error(
+        `fragment reidentification cannot map missing block ${sourceId}`,
+      );
+    }
+    return mapped;
+  };
+  const blocks = options.fragment.blocks.map(
+    (block): CanonicalBlockRecord => ({
+      ...block,
+      id: mapId(block.id),
+      parentId: block.parentId === null ? null : mapId(block.parentId),
+    }),
+  );
+  return createCanonicalBlockFragment({
+    blocks,
+    rootBlockIds: options.fragment.rootBlockIds.map(mapId),
+    start: {
+      ...options.fragment.start,
+      blockId: mapId(options.fragment.start.blockId),
+    },
+    end: {
+      ...options.fragment.end,
+      blockId: mapId(options.fragment.end.blockId),
+    },
+    ...(options.blockDefinitions
+      ? { blockDefinitions: options.blockDefinitions }
+      : {}),
+  });
 }
 
 /**

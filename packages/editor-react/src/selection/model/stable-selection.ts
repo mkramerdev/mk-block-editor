@@ -1,4 +1,8 @@
-import { cloneJsonValue, type JsonValue } from "@repo/editor-core/kernel";
+import {
+  cloneJsonValue,
+  jsonValuesEqual,
+  type JsonValue,
+} from "@repo/editor-core/kernel";
 import { isEditorSelectionTextAnchor } from "../anchors/text-anchor.ts";
 import type { CanonicalLocalSelection } from "./canonical-selection.ts";
 import type {
@@ -8,6 +12,57 @@ import type {
   StableDocumentSelectionPoint,
   TransactionDocumentSelectionPoint,
 } from "./types.ts";
+
+export function editorStableSelectionsEqual(
+  left: EditorStableSelection,
+  right: EditorStableSelection,
+): boolean {
+  if (left.kind !== right.kind) return false;
+  if (left.kind === "none" || right.kind === "none") return true;
+  if (left.selection.kind !== right.selection.kind) return false;
+  if (
+    left.selection.kind === "block-internal" ||
+    right.selection.kind === "block-internal"
+  ) {
+    if (
+      left.selection.kind !== "block-internal" ||
+      right.selection.kind !== "block-internal"
+    ) {
+      return false;
+    }
+    return (
+      left.selection.blockId === right.selection.blockId &&
+      left.selection.subsystem === right.selection.subsystem &&
+      jsonValuesEqual(left.selection.payload, right.selection.payload)
+    );
+  }
+  return (
+    left.selection.direction === right.selection.direction &&
+    stableDocumentPointsEqual(left.selection.anchor, right.selection.anchor) &&
+    stableDocumentPointsEqual(left.selection.focus, right.selection.focus)
+  );
+}
+
+function stableDocumentPointsEqual(
+  left: StableDocumentSelectionPoint,
+  right: StableDocumentSelectionPoint,
+): boolean {
+  if (left.kind !== right.kind) return false;
+  if (left.kind === "block" || right.kind === "block") {
+    return (
+      left.kind === "block" &&
+      right.kind === "block" &&
+      left.blockId === right.blockId &&
+      left.surface === right.surface
+    );
+  }
+  return (
+    left.blockId === right.blockId &&
+    left.textOffset === right.textOffset &&
+    left.affinity === right.affinity &&
+    jsonValuesEqual(left.textAnchor, right.textAnchor)
+  );
+}
 
 export function projectCanonicalSelectionToStable(
   canonical: CanonicalLocalSelection,

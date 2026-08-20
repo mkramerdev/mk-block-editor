@@ -256,6 +256,8 @@ describe("canonical structural edit composition", () => {
   it("preserves a wrapper whose open text boundary belongs to a descendant", () => {
     const graph = graphWithText("LR");
     const fragment = wrappedTextFragment("I");
+    const suffixId = "destination-owned-suffix" as BlockId;
+    const allocateBlockId = vi.fn(() => suffixId);
     const result = resolveCanonicalEditComposition({
       graph,
       target: {
@@ -266,8 +268,10 @@ describe("canonical structural edit composition", () => {
         expectedContentVersion: "1",
       },
       fragment,
+      allocateBlockId,
     });
 
+    expect(allocateBlockId).toHaveBeenCalledOnce();
     expect(result?.joins).toBeUndefined();
     expect(result?.insertions?.[0]?.fragment.rootBlockIds).toHaveLength(2);
     expect(result?.insertions?.[0]?.fragment.blocks).toEqual(
@@ -275,6 +279,7 @@ describe("canonical structural edit composition", () => {
         expect.objectContaining({ type: "collection" }),
         expect.objectContaining({ type: "collectionText", plainText: "I" }),
         expect.objectContaining({
+          id: suffixId,
           type: "paragraph",
           parentId: null,
           plainText: "R",

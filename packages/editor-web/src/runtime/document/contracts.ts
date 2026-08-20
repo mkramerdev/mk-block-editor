@@ -275,6 +275,7 @@ export interface EditorReadRuntime {
   getParentId(blockId: BlockId): BlockId | null;
   getRootBlockIds(): readonly BlockId[];
   getChildBlockIds(parentId: BlockId): readonly BlockId[];
+  getDirectChildBlocks(parentId: BlockId): readonly VersionedBlock[];
   getLastChildBlockId(parentId: BlockId | null): BlockId | null;
   readBlockSelectionModel(blockId: BlockId): BlockSelectionModel | null;
   readBlockContent(
@@ -284,6 +285,10 @@ export interface EditorReadRuntime {
   subscribeBlock(blockId: BlockId, listener: () => void): () => void;
   subscribeRootBlockIds(listener: () => void): () => void;
   subscribeChildBlockIds(parentId: BlockId, listener: () => void): () => void;
+  subscribeDirectChildBlocks(
+    parentId: BlockId,
+    listener: () => void,
+  ): () => void;
   applyRemoteTransaction(
     transaction: RemoteEditorTransaction,
   ): RemoteTransactionResult;

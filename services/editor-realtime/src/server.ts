@@ -4,13 +4,14 @@ import {
   type Server as HttpServer,
   type ServerResponse,
 } from "node:http";
-import { isDeepStrictEqual } from "node:util";
 import {
   decodeFirstDraftMessage,
   encodeFirstDraftMessage,
+  firstDraftParticipantPresencesEqual,
+  firstDraftSelectionPresencesEqual,
+  firstDraftSelectionValuesEqual,
   FIRST_DRAFT_PROTOCOL_VERSION,
   MAX_FIRST_DRAFT_FRAME_BYTES,
-  type ConnectFirstDraftSessionMessage,
   type FirstDraftAcceptedTransactionReplayMessage,
   type FirstDraftCollaborationSubject,
   type FirstDraftParticipantPresence,
@@ -27,10 +28,6 @@ import {
 } from "@repo/editor-first-draft/server";
 import { WebSocket, WebSocketServer } from "ws";
 import {
-  createEditorRealtimeAuthenticator,
-  type EditorRealtimeAuthenticator,
-} from "./auth.ts";
-import {
   loadEditorRealtimeConfig,
   type EditorRealtimeConfig,
 } from "./config.ts";
@@ -46,7 +43,7 @@ export interface EditorRealtimeTimeoutScheduler {
 
 interface ClientState {
   readonly socket: WebSocket;
-  phase: "awaiting-session" | "authenticating" | "active";
+  phase: "awaiting-session" | "active";
   session: FirstDraftSessionIdentity | null;
   subscribed: boolean;
   subscriptionLoading: boolean;
@@ -98,7 +95,6 @@ export interface CreateEditorRealtimeServerOptions {
   readonly documentLoader: FirstDraftDocumentLoader;
   readonly readiness?: EditorRealtimeReadiness;
   readonly config?: EditorRealtimeConfig;
-  readonly authenticator?: EditorRealtimeAuthenticator;
   readonly selectionPresenceScheduler?: EditorRealtimeTimeoutScheduler;
   readonly onProtocolDiagnostic?: (
     diagnostic: EditorRealtimeProtocolDiagnostic,
@@ -121,8 +117,6 @@ export async function startEditorRealtimeServer(
 ): Promise<EditorRealtimeServer> {
   await options.readiness?.assertReady();
   const config = options.config ?? loadEditorRealtimeConfig();
-  const authenticator =
-    options.authenticator ?? createEditorRealtimeAuthenticator(config);
   const selectionPresenceScheduler =
     options.selectionPresenceScheduler ?? systemTimeoutScheduler;
   const clients = new Set<ClientState>();
@@ -163,7 +157,6 @@ export async function startEditorRealtimeServer(
         state,
         data,
         isBinary,
-        authenticator,
         selectionPresenceScheduler,
         rooms,
         persistence: options.persistence,
@@ -215,7 +208,6 @@ async function handleSocketMessage(input: {
   readonly state: ClientState;
   readonly data: WebSocket.RawData;
   readonly isBinary: boolean;
-  readonly authenticator: EditorRealtimeAuthenticator;
   readonly selectionPresenceScheduler: EditorRealtimeTimeoutScheduler;
   readonly rooms: Map<string, DocumentRoom>;
   readonly persistence: FirstDraftTransactionPersistence;
@@ -253,11 +245,9 @@ async function handleSocketMessage(input: {
   }
 
   if (state.phase !== "active") {
-    await establishSession({
+    establishSession({
       state,
       frame,
-      authenticator: input.authenticator,
-      rooms: input.rooms,
       onProtocolDiagnostic: input.onProtocolDiagnostic,
     });
     return;
@@ -268,7 +258,7 @@ async function handleSocketMessage(input: {
     reportProtocolError({
       state,
       code: "invalid-session-state",
-      message: "Authenticated session identity is unavailable",
+      message: "Established session identity is unavailable",
       fatal: true,
       onProtocolDiagnostic: input.onProtocolDiagnostic,
     });
@@ -327,7 +317,7 @@ async function handleSocketMessage(input: {
         : "document-subscription-required",
       message: state.subscribed
         ? "The message variant is not valid from a First Draft client"
-        : "Subscribe to the authenticated document before publishing realtime state",
+        : "Subscribe to the established session document before publishing realtime state",
       fatal: false,
       onProtocolDiagnostic: input.onProtocolDiagnostic,
     });
@@ -438,25 +428,13 @@ function startPersistence(input: {
   input.inFlightPersistence.add(tail);
 }
 
-async function establishSession(input: {
+function establishSession(input: {
   readonly state: ClientState;
   readonly frame: Uint8Array;
-  readonly authenticator: EditorRealtimeAuthenticator;
-  readonly rooms: Map<string, DocumentRoom>;
   readonly onProtocolDiagnostic?: (
     diagnostic: EditorRealtimeProtocolDiagnostic,
   ) => void;
-}): Promise<void> {
-  if (input.state.phase === "authenticating") {
-    reportProtocolError({
-      state: input.state,
-      code: "authentication-in-progress",
-      message: "The First Draft session handshake is still being authenticated",
-      fatal: true,
-      onProtocolDiagnostic: input.onProtocolDiagnostic,
-    });
-    return;
-  }
+}): void {
   const decoded = decodeFirstDraftMessage(input.frame);
   if (!decoded.ok || decoded.message.type !== "connect-first-draft-session") {
     reportProtocolError({
@@ -470,27 +448,13 @@ async function establishSession(input: {
     });
     return;
   }
-  input.state.phase = "authenticating";
-  const connection = decoded.message satisfies ConnectFirstDraftSessionMessage;
-  const authentication =
-    await input.authenticator.authenticateAndAuthorizeSession(connection);
-  if (!authentication.ok) {
-    reportProtocolError({
-      state: input.state,
-      code: authentication.code,
-      message: authentication.message,
-      fatal: true,
-      onProtocolDiagnostic: input.onProtocolDiagnostic,
-    });
-    return;
-  }
   if (input.state.finalized) return;
   input.state.phase = "active";
   input.state.session = Object.freeze({
-    actorId: authentication.actorId,
-    clientId: authentication.clientId,
-    sessionId: authentication.sessionId,
-    documentId: authentication.documentId,
+    actorId: decoded.message.actorId,
+    clientId: decoded.message.clientId,
+    sessionId: decoded.message.sessionId,
+    documentId: decoded.message.documentId,
   });
   sendFirstDraftMessage(input.state.socket, {
     type: "first-draft-session-connected",
@@ -506,11 +470,11 @@ async function subscribeToDocument(
   selectionPresenceScheduler: EditorRealtimeTimeoutScheduler,
   onProtocolDiagnostic?: (diagnostic: EditorRealtimeProtocolDiagnostic) => void,
 ): Promise<void> {
-  if (!authorizedDocument(state, documentId)) {
+  if (!matchesSessionDocument(state, documentId)) {
     reportProtocolError({
       state,
-      code: "unauthorized-document",
-      message: "The authenticated session cannot subscribe to this document",
+      code: "session-document-mismatch",
+      message: "The established session cannot subscribe to another document",
       fatal: false,
       onProtocolDiagnostic,
     });
@@ -520,7 +484,7 @@ async function subscribeToDocument(
     reportProtocolError({
       state,
       code: "document-subscription-active",
-      message: "The authenticated session already has a document subscription",
+      message: "The established session already has a document subscription",
       fatal: false,
       onProtocolDiagnostic,
     });
@@ -627,7 +591,7 @@ function unsubscribeFromDocument(
   state: ClientState,
   documentId: string,
 ): void {
-  if (!authorizedDocument(state, documentId)) return;
+  if (!matchesSessionDocument(state, documentId)) return;
   removeSessionFromRoom(rooms, state);
   sendFirstDraftMessage(state.socket, {
     type: "first-draft-document-unsubscribed",
@@ -641,20 +605,22 @@ function applyParticipantUpdate(
   message: FirstDraftParticipantUpdateMessage,
   onProtocolDiagnostic?: (diagnostic: EditorRealtimeProtocolDiagnostic) => void,
 ): void {
-  if (!authorizeEphemeralMessage(state, message, onProtocolDiagnostic)) return;
+  if (!validateEphemeralSessionMessage(state, message, onProtocolDiagnostic))
+    return;
   const room = rooms.get(message.documentId);
   if (!room) return;
   const key = subjectKey(message.subject);
   const previous = room.participants.get(key);
-  if (previous && message.presenceRevision <= previous.presenceRevision) {
+  const next = {
+    subject: message.subject,
+    presenceRevision: message.presenceRevision,
+    active: message.active,
+    metadata: message.metadata,
+  } satisfies FirstDraftParticipantPresence;
+  if (previous && next.presenceRevision <= previous.presenceRevision) {
     if (
-      message.presenceRevision === previous.presenceRevision &&
-      JSON.stringify(message) !==
-        JSON.stringify({
-          type: message.type,
-          documentId: message.documentId,
-          ...previous,
-        })
+      next.presenceRevision === previous.presenceRevision &&
+      !firstDraftParticipantPresencesEqual(next, previous)
     ) {
       reportProtocolError({
         state,
@@ -666,12 +632,7 @@ function applyParticipantUpdate(
     }
     return;
   }
-  room.participants.set(key, {
-    subject: message.subject,
-    presenceRevision: message.presenceRevision,
-    active: message.active,
-    metadata: message.metadata,
-  });
+  room.participants.set(key, next);
   if (!message.active) removeSelectionPresence(room, key);
   broadcastMessage(room, state, message);
   if (message.active) sendSnapshots(state.socket, message.documentId, room);
@@ -684,18 +645,21 @@ function applySelectionUpdate(
   message: FirstDraftSelectionUpdateMessage,
   onProtocolDiagnostic?: (diagnostic: EditorRealtimeProtocolDiagnostic) => void,
 ): void {
-  if (!authorizeEphemeralMessage(state, message, onProtocolDiagnostic)) return;
+  if (!validateEphemeralSessionMessage(state, message, onProtocolDiagnostic))
+    return;
   const room = rooms.get(message.documentId);
   if (!room) return;
   const key = subjectKey(message.subject);
   const previous = room.selections.get(key);
-  if (
-    previous &&
-    message.selectionRevision <= previous.latest.selectionRevision
-  ) {
+  const next = {
+    subject: message.subject,
+    selectionRevision: message.selectionRevision,
+    selection: message.selection,
+  } satisfies FirstDraftSelectionPresence;
+  if (previous && next.selectionRevision <= previous.latest.selectionRevision) {
     if (
-      message.selectionRevision === previous.latest.selectionRevision &&
-      !isDeepStrictEqual(message.selection, previous.latest.selection)
+      next.selectionRevision === previous.latest.selectionRevision &&
+      !firstDraftSelectionPresencesEqual(next, previous.latest)
     ) {
       reportProtocolError({
         state,
@@ -707,14 +671,9 @@ function applySelectionUpdate(
     }
     return;
   }
-  const next = {
-    subject: message.subject,
-    selectionRevision: message.selectionRevision,
-    selection: message.selection,
-  } satisfies FirstDraftSelectionPresence;
   if (
     previous &&
-    isDeepStrictEqual(next.selection, previous.latest.selection)
+    firstDraftSelectionValuesEqual(next.selection, previous.latest.selection)
   ) {
     previous.latest = next;
     if (previous.active) broadcastMessage(room, state, message);
@@ -724,7 +683,7 @@ function applySelectionUpdate(
   broadcastMessage(room, state, message);
 }
 
-function authorizeEphemeralMessage(
+function validateEphemeralSessionMessage(
   state: ClientState,
   message: {
     readonly documentId: string;
@@ -734,20 +693,23 @@ function authorizeEphemeralMessage(
 ): boolean {
   const valid =
     state.subscribed &&
-    authorizedDocument(state, message.documentId) &&
+    matchesSessionDocument(state, message.documentId) &&
     sameSubject(state.session, message.subject);
   if (valid) return true;
   reportProtocolError({
     state,
-    code: "unauthorized-presence",
-    message: "Presence requires the authenticated subscribed session identity",
+    code: "presence-session-mismatch",
+    message: "Presence requires the established subscribed session identity",
     fatal: false,
     onProtocolDiagnostic,
   });
   return false;
 }
 
-function authorizedDocument(state: ClientState, documentId: string): boolean {
+function matchesSessionDocument(
+  state: ClientState,
+  documentId: string,
+): boolean {
   return state.session?.documentId === documentId;
 }
 

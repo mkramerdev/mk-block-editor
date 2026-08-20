@@ -1,5 +1,6 @@
 import { act, render, waitFor } from "@testing-library/react";
 import type { BlockId } from "@repo/editor-core/kernel";
+import { wholeSelection } from "@repo/editor-core/selection";
 import { blockTextCoordinateCodec } from "@repo/editor-dom/caret";
 import { createEditorLogicalSelectionPoint } from "@repo/editor-react/selection";
 import { describe, expect, it } from "vitest";
@@ -30,6 +31,16 @@ const readCopyDefinition = {
   defaultRoot: "paragraph",
   contentImport: { plainTextBlockType: "paragraph" },
 } satisfies typeof testReadEditorDefinition;
+const repeatedPasteDefinition = {
+  ...editableCopyDefinition,
+  blocks: {
+    ...editableCopyDefinition.blocks,
+    divider: {
+      ...editableCopyDefinition.blocks.divider!,
+      selection: wholeSelection(),
+    },
+  },
+} satisfies typeof testEditableEditorDefinition;
 
 describe("read-only canonical clipboard", () => {
   it("copies the same canonical fragment in read-only and editable modes", () => {
@@ -67,6 +78,158 @@ describe("read-only canonical clipboard", () => {
 });
 
 describe("editable canonical clipboard paste", () => {
+  it("reidentifies the same canonical payload for every destination-owned paste", () => {
+    const sourceFirst = "repeated-paste-source-first" as BlockId;
+    const sourceLast = "repeated-paste-source-last" as BlockId;
+    const firstTarget = "repeated-paste-target-one" as BlockId;
+    const secondTarget = "repeated-paste-target-two" as BlockId;
+    const editor = initializeEditableEditor({
+      definition: repeatedPasteDefinition,
+      snapshot: createTestEditorSnapshot([
+        { id: sourceFirst, type: "paragraph", text: "one" },
+        { id: sourceLast, type: "paragraph", text: "two" },
+        { id: firstTarget, type: "divider" },
+        { id: secondTarget, type: "divider" },
+      ]),
+    });
+    const runtime = editor as EditableEditorRuntimePort;
+    const rendered = render(<EditorDocument editor={editor} />);
+    act(() => settleTextRange(editor, sourceFirst, 0, sourceLast, 3));
+    const clipboard = new MemoryDataTransfer();
+    textRoot(rendered.container, sourceFirst).dispatchEvent(
+      clipboardEvent("copy", clipboard),
+    );
+
+    act(() => settleBlockSelection(editor, firstTarget));
+    const firstPaste = clipboardEvent("paste", clipboard);
+    act(() =>
+      blockShell(rendered.container, firstTarget).dispatchEvent(firstPaste),
+    );
+    expect(firstPaste.defaultPrevented).toBe(true);
+    const firstIds = editor
+      .getRootBlockIds()
+      .filter(
+        (blockId) => ![sourceFirst, sourceLast, secondTarget].includes(blockId),
+      );
+    expect(firstIds).toHaveLength(2);
+    expect(
+      firstIds.map((blockId) =>
+        editor.readBlockPlainText(blockId, "paragraph"),
+      ),
+    ).toEqual(["one", "two"]);
+
+    act(() => settleBlockSelection(editor, secondTarget));
+    const beforeSecondPaste = editor.getRootBlockIds();
+    const secondPaste = clipboardEvent("paste", clipboard);
+    act(() =>
+      blockShell(rendered.container, secondTarget).dispatchEvent(secondPaste),
+    );
+    expect(secondPaste.defaultPrevented).toBe(true);
+    const secondIds = editor
+      .getRootBlockIds()
+      .filter(
+        (blockId) =>
+          !beforeSecondPaste.includes(blockId) && blockId !== secondTarget,
+      );
+    expect(secondIds).toHaveLength(2);
+    expect(new Set([...firstIds, ...secondIds]).size).toBe(4);
+    expect(
+      secondIds.map((blockId) =>
+        editor.readBlockPlainText(blockId, "paragraph"),
+      ),
+    ).toEqual(["one", "two"]);
+    expectCanonicalCollapsedCaret(runtime, secondIds[1]!, 3);
+    expect(
+      (editor as unknown as { readonly history: readonly unknown[] }).history,
+    ).toHaveLength(2);
+
+    const committedSecondIds = [...secondIds];
+    act(() => expect(editor.undo()).toEqual({ status: "applied" }));
+    expect(editor.getRootBlockIds()).toEqual(beforeSecondPaste);
+    act(() => expect(editor.redo()).toEqual({ status: "applied" }));
+    expect(editor.getRootBlockIds()).toEqual(
+      expect.arrayContaining(committedSecondIds),
+    );
+    expect(
+      editor
+        .getRootBlockIds()
+        .filter((blockId) => committedSecondIds.includes(blockId)),
+    ).toEqual(committedSecondIds);
+
+    rendered.unmount();
+    editor.dispose();
+  });
+
+  it.each([
+    {
+      name: "plain text",
+      clipboard: { "text/html": "", "text/plain": "imported" },
+      expectedText: "imported",
+    },
+    {
+      name: "semantic HTML",
+      clipboard: {
+        "text/html": "<p>imported</p>",
+        "text/plain": "fallback",
+      },
+      expectedText: "imported",
+    },
+  ] satisfies readonly {
+    readonly name: string;
+    readonly clipboard: Readonly<Record<string, string>>;
+    readonly expectedText: string;
+  }[])(
+    "reidentifies repeated $name imports per paste attempt",
+    ({ clipboard, expectedText }) => {
+      const firstTarget = `repeated-${expectedText}-target-one` as BlockId;
+      const secondTarget = `repeated-${expectedText}-target-two` as BlockId;
+      const editor = initializeEditableEditor({
+        definition: repeatedPasteDefinition,
+        snapshot: createTestEditorSnapshot([
+          { id: firstTarget, type: "divider" },
+          { id: secondTarget, type: "divider" },
+        ]),
+      });
+      const rendered = render(<EditorDocument editor={editor} />);
+      const payload = new MemoryDataTransfer(clipboard);
+
+      act(() => settleBlockSelection(editor, firstTarget));
+      const firstPaste = clipboardEvent("paste", payload);
+      act(() =>
+        blockShell(rendered.container, firstTarget).dispatchEvent(firstPaste),
+      );
+      expect(firstPaste.defaultPrevented).toBe(true);
+      const firstId = editor
+        .getRootBlockIds()
+        .find((blockId) => blockId !== secondTarget);
+      if (!firstId) throw new Error("Expected first imported block");
+      expect(editor.readBlockPlainText(firstId, "paragraph")).toBe(
+        expectedText,
+      );
+
+      act(() => settleBlockSelection(editor, secondTarget));
+      const secondPaste = clipboardEvent("paste", payload);
+      act(() =>
+        blockShell(rendered.container, secondTarget).dispatchEvent(secondPaste),
+      );
+      expect(secondPaste.defaultPrevented).toBe(true);
+      const secondId = editor
+        .getRootBlockIds()
+        .find((blockId) => blockId !== firstId);
+      if (!secondId) throw new Error("Expected second imported block");
+      expect(secondId).not.toBe(firstId);
+      expect(editor.readBlockPlainText(secondId, "paragraph")).toBe(
+        expectedText,
+      );
+      expect(
+        (editor as unknown as { readonly history: readonly unknown[] }).history,
+      ).toHaveLength(2);
+
+      rendered.unmount();
+      editor.dispose();
+    },
+  );
+
   it("settles a cross-block paste at its logical end in canonical focus, the shared view, and history", async () => {
     const sourceFirst = "clipboard-source-first" as BlockId;
     const sourceLast = "clipboard-source-last" as BlockId;
@@ -473,6 +636,25 @@ function settleTextRange(
   }
 }
 
+function settleBlockSelection(editor: Editor, blockId: BlockId): void {
+  const runtime = resolveEditorRuntimePort(editor);
+  const point = createEditorLogicalSelectionPoint({
+    graph: runtime,
+    blockId,
+    textOffset: 0,
+  });
+  if (!point) throw new Error(`Expected block selection point ${blockId}`);
+  const settled = runtime.selectionController.extendSelection(
+    point,
+    point,
+    runtime,
+    runtime.getSelectionGraphRevision(),
+    { publication: { kind: "silent" }, cause: "programmatic-edit" },
+  );
+  if (!settled)
+    throw new Error(`Expected canonical block selection ${blockId}`);
+}
+
 function expectCanonicalCollapsedCaret(
   editor: EditableEditorRuntimePort,
   expectedBlockId: BlockId,
@@ -588,6 +770,14 @@ function textProjection(container: HTMLElement, id: BlockId): HTMLElement {
   );
   if (!projection) throw new Error(`Expected mounted text projection ${id}`);
   return projection;
+}
+
+function blockShell(container: HTMLElement, id: BlockId): HTMLElement {
+  const shell = container.querySelector<HTMLElement>(
+    `[data-editor-block-id="${id}"]`,
+  );
+  if (!shell) throw new Error(`Expected mounted block shell ${id}`);
+  return shell;
 }
 
 function snapshot() {

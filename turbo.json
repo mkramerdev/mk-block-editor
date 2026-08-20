@@ -19,9 +19,27 @@
     "check-types": {
       "dependsOn": ["^check-types"]
     },
-    "dev": {
+    "test": {
+      "dependsOn": ["^build"],
+      "outputs": []
+    },
+    "db:reset": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "db:seed": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "dev:prepare": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "dev:consumer": {
+      "dependsOn": ["^build"],
       "cache": false,
-      "persistent": true
+      "persistent": true,
+      "interruptible": true
     }
   }
 }

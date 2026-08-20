@@ -7,38 +7,32 @@
   "exports": {
     "./block-editor": {
       "types": "./src/api/block-editor.ts",
-      "development": "./src/api/block-editor.ts",
       "import": "./dist/api/block-editor.js"
     },
     "./schema": {
       "types": "./src/api/schema.ts",
-      "development": "./src/api/schema.ts",
       "import": "./dist/api/schema.js"
     },
     "./keymap": {
       "types": "./src/api/keymap.ts",
-      "development": "./src/api/keymap.ts",
       "import": "./dist/api/keymap.js"
     },
     "./caret": {
       "types": "./src/api/caret.ts",
-      "development": "./src/api/caret.ts",
       "import": "./dist/api/caret.js"
     },
     "./clipboard": {
       "types": "./src/api/clipboard.ts",
-      "development": "./src/api/clipboard.ts",
       "import": "./dist/api/clipboard.js"
     },
     "./prosemirror": {
       "types": "./src/api/prosemirror.ts",
-      "development": "./src/api/prosemirror.ts",
       "import": "./dist/api/prosemirror.js"
     }
   },
   "scripts": {
     "build": "pnpm run clean && tsc -p tsconfig.build.json",
-    "dev": "tsc -p tsconfig.build.json --watch",
+    "dev:compiler": "tsc -p tsconfig.build.json --watch",
     "check-types:source": "tsc --noEmit -p tsconfig.json",
     "check-types:tests": "tsc --noEmit -p tsconfig.test.json",
     "check-types": "pnpm run check-types:source && pnpm run check-types:tests",

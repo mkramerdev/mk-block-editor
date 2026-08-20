@@ -6,6 +6,10 @@ export {
 export {
   decodeFirstDraftMessage,
   encodeFirstDraftMessage,
+  firstDraftCollaborationSubjectsEqual,
+  firstDraftParticipantPresencesEqual,
+  firstDraftSelectionPresencesEqual,
+  firstDraftSelectionValuesEqual,
   FIRST_DRAFT_PROTOCOL_VERSION,
   isValidFirstDraftDocumentId,
   MAX_FIRST_DRAFT_FRAME_BYTES,

@@ -306,10 +306,140 @@ describe("block editor view lifecycle", () => {
     }
   });
 
-  it("renders base hard-break node views as inline-only DOM nodes", () => {
-    const br = hardBreakNodeView();
-    expect(br.dom.nodeName).toBe("BR");
-    expect(br.ignoreMutation?.({} as MutationRecord)).toBe(true);
+  it("creates heading and hard-break node views in the mounted document realm", () => {
+    const realmA = document;
+    const realmB = document.implementation.createHTMLDocument("realm-b");
+    const headingMount = realmB.createElement("div");
+    const breakMount = realmB.createElement("div");
+    realmB.body.append(headingMount, breakMount);
+    const headingMapping = {
+      blockTextNodeNames: { heading: "heading" },
+      blockTextNodeAttrs: { heading: { level: 3 } },
+    } as const;
+    const headingView = createBlockLocalProseMirrorView({
+      mount: headingMount,
+      blockId: testBlockId,
+      blockType: "heading",
+      doc: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [{ type: "text", text: "Realm heading" }],
+          },
+        ],
+      },
+      documentMapping: headingMapping,
+      pluginOptions: { headingLevel: 3 },
+      proposalAdapter: acceptingAdapter(),
+    });
+    const breakView = createBlockLocalProseMirrorView({
+      mount: breakMount,
+      blockId: testBlockId,
+      blockType: "paragraph",
+      doc: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              { type: "text", text: "before" },
+              { type: "hard_break" },
+              { type: "text", text: "after" },
+            ],
+          },
+        ],
+      },
+      proposalAdapter: acceptingAdapter(),
+    });
+
+    try {
+      const heading = headingMount.querySelector("h3");
+      const hardBreak = breakMount.querySelector("br");
+      expect(heading?.ownerDocument).toBe(realmB);
+      expect(heading?.ownerDocument).not.toBe(realmA);
+      expect(heading?.nodeName).toBe("H3");
+      expect(heading?.getAttribute("data-block-node")).toBe("heading");
+      expect(heading?.getAttribute("data-level")).toBe("3");
+      expect(headingView.dom.ownerDocument).toBe(realmB);
+      expect(hardBreak?.ownerDocument).toBe(realmB);
+      expect(hardBreak?.ownerDocument).not.toBe(realmA);
+      expect(hardBreak?.nodeName).toBe("BR");
+      const directHardBreak = hardBreakNodeView(
+        ...([
+          breakView.state.schema.nodes.hard_break!.create(),
+          breakView,
+          () => 0,
+          [],
+          {},
+        ] as unknown as Parameters<typeof hardBreakNodeView>),
+      );
+      expect(directHardBreak.dom.ownerDocument).toBe(realmB);
+      expect(directHardBreak.ignoreMutation?.({} as MutationRecord)).toBe(true);
+
+      headingView.updateState(
+        createBlockLocalProseMirrorState({
+          blockId: testBlockId,
+          blockType: "heading",
+          doc: {
+            type: "doc",
+            content: [
+              {
+                type: "paragraph",
+                content: [{ type: "text", text: "Updated heading" }],
+              },
+            ],
+          },
+          schema: headingView.state.schema,
+          documentMapping: headingMapping,
+          pluginOptions: { headingLevel: 3 },
+        }),
+      );
+      expect(headingMount.querySelector("h3")).toBe(heading);
+      expect(heading?.textContent).toBe("Updated heading");
+    } finally {
+      headingView.destroy();
+      breakView.destroy();
+    }
+  });
+
+  it("keeps the ProseMirror root separate from the node-view DOM realm", () => {
+    const host = document.createElement("div");
+    const shadowRoot = host.attachShadow({ mode: "open" });
+    const mount = document.createElement("div");
+    shadowRoot.append(mount);
+    document.body.append(host);
+    const view = createBlockLocalProseMirrorView({
+      mount,
+      blockId: testBlockId,
+      blockType: "paragraph",
+      doc: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              { type: "text", text: "before" },
+              { type: "hard_break" },
+              { type: "text", text: "after" },
+            ],
+          },
+        ],
+      },
+      proposalAdapter: acceptingAdapter(),
+    });
+
+    try {
+      view.updateRoot();
+      expect(view.root).toBe(shadowRoot);
+      expect(view.dom.ownerDocument).toBe(shadowRoot.ownerDocument);
+      expect(shadowRoot.querySelector("br")?.ownerDocument).toBe(
+        shadowRoot.ownerDocument,
+      );
+    } finally {
+      view.destroy();
+      host.remove();
+    }
   });
 
   it("normalizes caller-owned block attrs to the neutral rich-text node", () => {

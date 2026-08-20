@@ -12,7 +12,8 @@ export type HeadingNodeViewLevel = HeadingLevel;
 
 export function createHeadingNodeView(level: unknown): NodeViewConstructor {
   const headingLevel = normalizeHeadingLevel(level);
-  return (node) => new HeadingNodeView(node, headingLevel);
+  return (node, view) =>
+    new HeadingNodeView(node, headingLevel, view.dom.ownerDocument);
 }
 
 class HeadingNodeView implements NodeView {
@@ -21,10 +22,14 @@ class HeadingNodeView implements NodeView {
   private node: PMNode;
   private readonly level: HeadingNodeViewLevel;
 
-  constructor(node: PMNode, level: HeadingNodeViewLevel) {
+  constructor(
+    node: PMNode,
+    level: HeadingNodeViewLevel,
+    ownerDocument: Document,
+  ) {
     this.node = node;
     this.level = level;
-    this.dom = document.createElement(`h${level}`) as HTMLHeadingElement;
+    this.dom = ownerDocument.createElement(`h${level}`) as HTMLHeadingElement;
     this.contentDOM = this.dom;
     this.render();
   }

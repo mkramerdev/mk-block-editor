@@ -85,13 +85,41 @@ Compose.
 pnpm install
 docker compose up -d editor-db
 pnpm db:reset:first-draft
-pnpm --filter @repo/editor-realtime dev
-pnpm --filter playground-react dev
+pnpm dev:realtime
+pnpm dev:playground-react
 ```
 
 `db:reset:first-draft` recreates the local First Draft database and seeds the
 example document. To seed an existing empty database without recreating it,
 run `pnpm db:seed:first-draft` instead.
+
+The supported development entrypoints are:
+
+```sh
+pnpm dev                    # all consumers
+pnpm dev:realtime           # realtime service only
+pnpm dev:playground-react   # Vite playground only
+pnpm dev:playground         # Next.js playground only
+```
+
+Each command first asks Turbo to build only the selected consumer's workspace
+dependencies. It then keeps the same dependency graph under `turbo watch`.
+Package `build` tasks exclusively own their `dist` directories; package source
+changes rerun those tasks in dependency order, and the selected consumer is
+restarted only after the required builds succeed. The leaf process still runs
+its own source (`vite`, `next dev`, or `tsx src/index.ts`), so development never
+requires `apps/playground-react/dist`, a production `.next` build, or
+`services/editor-realtime/dist`.
+
+All runtime package exports resolve to generated files in package `dist`
+directories. The `types` export condition may continue to expose TypeScript
+source for compile-time type resolution; Node, Vite, Next.js, and other runtime
+conditions do not use those paths. `@repo/editor-web/styles.css` and
+`@repo/editor-first-draft/first-draft.css` likewise resolve to package-owned
+compiled/copied CSS output.
+
+The leaf `dev:consumer` scripts and package `dev:compiler` scripts are internal
+building blocks, not standalone repository development entrypoints.
 
 Open [http://localhost:3001/first-draft](http://localhost:3001/first-draft) for
 the collaborative example. `/full-editor` is also registered in the React
@@ -101,16 +129,17 @@ editor surface.
 The development PostgreSQL URL is
 `postgres://editor:editor@127.0.0.1:5435/editor_document`. The realtime service
 listens on port `4455`; its WebSocket route is
-`ws://localhost:4455/editor-realtime`. In non-production mode it defaults to
-`dev-shared` authentication with the shared token
-`dev-editor-realtime-token`, which is also used by the React playground.
+`ws://localhost:4455/editor-realtime`.
+
+The realtime service is an anonymous public-demo collaboration server. Each
+client declares its actor, client, session, and document identity in the first
+protocol frame. The server validates that later messages remain consistent
+with that established session and isolates collaboration by document room. It
+does not authenticate users or provide access control, so connect it only to
+data intended for public demonstration.
 
 Relevant service variables are `EDITOR_DOCUMENT_POSTGRES_URL`,
-`EDITOR_REALTIME_HOST`, `EDITOR_REALTIME_PORT`, `EDITOR_REALTIME_AUTH_MODE`, and
-`EDITOR_REALTIME_DEV_SHARED_TOKEN`. The configuration loader also accepts
-`EDITOR_REALTIME_JWKS_URL`, `EDITOR_REALTIME_JWT_ISSUER`, and
-`EDITOR_REALTIME_JWT_AUDIENCE`, but the current `jwt-jwks` authenticator rejects
-connections as unavailable. The React playground accepts
+`EDITOR_REALTIME_HOST`, and `EDITOR_REALTIME_PORT`. The React playground accepts
 `VITE_EDITOR_REALTIME_URL` and `VITE_FIRST_DRAFT_DOCUMENT_ID`; the seed script
 accepts `FIRST_DRAFT_SEED_DOCUMENT_ID`.
 

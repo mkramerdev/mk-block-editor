@@ -12,6 +12,10 @@ import {
 } from "@repo/editor-react/selection";
 import type { EditorContentRuntimeResources } from "../../../runtime/content/runtime-resources.ts";
 import type { EditorContentRuntime } from "@repo/editor-core/content";
+import {
+  createCollisionSafeBlockIdAllocator,
+  reidentifyCanonicalBlockFragment,
+} from "@repo/editor-core/editing";
 import type { EditorDefinition } from "../../../runtime/definition/contracts.ts";
 import type { EditableEditorRuntimePort } from "../../../runtime/document/render-port.ts";
 import { createDefinitionClipboardBoundary } from "../../../clipboard/editor-boundary.ts";
@@ -181,6 +185,21 @@ export function useEditableClipboardEvents({
         captured: NonNullable<ReturnType<typeof captureSelection>>,
         fragment: import("@repo/editor-core/editing").CanonicalBlockFragment,
       ) => {
+        const idAllocator = createCollisionSafeBlockIdAllocator({
+          reservedBlockIds: new Set(fragment.blocks.map((block) => block.id)),
+          isBlockIdReserved: (blockId) => editor.getBlock(blockId) !== null,
+          purpose: "clipboard paste",
+        });
+        let destinationFragment: typeof fragment;
+        try {
+          destinationFragment = reidentifyCanonicalBlockFragment({
+            fragment,
+            blockDefinitions: definition.blocks,
+            allocateBlockId: idAllocator.allocateBlockId,
+          });
+        } catch {
+          return { ok: false as const, changed: false as const };
+        }
         const composition = resolveCanonicalEditComposition({
           graph: {
             blockDefinitions: definition.blocks,
@@ -191,7 +210,8 @@ export function useEditableClipboardEvents({
               contentRuntime.readBlockProjection(blockId, blockType),
           },
           target: { kind: "selection" as const, range: captured.range },
-          fragment,
+          fragment: destinationFragment,
+          allocateBlockId: idAllocator.allocateBlockId,
         });
         const result = composition
           ? executeStructuralEditComposition(editor, composition, {

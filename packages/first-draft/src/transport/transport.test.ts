@@ -400,7 +400,6 @@ describe("First Draft binary message protocol", () => {
     const messages = [
       {
         type: "connect-first-draft-session" as const,
-        authenticationToken: "token",
         ...collaborationSubject,
         documentId: "document-a",
       },
@@ -496,10 +495,38 @@ describe("First Draft binary message protocol", () => {
     expect(decoded.message.revision).toBe(3);
   });
 
+  it("round-trips an anonymous connection with no credential field", () => {
+    const connection = {
+      type: "connect-first-draft-session" as const,
+      actorId: "actor-a",
+      clientId: "client-a",
+      sessionId: "session-a",
+      documentId: "document-a",
+    };
+    const frame = encodeFirstDraftMessage(connection);
+    expect(decodeFirstDraftMessage(frame)).toEqual({
+      ok: true,
+      message: connection,
+    });
+    expect(Object.keys(connection)).toEqual([
+      "type",
+      "actorId",
+      "clientId",
+      "sessionId",
+      "documentId",
+    ]);
+
+    const removedCredential = ["authentication", "Token"].join("");
+    expect(
+      decodeFirstDraftMessage(
+        addMetadataPropertyAtRoot(frame, removedCredential, "removed-token"),
+      ).ok,
+    ).toBe(false);
+  });
+
   it("strictly rejects the removed container field", () => {
     const frame = encodeFirstDraftMessage({
       type: "connect-first-draft-session",
-      authenticationToken: "token",
       actorId: "actor-a",
       clientId: "client-a",
       sessionId: "session-a",
@@ -618,7 +645,7 @@ describe("First Draft binary message protocol", () => {
     badMagicBytes[0] = badMagicBytes[0]! ^ 0xff;
     const badVersion = frame.slice(0);
     const badVersionBytes = new Uint8Array(badVersion);
-    badVersionBytes[3] = badVersionBytes[3]! ^ 0xff;
+    badVersionBytes[3] = 4;
 
     expect(decodeFirstDraftMessage(badMagic).ok).toBe(false);
     expect(decodeFirstDraftMessage(badVersion).ok).toBe(false);

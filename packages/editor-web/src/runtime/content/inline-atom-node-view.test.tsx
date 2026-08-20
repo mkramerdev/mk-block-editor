@@ -4,12 +4,24 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createBlockLocalProseMirrorSchema } from "@repo/editor-dom/schema";
 import {
+  createBlockLocalProseMirrorView,
+  type ProseMirrorProposalAdapter,
+  type ProseMirrorStateProposal,
+} from "@repo/editor-dom/block-editor";
+import { asBlockId } from "@repo/editor-core/kernel";
+import type {
+  EditorView,
+  NodeViewConstructor,
+  PMNode,
+} from "@repo/editor-dom/prosemirror";
+import {
   InlineAtomPortalHost,
   InlineAtomPortalRegistry,
 } from "./inline-atom-portal-registry.tsx";
 import {
   createInlineAtomNodeView,
   createInlineAtomNodeViews,
+  type InlineAtomNodeView,
 } from "./inline-atom-node-view.ts";
 
 const renderMention = vi.fn((metadata: Readonly<Record<string, unknown>>) => (
@@ -27,6 +39,7 @@ const emojiDefinition = {
   metadata: { value: { type: "string", required: true } },
   render: () => <span>emoji</span>,
 } as const;
+const inlineAtomBlockId = asBlockId("inline-atom-realm");
 
 describe("document-owned inline atom portals", () => {
   let portals: InlineAtomPortalRegistry;
@@ -44,8 +57,12 @@ describe("document-owned inline atom portals", () => {
     expect(source).not.toMatch(/react-dom\/client|createRoot|root\.unmount/u);
   });
 
-  it("creates one portal NodeView per exact definition and renders metadata", () => {
+  it("creates and updates one portal NodeView in the mounted document realm", () => {
     const owner = render(<InlineAtomPortalHost registry={portals} />);
+    const realmA = document;
+    const realmB = document.implementation.createHTMLDocument("realm-b");
+    const mount = realmB.createElement("div");
+    realmB.body.append(mount);
     const schema = createBlockLocalProseMirrorSchema({
       inlineAtoms: [mentionDefinition, emojiDefinition],
     });
@@ -53,21 +70,52 @@ describe("document-owned inline atom portals", () => {
       [mentionDefinition, emojiDefinition],
       portals,
     );
-    const mention = schema.nodes.mention!.create({
-      metadata: { id: "user-123" },
-    });
-    let view!: ReturnType<(typeof views)["mention"]>;
+    let editorView!: EditorView;
     act(() => {
-      view = views.mention!(mention);
+      editorView = createBlockLocalProseMirrorView({
+        mount,
+        blockId: inlineAtomBlockId,
+        blockType: "paragraph",
+        doc: {
+          type: "doc",
+          content: [
+            {
+              type: "paragraph",
+              content: [{ type: "mention", metadata: { id: "user-123" } }],
+            },
+          ],
+        },
+        schema,
+        nodeViews: { ...views },
+        proposalAdapter: acceptingAdapter(),
+      });
     });
 
+    const atom = mount.querySelector("[data-inline-atom-type='mention']");
     expect(Object.keys(views).sort()).toStrictEqual(["emoji", "mention"]);
-    expect(view.dom).toBeInstanceOf(HTMLElement);
-    expect((view.dom as HTMLElement).contentEditable).toBe("false");
-    expect((view.dom as HTMLElement).dataset.inlineAtomType).toBe("mention");
+    expect(atom?.ownerDocument).toBe(realmB);
+    expect(atom?.ownerDocument).not.toBe(realmA);
+    expect(atom?.nodeName).toBe("SPAN");
+    expect((atom as HTMLElement).contentEditable).toBe("false");
+    expect((atom as HTMLElement).dataset.inlineAtomType).toBe("mention");
     expect(renderMention).toHaveBeenCalledWith({ id: "user-123" });
-    expect((view.dom as HTMLElement).textContent).toBe("mention:user-123");
-    expect(view).not.toHaveProperty("contentDOM");
+    expect(atom?.textContent).toBe("mention:user-123");
+
+    act(() => {
+      editorView.updateState(
+        editorView.state.apply(
+          editorView.state.tr.setNodeMarkup(1, undefined, {
+            metadata: { id: "user-456" },
+          }),
+        ),
+      );
+    });
+    expect(mount.querySelector("[data-inline-atom-type='mention']")).toBe(atom);
+    expect(atom?.textContent).toBe("mention:user-456");
+    expect(renderMention).toHaveBeenLastCalledWith({ id: "user-456" });
+
+    act(() => editorView.destroy());
+    expect(atom?.textContent).toBe("");
     owner.unmount();
     portals.dispose();
   });
@@ -77,12 +125,12 @@ describe("document-owned inline atom portals", () => {
     const schema = createBlockLocalProseMirrorSchema({
       inlineAtoms: [mentionDefinition, emojiDefinition],
     });
-    let view!: ReturnType<ReturnType<typeof createInlineAtomNodeView>>;
+    let view!: InlineAtomNodeView;
     act(() => {
-      view = createInlineAtomNodeView(
-        mentionDefinition,
-        portals,
-      )(schema.nodes.mention!.create({ metadata: { id: "user-1" } }));
+      view = instantiateNodeView(
+        createInlineAtomNodeView(mentionDefinition, portals),
+        schema.nodes.mention!.create({ metadata: { id: "user-1" } }),
+      );
     });
     const dom = view.dom;
 
@@ -111,13 +159,15 @@ describe("document-owned inline atom portals", () => {
       inlineAtoms: [mentionDefinition],
     });
     const create = createInlineAtomNodeView(mentionDefinition, portals);
-    let first!: ReturnType<typeof create>;
-    let second!: ReturnType<typeof create>;
+    let first!: InlineAtomNodeView;
+    let second!: InlineAtomNodeView;
     act(() => {
-      first = create(
+      first = instantiateNodeView(
+        create,
         schema.nodes.mention!.create({ metadata: { id: "first" } }),
       );
-      second = create(
+      second = instantiateNodeView(
+        create,
         schema.nodes.mention!.create({ metadata: { id: "second" } }),
       );
     });
@@ -140,3 +190,37 @@ describe("document-owned inline atom portals", () => {
     portals.dispose();
   });
 });
+
+function instantiateNodeView(
+  constructor: NodeViewConstructor,
+  node: PMNode,
+  ownerDocument: Document = document,
+): InlineAtomNodeView {
+  const view = {
+    dom: ownerDocument.createElement("div"),
+  } as unknown as EditorView;
+  const args = [
+    node,
+    view,
+    () => 0,
+    [],
+    {},
+  ] as unknown as Parameters<NodeViewConstructor>;
+  return constructor(...args) as InlineAtomNodeView;
+}
+
+function acceptingAdapter(): ProseMirrorProposalAdapter {
+  return {
+    isProjectingFinalizedContent: () => false,
+    readContentBaseToken: () => ({
+      graphRevision: 1,
+      blockId: inlineAtomBlockId,
+      blockType: "paragraph" as const,
+      contentRevision: 1,
+    }),
+    evaluateProposal: (proposal: ProseMirrorStateProposal) => ({
+      kind: "accepted",
+      state: proposal.proposedState,
+    }),
+  };
+}

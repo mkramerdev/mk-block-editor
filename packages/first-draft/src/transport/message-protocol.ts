@@ -15,7 +15,10 @@ import {
   EDITOR_YJS_CONTENT_FORMAT_VERSION,
 } from "@repo/editor-yjs/checkpoint-format";
 import type { UpdateBlockMetadataOperation } from "@repo/editor-core/operations";
-import type { EditorStableSelection } from "@repo/editor-react/selection-model";
+import {
+  editorStableSelectionsEqual,
+  type EditorStableSelection,
+} from "@repo/editor-react/selection";
 import type {
   EditorTransportBlockGraphChange,
   EditorTransportTransaction,
@@ -52,7 +55,6 @@ export interface FirstDraftSessionIdentity {
 
 export interface ConnectFirstDraftSessionMessage extends FirstDraftSessionIdentity {
   readonly type: "connect-first-draft-session";
-  readonly authenticationToken: string;
 }
 
 export interface FirstDraftSessionConnectedMessage extends FirstDraftSessionIdentity {
@@ -143,6 +145,48 @@ export interface FirstDraftSelectionSnapshotMessage extends FirstDraftDocumentId
   readonly selections: readonly FirstDraftSelectionPresence[];
 }
 
+export function firstDraftCollaborationSubjectsEqual(
+  left: FirstDraftCollaborationSubject,
+  right: FirstDraftCollaborationSubject,
+): boolean {
+  return (
+    left.actorId === right.actorId &&
+    left.clientId === right.clientId &&
+    left.sessionId === right.sessionId
+  );
+}
+
+export function firstDraftParticipantPresencesEqual(
+  left: FirstDraftParticipantPresence,
+  right: FirstDraftParticipantPresence,
+): boolean {
+  return (
+    firstDraftCollaborationSubjectsEqual(left.subject, right.subject) &&
+    left.presenceRevision === right.presenceRevision &&
+    left.active === right.active &&
+    left.metadata.displayName === right.metadata.displayName &&
+    left.metadata.color === right.metadata.color
+  );
+}
+
+export function firstDraftSelectionValuesEqual(
+  left: EditorStableSelection,
+  right: EditorStableSelection,
+): boolean {
+  return editorStableSelectionsEqual(left, right);
+}
+
+export function firstDraftSelectionPresencesEqual(
+  left: FirstDraftSelectionPresence,
+  right: FirstDraftSelectionPresence,
+): boolean {
+  return (
+    firstDraftCollaborationSubjectsEqual(left.subject, right.subject) &&
+    left.selectionRevision === right.selectionRevision &&
+    firstDraftSelectionValuesEqual(left.selection, right.selection)
+  );
+}
+
 export interface FirstDraftProtocolErrorMessage {
   readonly type: "first-draft-protocol-error";
   readonly code: string;
@@ -166,7 +210,6 @@ export interface EditorTransactionAcceptedMessage {
 
 export type EditorTransactionPersistenceFailureReason =
   | "missing"
-  | "unauthorized"
   | "invalid"
   | "integrity"
   | "unavailable";
@@ -587,14 +630,11 @@ function validConnectMessage(value: Record<string, unknown>): boolean {
   return (
     hasExactKeys(value, [
       "type",
-      "authenticationToken",
       "actorId",
       "clientId",
       "sessionId",
       "documentId",
-    ]) &&
-    isBoundedText(value.authenticationToken) &&
-    validSessionIdentity(value)
+    ]) && validSessionIdentity(value)
   );
 }
 
@@ -912,7 +952,6 @@ function isPersistenceFailureReason(
 ): value is EditorTransactionPersistenceFailureReason {
   return (
     value === "missing" ||
-    value === "unauthorized" ||
     value === "invalid" ||
     value === "integrity" ||
     value === "unavailable"

@@ -20,7 +20,7 @@ import {
   createTableRangeCoverage,
   tableInternalSelectionSubsystem,
 } from "./selection.ts";
-import { readFirstDraftTableColumnIds } from "./model.ts";
+import { resolveFirstDraftTableColumnIds } from "./model.ts";
 import { FirstDraftBlockHoverProvider } from "../../block-controls/index.ts";
 
 const id = asBlockId;
@@ -363,7 +363,7 @@ describe("First Draft table-cell boundary commands", () => {
     expect(new Set(appendedColumnCellIds).size).toBe(4);
     const table = fixture.editor.getBlock(tableId);
     if (!table) throw new Error("Missing table after append");
-    const columnIds = readFirstDraftTableColumnIds(table.metadata, 4);
+    const columnIds = resolveFirstDraftTableColumnIds(table.metadata, 4).ids;
     expect(columnIds).toHaveLength(4);
     expect(new Set(columnIds).size).toBe(4);
     expect(

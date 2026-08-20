@@ -220,7 +220,6 @@ const first: FirstDraftCollaborationOptions = {
   documentId: "document-first",
   actorId: "actor",
   clientId: "client",
-  authenticationToken: "token",
 };
 const second: FirstDraftCollaborationOptions = {
   ...first,
@@ -266,6 +265,16 @@ describe("FirstDraftEditorSurface canonical lifecycle", () => {
 
     act(() => socket.open());
     expect(socket.sent).toHaveLength(1);
+    expect(probes.decode(socket.sent[0])).toEqual({
+      ok: true,
+      message: {
+        type: "connect-first-draft-session",
+        actorId: first.actorId,
+        clientId: first.clientId,
+        sessionId: "00000000-0000-4000-8000-000000000001",
+        documentId: first.documentId,
+      },
+    });
     act(() => {
       socket.receive(
         encodeFirstDraftMessage({
@@ -311,7 +320,7 @@ describe("FirstDraftEditorSurface canonical lifecycle", () => {
         }),
       );
     });
-    expect(probes.decode).toHaveBeenCalledTimes(5);
+    expect(probes.decode).toHaveBeenCalledTimes(6);
     expect(probes.initialize).toHaveBeenCalledOnce();
 
     view.rerender(<FirstDraftEditorSurface collaboration={second} />);

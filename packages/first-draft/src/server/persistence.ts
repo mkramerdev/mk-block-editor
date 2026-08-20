@@ -17,7 +17,6 @@ export interface FirstDraftAcceptedTransactionIdentity {
 
 export type FirstDraftPersistenceFailureReason =
   | "missing"
-  | "unauthorized"
   | "invalid"
   | "integrity"
   | "unavailable";

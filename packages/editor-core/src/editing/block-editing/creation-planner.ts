@@ -10,8 +10,7 @@ import {
 import { cloneJsonValue } from "../../kernel/json/json-value.ts";
 import { createBlockRecord } from "../../metadata/block-record.ts";
 import { blockCreationSelectionTargetKind } from "./creation-selection.ts";
-
-const MAX_BLOCK_ID_ALLOCATION_ATTEMPTS = 100;
+import { createCollisionSafeBlockIdAllocator } from "./block-id-allocator.ts";
 
 export interface PlanBlockTreeCreationInput {
   readonly blockDefinitions: Readonly<Record<BlockType, BlockDefinition>>;
@@ -47,35 +46,32 @@ export interface BlockTreeCreationPlan {
 export function planBlockTreeCreation(
   input: PlanBlockTreeCreationInput,
 ): BlockTreeCreationPlan {
-  const allocated = new Set(input.reservedBlockIds ?? []);
+  const idAllocator = createCollisionSafeBlockIdAllocator({
+    ...(input.createBlockId ? { createBlockId: input.createBlockId } : {}),
+    ...(input.reservedBlockIds
+      ? { reservedBlockIds: input.reservedBlockIds }
+      : {}),
+    ...(input.isBlockIdReserved
+      ? { isBlockIdReserved: input.isBlockIdReserved }
+      : {}),
+    purpose: "block creation",
+  });
   const nodes: PlannedBlockTreeNode[] = [];
   const allocate = (type: BlockType, preferred?: BlockId): BlockId => {
-    if (preferred) {
-      if (allocated.has(preferred) || input.isBlockIdReserved?.(preferred)) {
+    try {
+      return createBlockRecord({
+        id:
+          preferred === undefined
+            ? idAllocator.allocateBlockId()
+            : idAllocator.reserveBlockId(preferred),
+        type,
+      }).id;
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("block id ")) {
         throw new Error(`block creation id ${preferred} is already reserved`);
       }
-      allocated.add(preferred);
-      return createBlockRecord({ id: preferred, type }).id;
+      throw new Error("unable to allocate unique ids for block creation");
     }
-    for (
-      let attempt = 0;
-      attempt < MAX_BLOCK_ID_ALLOCATION_ATTEMPTS;
-      attempt += 1
-    ) {
-      let id: BlockId;
-      try {
-        id = input.createBlockId
-          ? createBlockRecord({ id: input.createBlockId(), type }).id
-          : createBlockRecord({ type }).id;
-      } catch {
-        throw new Error("unable to allocate unique ids for block creation");
-      }
-      if (!allocated.has(id) && !input.isBlockIdReserved?.(id)) {
-        allocated.add(id);
-        return id;
-      }
-    }
-    throw new Error("unable to allocate unique ids for block creation");
   };
 
   const append = (

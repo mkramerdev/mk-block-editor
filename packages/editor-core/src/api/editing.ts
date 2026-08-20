@@ -7,6 +7,11 @@ export {
 export { isEditableFocusTarget } from "../editing/focus/focus-targets.ts";
 export { planBlockTreeCreation } from "../editing/block-editing/creation-planner.ts";
 export { materializeBlockCreationMetadata } from "../editing/block-editing/creation-planner.ts";
+export { createCollisionSafeBlockIdAllocator } from "../editing/block-editing/block-id-allocator.ts";
+export type {
+  CollisionSafeBlockIdAllocator,
+  CreateCollisionSafeBlockIdAllocatorOptions,
+} from "../editing/block-editing/block-id-allocator.ts";
 export { blockCreationSelectionTargetKind } from "../editing/block-editing/creation-selection.ts";
 export type { BlockCreationSelectionTargetKind } from "../editing/block-editing/creation-selection.ts";
 export {
@@ -22,6 +27,7 @@ export {
   createCanonicalBlockRecord,
   duplicateCanonicalBlockSubtrees,
   materializeCanonicalBlockCreation,
+  reidentifyCanonicalBlockFragment,
   validateCanonicalBlockFragment,
 } from "../editing/canonical-fragment.ts";
 export type {
@@ -34,6 +40,7 @@ export type {
   DuplicateCanonicalBlockSubtreesOptions,
   MaterializeCanonicalBlockCreationOptions,
   MaterializedCanonicalBlockCreation,
+  ReidentifyCanonicalBlockFragmentOptions,
 } from "../editing/canonical-fragment.ts";
 export {
   findPreviousCanonicalSelectionTarget,

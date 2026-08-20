@@ -9,18 +9,16 @@
   "exports": {
     ".": {
       "types": "./src/api/index.ts",
-      "development": "./src/api/index.ts",
       "import": "./dist/api/index.js"
     },
     "./checkpoint-format": {
       "types": "./src/block-content/checkpoint-format.ts",
-      "development": "./src/block-content/checkpoint-format.ts",
       "import": "./dist/block-content/checkpoint-format.js"
     }
   },
   "scripts": {
     "build": "pnpm run clean && tsc -p tsconfig.build.json",
-    "dev": "tsc -p tsconfig.build.json --watch",
+    "dev:compiler": "tsc -p tsconfig.build.json --watch",
     "check-types:source": "tsc --noEmit -p tsconfig.json",
     "check-types:tests": "tsc --noEmit -p tsconfig.test.json",
     "check-types": "pnpm run check-types:source && pnpm run check-types:tests",

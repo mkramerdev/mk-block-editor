@@ -402,6 +402,14 @@ export class EditorImplementation {
     string,
     Set<() => void>
   >();
+  private readonly directChildBlocksByParentId = new Map<
+    BlockId,
+    readonly VersionedBlock[]
+  >();
+  private readonly directChildBlockListenersByParentId = new Map<
+    BlockId,
+    Set<() => void>
+  >();
   private readonly blockDefinitions: Readonly<
     Record<BlockType, BlockDefinition>
   >;
@@ -1745,6 +1753,21 @@ export class EditorImplementation {
     return this.manifestState.childIdsByParentId[parentId] ?? EMPTY_BLOCK_IDS;
   }
 
+  getDirectChildBlocks(parentId: BlockId): readonly VersionedBlock[] {
+    const cached = this.directChildBlocksByParentId.get(parentId);
+    if (cached) return cached;
+    const result: VersionedBlock[] = [];
+    for (const childId of this.getChildBlockIds(parentId)) {
+      const block = this.manifestState.blocks[childId];
+      if (block && !block.tombstone && block.parentId === parentId) {
+        result.push(block);
+      }
+    }
+    const snapshot = Object.freeze(result);
+    this.directChildBlocksByParentId.set(parentId, snapshot);
+    return snapshot;
+  }
+
   getLastChildBlockId(parentId: BlockId | null): BlockId | null {
     const blockIds =
       parentId === null
@@ -1862,6 +1885,26 @@ export class EditorImplementation {
       listeners.delete(listener);
       if (listeners.size === 0)
         this.blockChildSequenceListenersByKey.delete(key);
+    };
+  }
+
+  subscribeDirectChildBlocks(
+    parentId: BlockId,
+    listener: () => void,
+  ): () => void {
+    if (this.disposed) return noop;
+    const listeners = getOrCreateEditorListenerSet(
+      this.directChildBlockListenersByParentId,
+      parentId,
+    );
+    listeners.add(listener);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      listeners.delete(listener);
+      if (listeners.size === 0)
+        this.directChildBlockListenersByParentId.delete(parentId);
     };
   }
 
@@ -3925,6 +3968,8 @@ export class EditorImplementation {
     this.rootBlockIdListeners.clear();
     this.blockListenersById.clear();
     this.blockChildSequenceListenersByKey.clear();
+    this.directChildBlocksByParentId.clear();
+    this.directChildBlockListenersByParentId.clear();
     this.commandAvailabilityListeners.clear();
     this.editableDocumentLeaseActive = false;
     this.selectionController.dispose();
@@ -4640,6 +4685,7 @@ export class EditorImplementation {
       throw new Error("cannot commit an editor document without a live root");
     }
     const split = splitEditorCommandState(nextState);
+    const previousManifest = this.manifestState;
     const selectionSettlementCapture =
       !selectionEffect || selectionEffect.kind === "preserve"
         ? this.captureGraphSelectionSettlement()
@@ -4647,7 +4693,7 @@ export class EditorImplementation {
     const nextManifest = freezeManifestState(
       split.manifest,
       this.blockDefinitions,
-      this.manifestState,
+      previousManifest,
       {
         structuralDraftAlreadyValidated,
         changedBlockIds: [
@@ -4658,15 +4704,21 @@ export class EditorImplementation {
       },
     );
     const manifestChanged = !editorManifestStatesEqual(
-      this.manifestState,
+      previousManifest,
       nextManifest,
     );
     const canonicalDocumentChanged =
       update.canonical.updatedBlockIds.length > 0 ||
       update.canonical.removedBlockIds.length > 0 ||
       update.canonical.contentChangedBlockIds.length > 0;
+    let directChildParentIds: readonly BlockId[] = EMPTY_BLOCK_IDS;
     if (manifestChanged) {
       this.manifestState = nextManifest;
+      directChildParentIds = this.invalidateDirectChildBlockProjections(
+        update,
+        previousManifest,
+        nextManifest,
+      );
     }
     if (!editorSessionStatesEqual(this.store.getSnapshot(), split.session)) {
       this.store.replaceState(split.session);
@@ -4694,7 +4746,7 @@ export class EditorImplementation {
       for (const listener of [...this.manifestListeners]) {
         notifyProjectionSubscriber(() => listener(update));
       }
-      this.notifyDocumentSubscribers(update);
+      this.notifyDocumentSubscribers(update, directChildParentIds);
     };
     if (!deferNotifications) notify();
     return deferNotifications ? notify : noop;
@@ -5286,13 +5338,55 @@ export class EditorImplementation {
     return `${this.documentRevision}:${sequence}`;
   }
 
-  private notifyDocumentSubscribers(update: EditorDocumentUpdate): void {
+  private invalidateDirectChildBlockProjections(
+    update: EditorDocumentUpdate,
+    previousManifest: EditorManifestState,
+    nextManifest: EditorManifestState,
+  ): readonly BlockId[] {
+    const directChildParentIds = new Set<BlockId>();
+    for (const parentId of update.containerSequences.changedParentIds) {
+      if (parentId !== null) directChildParentIds.add(parentId);
+    }
+    const changedBlockIds = uniqueEditorBlockIds([
+      ...update.canonical.updatedBlockIds,
+      ...update.canonical.removedBlockIds,
+      ...update.canonical.metadataChangedBlockIds,
+      ...update.canonical.contentChangedBlockIds,
+    ]);
+    for (const blockId of changedBlockIds) {
+      const previousBlock = previousManifest.blocks[blockId];
+      if (
+        previousBlock &&
+        !previousBlock.tombstone &&
+        previousBlock.parentId !== null
+      ) {
+        directChildParentIds.add(previousBlock.parentId);
+      }
+      const nextBlock = nextManifest.blocks[blockId];
+      if (nextBlock && !nextBlock.tombstone && nextBlock.parentId !== null) {
+        directChildParentIds.add(nextBlock.parentId);
+      }
+    }
+    const orderedParentIds = [...directChildParentIds].sort((left, right) =>
+      left < right ? -1 : left > right ? 1 : 0,
+    );
+    for (const parentId of orderedParentIds) {
+      this.directChildBlocksByParentId.delete(parentId);
+    }
+    return orderedParentIds;
+  }
+
+  private notifyDocumentSubscribers(
+    update: EditorDocumentUpdate,
+    directChildParentIds: readonly BlockId[],
+  ): void {
     const changedBlockIds = uniqueEditorBlockIds([
       ...update.canonical.updatedBlockIds,
       ...update.canonical.removedBlockIds,
     ]).sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
     // Observable block notifications run in block-ID order, followed by
-    // canonical sequence notifications in root-first deterministic order.
+    // canonical sequence notifications and direct-child projections in
+    // deterministic parent order.
     for (const blockId of changedBlockIds) {
       const listeners = this.blockListenersById.get(blockId);
       if (!listeners) continue;
@@ -5311,6 +5405,14 @@ export class EditorImplementation {
       const listeners = this.blockChildSequenceListenersByKey.get(
         parentKey(parentId),
       );
+      if (!listeners) continue;
+      for (const listener of [...listeners]) {
+        notifyProjectionSubscriber(listener);
+      }
+    }
+
+    for (const parentId of directChildParentIds) {
+      const listeners = this.directChildBlockListenersByParentId.get(parentId);
       if (!listeners) continue;
       for (const listener of [...listeners]) {
         notifyProjectionSubscriber(listener);

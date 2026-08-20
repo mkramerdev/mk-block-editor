@@ -6,6 +6,22 @@ export const FIRST_DRAFT_TABLE_DEFAULT_WIDTH = 0;
 export const FIRST_DRAFT_TABLE_DEFAULT_VIEW_ID = "";
 const MAX_TABLE_ID_ALLOCATION_ATTEMPTS = 100;
 
+export type FirstDraftTableColumnIdResolution =
+  | {
+      readonly kind: "canonical";
+      readonly ids: readonly string[];
+    }
+  | {
+      readonly kind: "synthetic-presentation";
+      readonly ids: readonly string[];
+    };
+
+export interface NormalizedFirstDraftTableColumns {
+  readonly columnIds: readonly string[];
+  readonly columnWidths: Readonly<Record<string, number>>;
+  readonly replacedInvalidIdentities: boolean;
+}
+
 export function createFirstDraftTableColumnId(
   existingColumnIds: readonly string[],
   createId: () => string = createBlockId,
@@ -53,15 +69,93 @@ export function createFirstDraftTableMetadata(
   };
 }
 
-export function readFirstDraftTableColumnIds(
+export function resolveFirstDraftTableColumnIds(
   metadata: Readonly<Record<string, unknown>> | undefined,
   count: number,
-): readonly string[] {
+): FirstDraftTableColumnIdResolution {
   const ids = metadata?.[TABLE_COLUMN_IDS_FIELD];
   return Array.isArray(ids) &&
     ids.length === count &&
-    ids.every((id) => typeof id === "string") &&
+    ids.every((id) => typeof id === "string" && id.length > 0) &&
     new Set(ids).size === ids.length
-    ? ids
-    : Array.from({ length: count }, (_, index) => `column-${index + 1}`);
+    ? { kind: "canonical", ids }
+    : {
+        kind: "synthetic-presentation",
+        ids: Array.from({ length: count }, (_, index) => `column-${index + 1}`),
+      };
+}
+
+/** Prepares canonical identities and width metadata without mutating source. */
+export function normalizeFirstDraftTableColumns(
+  metadata: Readonly<Record<string, unknown>> | undefined,
+  count: number,
+  createId: () => string = createBlockId,
+): NormalizedFirstDraftTableColumns {
+  if (!Number.isInteger(count) || count < 1) {
+    throw new Error("table column count must be a positive integer");
+  }
+  const resolution = resolveFirstDraftTableColumnIds(metadata, count);
+  const columnIds =
+    resolution.kind === "canonical"
+      ? resolution.ids
+      : createFirstDraftTableColumnIds(count, createId);
+  return {
+    columnIds,
+    columnWidths: remapFirstDraftTableColumnWidths(
+      metadata,
+      resolution,
+      columnIds,
+    ),
+    replacedInvalidIdentities: resolution.kind !== "canonical",
+  };
+}
+
+function remapFirstDraftTableColumnWidths(
+  metadata: Readonly<Record<string, unknown>> | undefined,
+  resolution: FirstDraftTableColumnIdResolution,
+  columnIds: readonly string[],
+): Readonly<Record<string, number>> {
+  const rawWidths = metadata?.[TABLE_COLUMN_WIDTHS_FIELD];
+  if (!rawWidths || typeof rawWidths !== "object" || Array.isArray(rawWidths)) {
+    return {};
+  }
+  const widths = rawWidths as Readonly<Record<string, unknown>>;
+  const rawIds = metadata?.[TABLE_COLUMN_IDS_FIELD];
+  const sourceIds: readonly (string | null)[] =
+    resolution.kind === "canonical"
+      ? resolution.ids
+      : positionalWidthSourceIds(rawIds, resolution.ids);
+  return Object.fromEntries(
+    sourceIds.flatMap((sourceId, index) => {
+      const targetId = columnIds[index];
+      const width = sourceId === null ? undefined : widths[sourceId];
+      return targetId &&
+        typeof width === "number" &&
+        Number.isFinite(width) &&
+        width > 0
+        ? [[targetId, width] as const]
+        : [];
+    }),
+  );
+}
+
+function positionalWidthSourceIds(
+  rawIds: unknown,
+  presentationIds: readonly string[],
+): readonly (string | null)[] {
+  if (rawIds === undefined) return presentationIds;
+  if (!Array.isArray(rawIds) || rawIds.length !== presentationIds.length) {
+    return presentationIds.map(() => null);
+  }
+  const counts = new Map<string, number>();
+  for (const value of rawIds) {
+    if (typeof value === "string" && value.length > 0) {
+      counts.set(value, (counts.get(value) ?? 0) + 1);
+    }
+  }
+  return rawIds.map((value) =>
+    typeof value === "string" && value.length > 0 && counts.get(value) === 1
+      ? value
+      : null,
+  );
 }

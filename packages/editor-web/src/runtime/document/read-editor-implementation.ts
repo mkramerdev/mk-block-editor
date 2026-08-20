@@ -34,6 +34,13 @@ import type {
 
 const noop = () => undefined;
 
+interface ReadEditorGraphChanges {
+  readonly changedBlockIds: readonly BlockId[];
+  readonly rootsChanged: boolean;
+  readonly changedChildParentIds: readonly BlockId[];
+  readonly directChildParentIds: readonly BlockId[];
+}
+
 /**
  * Canonical graph/read projection runtime. It owns the same local selection
  * foundation as the editable editor, without editing or remote selection.
@@ -57,6 +64,11 @@ export class ReadEditorImplementation implements ReadEditor {
   private readonly blockListeners = new Map<BlockId, Set<() => void>>();
   private readonly rootListeners = new Set<() => void>();
   private readonly childListeners = new Map<BlockId, Set<() => void>>();
+  private readonly directChildBlocksByParentId = new Map<
+    BlockId,
+    readonly VersionedBlock[]
+  >();
+  private readonly directChildListeners = new Map<BlockId, Set<() => void>>();
   private readonly cleanups: (() => void)[] = [];
   private readonly remoteTransactions: RemoteTransactionCoordinator;
 
@@ -103,6 +115,21 @@ export class ReadEditorImplementation implements ReadEditor {
 
   getChildBlockIds(parentId: BlockId): readonly BlockId[] {
     return this.childIdsByParentId[parentId] ?? emptyBlockIds;
+  }
+
+  getDirectChildBlocks(parentId: BlockId): readonly VersionedBlock[] {
+    const cached = this.directChildBlocksByParentId.get(parentId);
+    if (cached) return cached;
+    const result: VersionedBlock[] = [];
+    for (const childId of this.getChildBlockIds(parentId)) {
+      const block = this.blocks[childId];
+      if (block && !block.tombstone && block.parentId === parentId) {
+        result.push(block);
+      }
+    }
+    const snapshot = Object.freeze(result);
+    this.directChildBlocksByParentId.set(parentId, snapshot);
+    return snapshot;
   }
 
   getLastChildBlockId(parentId: BlockId | null): BlockId | null {
@@ -169,6 +196,24 @@ export class ReadEditorImplementation implements ReadEditor {
     };
   }
 
+  subscribeDirectChildBlocks(
+    parentId: BlockId,
+    listener: () => void,
+  ): () => void {
+    if (this.disposed) return noop;
+    const listeners =
+      this.directChildListeners.get(parentId) ?? new Set<() => void>();
+    listeners.add(listener);
+    this.directChildListeners.set(parentId, listeners);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      listeners.delete(listener);
+      if (listeners.size === 0) this.directChildListeners.delete(parentId);
+    };
+  }
+
   applyRemoteTransaction(
     transaction: RemoteEditorTransaction,
   ): RemoteTransactionResult {
@@ -197,9 +242,10 @@ export class ReadEditorImplementation implements ReadEditor {
     try {
       applied = this.contentRuntime.commitContent(input.validatedContent);
       this.installGraph(input.nextState);
+      const graphChanges = this.prepareGraphChanges(previous);
       input.afterCanonicalStateInstalled();
       this.contentRuntime.publishContentCommit(applied);
-      this.notifyGraphChanges(previous);
+      this.notifyGraphChanges(graphChanges);
       return this.blockGraphVersion;
     } catch (error) {
       if (applied) {
@@ -244,6 +290,8 @@ export class ReadEditorImplementation implements ReadEditor {
     this.blockListeners.clear();
     this.rootListeners.clear();
     this.childListeners.clear();
+    this.directChildBlocksByParentId.clear();
+    this.directChildListeners.clear();
     this.selectionController.dispose();
     this.geometryOwner.dispose();
     this.contentRuntime.destroy();
@@ -256,7 +304,9 @@ export class ReadEditorImplementation implements ReadEditor {
     this.blockGraphVersion = state.blockGraphVersion;
   }
 
-  private notifyGraphChanges(previous: RemoteCanonicalState): void {
+  private prepareGraphChanges(
+    previous: RemoteCanonicalState,
+  ): ReadEditorGraphChanges {
     const previousBlocks = previous.blocks;
     const previousRoots = previous.rootBlockIds;
     const previousChildren = previous.childIdsByParentId;
@@ -264,19 +314,31 @@ export class ReadEditorImplementation implements ReadEditor {
       ...(Object.keys(previousBlocks) as BlockId[]),
       ...(Object.keys(this.blocks) as BlockId[]),
     ]);
+    const changedBlockIds: BlockId[] = [];
+    const affectedDirectChildParentIds = new Set<BlockId>();
     for (const blockId of blockIds) {
       if (previousBlocks[blockId] === this.blocks[blockId]) continue;
-      for (const listener of this.blockListeners.get(blockId) ?? []) {
-        notifyListener(listener);
+      changedBlockIds.push(blockId);
+      const previousBlock = previousBlocks[blockId];
+      if (
+        previousBlock &&
+        !previousBlock.tombstone &&
+        previousBlock.parentId !== null
+      ) {
+        affectedDirectChildParentIds.add(previousBlock.parentId);
+      }
+      const nextBlock = this.blocks[blockId];
+      if (nextBlock && !nextBlock.tombstone && nextBlock.parentId !== null) {
+        affectedDirectChildParentIds.add(nextBlock.parentId);
       }
     }
-    if (!arrayEqual(previousRoots, this.rootBlockIds)) {
-      for (const listener of this.rootListeners) notifyListener(listener);
-    }
+    changedBlockIds.sort(compareBlockIds);
+    const rootsChanged = !arrayEqual(previousRoots, this.rootBlockIds);
     const parentIds = new Set([
       ...(Object.keys(previousChildren) as BlockId[]),
       ...(Object.keys(this.childIdsByParentId) as BlockId[]),
     ]);
+    const changedChildParentIds: BlockId[] = [];
     for (const parentId of parentIds) {
       if (
         arrayEqual(
@@ -286,7 +348,40 @@ export class ReadEditorImplementation implements ReadEditor {
       ) {
         continue;
       }
+      changedChildParentIds.push(parentId);
+      affectedDirectChildParentIds.add(parentId);
+    }
+    changedChildParentIds.sort(compareBlockIds);
+    const directChildParentIds = [...affectedDirectChildParentIds].sort(
+      compareBlockIds,
+    );
+    for (const parentId of directChildParentIds) {
+      this.directChildBlocksByParentId.delete(parentId);
+    }
+    return {
+      changedBlockIds,
+      rootsChanged,
+      changedChildParentIds,
+      directChildParentIds,
+    };
+  }
+
+  private notifyGraphChanges(changes: ReadEditorGraphChanges): void {
+    for (const blockId of changes.changedBlockIds) {
+      for (const listener of this.blockListeners.get(blockId) ?? []) {
+        notifyListener(listener);
+      }
+    }
+    if (changes.rootsChanged) {
+      for (const listener of this.rootListeners) notifyListener(listener);
+    }
+    for (const parentId of changes.changedChildParentIds) {
       for (const listener of this.childListeners.get(parentId) ?? []) {
+        notifyListener(listener);
+      }
+    }
+    for (const parentId of changes.directChildParentIds) {
+      for (const listener of this.directChildListeners.get(parentId) ?? []) {
         notifyListener(listener);
       }
     }
@@ -324,6 +419,10 @@ function arrayEqual<T>(left: readonly T[], right: readonly T[]): boolean {
     (left.length === right.length &&
       left.every((value, index) => value === right[index]))
   );
+}
+
+function compareBlockIds(left: BlockId, right: BlockId): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 const emptyBlockIds = Object.freeze([]) as readonly BlockId[];

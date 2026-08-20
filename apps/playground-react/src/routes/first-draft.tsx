@@ -8,6 +8,12 @@ const SEEDED_DOCUMENT_ID =
 
 const browserIdentity = createBrowserIdentity();
 
+interface BrowserIdentity {
+  readonly actorId: string;
+  readonly clientId: string;
+  readonly displayName: string;
+}
+
 export default function FirstDraft() {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const webSocketUrl =
@@ -30,8 +36,7 @@ export default function FirstDraft() {
             documentId: SEEDED_DOCUMENT_ID,
             actorId: browserIdentity.actorId,
             clientId: browserIdentity.clientId,
-            authenticationToken: "dev-editor-realtime-token",
-            displayName: "Playground editor",
+            displayName: browserIdentity.displayName,
             color: "#4f46e5",
           }}
         />
@@ -40,15 +45,25 @@ export default function FirstDraft() {
   );
 }
 
-function createBrowserIdentity(): {
-  readonly actorId: string;
-  readonly clientId: string;
-} {
-  const randomId = () =>
-    globalThis.crypto?.randomUUID?.() ??
-    `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+function createBrowserIdentity(): BrowserIdentity {
+  const actorToken = randomId();
+  const clientToken = randomId();
   return {
-    actorId: `playground-actor-${randomId()}`,
-    clientId: `playground-client-${randomId()}`,
+    actorId: `playground-actor-${actorToken}`,
+    clientId: `playground-client-${clientToken}`,
+    displayName: `User ${shortDisplayId(actorToken)}`,
   };
+}
+
+function randomId(): string {
+  return (
+    globalThis.crypto?.randomUUID?.() ??
+    `${Date.now()}-${Math.random().toString(16).slice(2)}`
+  );
+}
+
+function shortDisplayId(actorToken: string): string {
+  const normalized = actorToken.toLowerCase().replace(/[^a-z0-9]/gu, "");
+  if (normalized.length === 0) return "anon";
+  return normalized.slice(-6);
 }

@@ -1,5 +1,9 @@
 import { validateAndCloneInlineAtomMetadata } from "@repo/editor-core/content/inline-atoms";
-import type { NodeView, PMNode } from "@repo/editor-dom/prosemirror";
+import type {
+  NodeView,
+  NodeViewConstructor,
+  PMNode,
+} from "@repo/editor-dom/prosemirror";
 import type { InlineAtomDefinition } from "../definition/contracts.ts";
 import type {
   InlineAtomPortalRegistration,
@@ -9,14 +13,20 @@ import type {
 export function createInlineAtomNodeView(
   definition: InlineAtomDefinition,
   portals: InlineAtomPortalRegistry,
-): (node: PMNode) => InlineAtomNodeView {
-  return (node) => new PortalInlineAtomNodeView(definition, portals, node);
+): NodeViewConstructor {
+  return (node, view) =>
+    new PortalInlineAtomNodeView(
+      definition,
+      portals,
+      node,
+      view.dom.ownerDocument,
+    );
 }
 
 export function createInlineAtomNodeViews(
   definitions: readonly InlineAtomDefinition[],
   portals: InlineAtomPortalRegistry,
-): Readonly<Record<string, (node: PMNode) => InlineAtomNodeView>> {
+): Readonly<Record<string, NodeViewConstructor>> {
   return Object.freeze(
     Object.fromEntries(
       definitions.map((definition) => [
@@ -40,9 +50,10 @@ class PortalInlineAtomNodeView implements InlineAtomNodeView {
     private readonly definition: InlineAtomDefinition,
     private readonly portals: InlineAtomPortalRegistry,
     node: PMNode,
+    ownerDocument: Document,
   ) {
     this.node = node;
-    this.dom = document.createElement("span");
+    this.dom = ownerDocument.createElement("span");
     this.dom.contentEditable = "false";
     this.dom.dataset.inlineAtomType = definition.type;
     this.render();

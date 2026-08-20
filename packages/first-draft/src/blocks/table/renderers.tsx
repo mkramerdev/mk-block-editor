@@ -42,12 +42,13 @@ import {
   type TableRange,
 } from "./selection.ts";
 import {
-  readFirstDraftTableColumnIds,
+  resolveFirstDraftTableColumnIds,
   TABLE_COLUMN_WIDTHS_FIELD,
 } from "./model.ts";
 import {
   appendFirstDraftTableColumn,
   appendFirstDraftTableRow,
+  resizeFirstDraftTableColumn,
 } from "./mutations.ts";
 
 type Props = FirstDraftBlockRendererProps;
@@ -63,7 +64,10 @@ export function TableRenderer({
   const setHoveredBlockId = useSetHoveredFirstDraftBlockId();
   const rows = editor.getChildBlockIds(block.id);
   const columnCount = rows[0] ? editor.getChildBlockIds(rows[0]).length : 0;
-  const columnIds = readFirstDraftTableColumnIds(block.metadata, columnCount);
+  const columnIds = resolveFirstDraftTableColumnIds(
+    block.metadata,
+    columnCount,
+  ).ids;
   const widths = readColumnWidths(block.metadata, columnIds);
   const [preview, setPreview] = useState<Record<string, number> | null>(null);
   const [drag, setDrag] = useState<{
@@ -345,17 +349,14 @@ export function TableRenderer({
     if (next) setPreview(next);
   };
   const finishResize = (commit: boolean) => {
-    if (commit && preview) {
-      editor.updateBlockMetadata(
-        [
-          {
-            blockId: block.id,
-            values: { [TABLE_COLUMN_WIDTHS_FIELD]: preview },
-          },
-        ],
-        { editorSuggestion: null },
-      );
-    } else setPreview(null);
+    if (commit && preview && drag) {
+      const columnIndex = columnIds.indexOf(drag.id);
+      const width = preview[drag.id];
+      if (columnIndex >= 0 && width !== undefined) {
+        resizeFirstDraftTableColumn(editor, block.id, columnIndex, width);
+      }
+    }
+    setPreview(null);
     setDrag(null);
   };
   const pointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -600,16 +601,14 @@ export function TableRenderer({
                         (widths[id] ?? MIN_WIDTH) +
                           (event.key === "ArrowLeft" ? -8 : 8),
                       );
-                      if (next)
-                        editor.updateBlockMetadata(
-                          [
-                            {
-                              blockId: block.id,
-                              values: { [TABLE_COLUMN_WIDTHS_FIELD]: next },
-                            },
-                          ],
-                          { editorSuggestion: null },
+                      if (next) {
+                        resizeFirstDraftTableColumn(
+                          editor,
+                          block.id,
+                          index,
+                          next[id]!,
                         );
+                      }
                     }
                   }}
                 />
@@ -619,9 +618,7 @@ export function TableRenderer({
           <TableAppendButton
             axis="column"
             label="Add table column"
-            onAppend={() =>
-              appendFirstDraftTableColumn(editor, block.id, columnIds)
-            }
+            onAppend={() => appendFirstDraftTableColumn(editor, block.id)}
           />
           <TableAppendButton
             axis="row"
@@ -682,7 +679,7 @@ export function TableRowRenderer({ block, editor, children }: Props) {
     () => (tableId ? editor.getBlock(tableId) : null),
   );
   const count = editor.getChildBlockIds(block.id).length;
-  const ids = readFirstDraftTableColumnIds(table?.metadata, count);
+  const ids = resolveFirstDraftTableColumnIds(table?.metadata, count).ids;
   const widths = readColumnWidths(table?.metadata, ids);
   const fallbackTracks = ids
     .map((id) => `${widths[id] ?? MIN_WIDTH}px`)

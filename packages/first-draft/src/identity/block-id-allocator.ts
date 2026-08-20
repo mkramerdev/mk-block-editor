@@ -1,6 +1,5 @@
-import { createBlockId, type BlockId } from "@repo/editor-core/kernel";
-
-const MAX_BLOCK_ID_ALLOCATION_ATTEMPTS = 100;
+import { createCollisionSafeBlockIdAllocator } from "@repo/editor-core/editing";
+import type { BlockId } from "@repo/editor-core/kernel";
 
 interface BlockIdentityOwner {
   getBlock(blockId: BlockId): unknown | null;
@@ -15,23 +14,12 @@ export function createFirstDraftBlockIdAllocator(
     readonly purpose: string;
   },
 ): () => BlockId {
-  const createId = options.createId ?? createBlockId;
-  const allocated = new Set(options.reservedBlockIds ?? []);
-  return () => {
-    for (
-      let attempt = 0;
-      attempt < MAX_BLOCK_ID_ALLOCATION_ATTEMPTS;
-      attempt += 1
-    ) {
-      const candidate = createId();
-      if (allocated.has(candidate) || owner.getBlock(candidate) !== null) {
-        continue;
-      }
-      allocated.add(candidate);
-      return candidate;
-    }
-    throw new Error(
-      `unable to allocate a unique block id for ${options.purpose}`,
-    );
-  };
+  return createCollisionSafeBlockIdAllocator({
+    ...(options.createId ? { createBlockId: options.createId } : {}),
+    ...(options.reservedBlockIds
+      ? { reservedBlockIds: options.reservedBlockIds }
+      : {}),
+    isBlockIdReserved: (blockId) => owner.getBlock(blockId) !== null,
+    purpose: options.purpose,
+  }).allocateBlockId;
 }

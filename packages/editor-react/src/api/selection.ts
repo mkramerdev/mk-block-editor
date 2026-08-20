@@ -49,6 +49,7 @@ export { createIdleSelectionSnapshot } from "../selection/model/snapshot.ts";
 export { validateEditorSelectionInvalidation } from "../selection/controller/invalidation.ts";
 export { blockInternalSelectionSubsystemId } from "../selection/model/types.ts";
 export {
+  editorStableSelectionsEqual,
   projectCanonicalSelectionToStable,
   projectCanonicalSelectionToTransaction,
   projectTransactionSelectionToStable,

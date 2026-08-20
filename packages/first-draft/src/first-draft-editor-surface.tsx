@@ -53,7 +53,6 @@ export interface FirstDraftCollaborationOptions {
   readonly documentId: string;
   readonly actorId: string;
   readonly clientId: string;
-  readonly authenticationToken: string;
   readonly displayName?: string;
   readonly color?: string;
 }
@@ -98,7 +97,6 @@ interface FirstDraftConnectionInputs {
   readonly documentId: string;
   readonly actorId: string;
   readonly clientId: string;
-  readonly authenticationToken: string;
   readonly displayName?: string;
   readonly color?: string;
 }
@@ -133,8 +131,6 @@ export function FirstDraftEditorSurface({
   const requestedDocumentId = collaboration?.documentId ?? null;
   const requestedActorId = collaboration?.actorId ?? null;
   const requestedClientId = collaboration?.clientId ?? null;
-  const requestedAuthenticationToken =
-    collaboration?.authenticationToken ?? null;
   const requestedDisplayName = collaboration?.displayName;
   const requestedColor = collaboration?.color;
   const connectionInputs = useMemo<FirstDraftConnectionInputs | null>(
@@ -145,7 +141,6 @@ export function FirstDraftEditorSurface({
             documentId: requestedDocumentId!,
             actorId: requestedActorId!,
             clientId: requestedClientId!,
-            authenticationToken: requestedAuthenticationToken!,
             ...(requestedDisplayName === undefined
               ? {}
               : { displayName: requestedDisplayName }),
@@ -155,7 +150,6 @@ export function FirstDraftEditorSurface({
     [
       hasCollaboration,
       requestedActorId,
-      requestedAuthenticationToken,
       requestedClientId,
       requestedColor,
       requestedDisplayName,
@@ -241,7 +235,6 @@ export function FirstDraftEditorSurface({
       socket.send(
         encodeFirstDraftMessage({
           type: "connect-first-draft-session",
-          authenticationToken: connectionInputs.authenticationToken,
           ...identity,
         }),
       );

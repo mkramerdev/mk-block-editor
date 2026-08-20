@@ -6,7 +6,7 @@ import type {
 } from "@repo/editor-react/selection";
 import type { EditorExternalStore } from "@repo/editor-react/store";
 import type { BlockSelectionModel } from "@repo/editor-core/selection";
-import type { BlockType } from "@repo/editor-core/document";
+import type { BlockType, VersionedBlock } from "@repo/editor-core/document";
 import type { BlockId } from "@repo/editor-core/kernel";
 import type { EditorContentRuntime } from "@repo/editor-core/content";
 import type { EditorContentRuntimeResources } from "../content/runtime-resources.ts";
@@ -38,8 +38,13 @@ export interface EditorRendererInfrastructure {
   getSelectionGraphRevision(): number;
   readBlockPlainText(blockId: BlockId, blockType: BlockType): string;
   readBlockSelectionModel(blockId: BlockId): BlockSelectionModel | null;
+  getDirectChildBlocks(parentId: BlockId): readonly VersionedBlock[];
   subscribeBlock(blockId: BlockId, listener: () => void): () => void;
   subscribeChildBlockIds(parentId: BlockId, listener: () => void): () => void;
+  subscribeDirectChildBlocks(
+    parentId: BlockId,
+    listener: () => void,
+  ): () => void;
   subscribeRootBlockIds(listener: () => void): () => void;
 }
 

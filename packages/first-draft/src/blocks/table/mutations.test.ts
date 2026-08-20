@@ -15,17 +15,50 @@ import {
 import { convertEditorTransactionToTransport } from "../../transport/editor-transaction-to-transport.ts";
 import { createFirstDraftViewStateStore } from "../view-state.tsx";
 import {
-  readFirstDraftTableColumnIds,
+  resolveFirstDraftTableColumnIds,
   TABLE_COLUMN_IDS_FIELD,
+  TABLE_COLUMN_WIDTHS_FIELD,
 } from "./model.ts";
 import {
   appendFirstDraftTableColumn,
   appendFirstDraftTableRow,
+  resizeFirstDraftTableColumn,
 } from "./mutations.ts";
 
 const tableId = asBlockId("fd-table");
 const canonicalIdPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const invalidColumnMetadataCases: readonly {
+  readonly name: string;
+  readonly columnIds: readonly string[] | undefined;
+  readonly widths: Readonly<Record<string, number>>;
+  readonly expectedWidths: Readonly<Record<string, number>>;
+}[] = [
+  {
+    name: "missing identities",
+    columnIds: undefined,
+    widths: { "column-1": 180, "column-2": 200, stale: 900 },
+    expectedWidths: { "normalized-1": 180, "normalized-2": 200 },
+  },
+  {
+    name: "wrong-length identities",
+    columnIds: ["only-one"],
+    widths: { "only-one": 180 },
+    expectedWidths: {},
+  },
+  {
+    name: "duplicate identities",
+    columnIds: ["duplicate", "duplicate", "unique"],
+    widths: { duplicate: 180, unique: 240 },
+    expectedWidths: { "normalized-3": 240 },
+  },
+  {
+    name: "empty identities",
+    columnIds: ["", "valid-two", "valid-three"],
+    widths: { "": 160, "valid-two": 220, "valid-three": 260 },
+    expectedWidths: { "normalized-2": 220, "normalized-3": 260 },
+  },
+];
 const disposables: FirstDraftTestEditor[] = [];
 
 afterEach(() => {
@@ -122,9 +155,126 @@ describe("First Draft table mutations", () => {
     expect(row.cellIds).not.toContain(legacyCellId);
     expect(column.cellIds).not.toContain(legacyCellId);
     expect(column.columnId).not.toBe("first-draft-column-6");
+    expect(readColumnIds(editor).slice(0, 3)).toEqual([
+      "first-draft-column-6",
+      "fd-table-column-b",
+      "fd-table-column-c",
+    ]);
     expectRectangularTable(editor, 4, 4);
     expect(readColumnIds(editor)).toHaveLength(4);
     expect(new Set(readColumnIds(editor)).size).toBe(4);
+  });
+
+  it.each(invalidColumnMetadataCases)(
+    "normalizes $name atomically when appending a column",
+    ({ columnIds, widths, expectedWidths }) => {
+      const initial = snapshotWithTableMetadata(columnIds, widths);
+      const { editor, changes } = createEditor(initial);
+      const originalRows = editor.getChildBlockIds(tableId);
+      const originalCells = originalRows.flatMap((rowId) =>
+        editor.getChildBlockIds(rowId),
+      );
+      const before = editor.readSnapshot();
+      const candidates = [
+        "normalized-1",
+        "normalized-2",
+        "normalized-3",
+        "normalized-4",
+      ];
+
+      const result = appendFirstDraftTableColumn(editor, tableId, {
+        createColumnId: () => candidates.shift() ?? "normalized-exhausted",
+      });
+
+      expect(changes).toHaveLength(1);
+      expect(readColumnIds(editor)).toEqual([
+        "normalized-1",
+        "normalized-2",
+        "normalized-3",
+        "normalized-4",
+      ]);
+      expect(result.columnId).toBe("normalized-4");
+      expect(editor.getBlock(tableId)?.metadata?.columnWidths).toEqual(
+        expectedWidths,
+      );
+      expect(editor.getChildBlockIds(tableId)).toEqual(originalRows);
+      for (const cellId of originalCells) {
+        expect(editor.getBlock(cellId)).toMatchObject({
+          id: cellId,
+          tombstone: null,
+        });
+      }
+
+      expect(editor.undo()).toEqual({ status: "applied" });
+      expect(editor.getBlock(tableId)?.metadata).toEqual(
+        before.blocks[tableId]?.metadata,
+      );
+      expect(editor.getChildBlockIds(tableId)).toEqual(originalRows);
+      for (const cellId of originalCells) {
+        expect(editor.getBlock(cellId)).toMatchObject({
+          id: cellId,
+          tombstone: null,
+        });
+      }
+      expect(editor.redo()).toEqual({ status: "applied" });
+      expect(readColumnIds(editor)).toEqual([
+        "normalized-1",
+        "normalized-2",
+        "normalized-3",
+        "normalized-4",
+      ]);
+    },
+  );
+
+  it("normalizes identity and widths in the first resize transaction", () => {
+    const initial = snapshotWithTableMetadata(undefined, {
+      "column-1": 180,
+      "column-2": 200,
+      stale: 900,
+    });
+    const { editor, changes } = createEditor(initial);
+    const before = editor.readSnapshot();
+    const candidates = ["resize-1", "resize-2", "resize-3"];
+
+    const result = resizeFirstDraftTableColumn(editor, tableId, 1, 248, {
+      createColumnId: () => candidates.shift() ?? "resize-exhausted",
+    });
+
+    expect(result).toMatchObject({ columnId: "resize-2", width: 248 });
+    expect(changes).toHaveLength(1);
+    expect(readColumnIds(editor)).toEqual(["resize-1", "resize-2", "resize-3"]);
+    expect(editor.getBlock(tableId)?.metadata?.columnWidths).toEqual({
+      "resize-1": 180,
+      "resize-2": 248,
+    });
+    expect(editor.undo()).toEqual({ status: "applied" });
+    expect(editor.getBlock(tableId)?.metadata).toEqual(
+      before.blocks[tableId]?.metadata,
+    );
+    expect(editor.redo()).toEqual({ status: "applied" });
+    expect(readColumnIds(editor)).toEqual(["resize-1", "resize-2", "resize-3"]);
+  });
+
+  it("opens no transaction when table identity normalization is exhausted", () => {
+    const { editor, changes } = createEditor(
+      snapshotWithTableMetadata(undefined, {}),
+    );
+    const before = editor.readSnapshot();
+    const transaction = vi.spyOn(editor, "transaction");
+
+    expect(() =>
+      appendFirstDraftTableColumn(editor, tableId, {
+        createColumnId: () => "",
+      }),
+    ).toThrow("unable to allocate a unique table column id");
+    expect(() =>
+      resizeFirstDraftTableColumn(editor, tableId, 0, 220, {
+        createColumnId: () => "",
+      }),
+    ).toThrow("unable to allocate a unique table column id");
+    expect(transaction).not.toHaveBeenCalled();
+    expect(changes).toEqual([]);
+    expect(editor.readSnapshot()).toEqual(before);
   });
 
   it("continues allocating unique identities after snapshot reload", () => {
@@ -249,7 +399,7 @@ describe("First Draft table mutations", () => {
       }),
     ).toThrow("unable to allocate a unique block id for table mutation");
     expect(() =>
-      appendFirstDraftTableColumn(editor, tableId, readColumnIds(editor), {
+      appendFirstDraftTableColumn(editor, tableId, {
         createBlockId: collision,
       }),
     ).toThrow("unable to allocate a unique block id for table mutation");
@@ -352,6 +502,54 @@ describe("First Draft table mutations", () => {
     );
     expect(readColumnIds(reloaded)).toEqual(readColumnIds(editor));
   });
+
+  it("publishes normalized legacy metadata as one remote and reload-stable transaction", () => {
+    const snapshot = snapshotWithTableMetadata(
+      ["duplicate", "duplicate", "unique"],
+      { duplicate: 180, unique: 260 },
+    );
+    const { editor, changes } = createEditor(snapshot);
+    const peer = createEditor(snapshot).editor;
+    const originalRows = editor.getChildBlockIds(tableId);
+    const originalCells = originalRows.flatMap((rowId) =>
+      editor.getChildBlockIds(rowId),
+    );
+    const candidates = ["remote-1", "remote-2", "remote-3", "remote-4"];
+
+    appendFirstDraftTableColumn(editor, tableId, {
+      createColumnId: () => candidates.shift() ?? "remote-exhausted",
+    });
+
+    expect(changes).toHaveLength(1);
+    expect(
+      peer.applyRemoteTransaction({
+        transaction: convertEditorTransactionToTransport(changes[0]!),
+        authorSelection: { kind: "no-author-selection" },
+      }),
+    ).toMatchObject({ status: "applied" });
+    expect(readColumnIds(peer)).toEqual([
+      "remote-1",
+      "remote-2",
+      "remote-3",
+      "remote-4",
+    ]);
+    expect(peer.getBlock(tableId)?.metadata).toEqual(
+      editor.getBlock(tableId)?.metadata,
+    );
+    expect(peer.getChildBlockIds(tableId)).toEqual(originalRows);
+    for (const cellId of originalCells) {
+      expect(peer.getBlock(cellId)).toMatchObject({
+        id: cellId,
+        tombstone: null,
+      });
+    }
+
+    const reloaded = createEditor(peer.readSnapshot()).editor;
+    expect(readColumnIds(reloaded)).toEqual(readColumnIds(editor));
+    expect(reloaded.getBlock(tableId)?.metadata).toEqual(
+      editor.getBlock(tableId)?.metadata,
+    );
+  });
 });
 
 function createEditor(
@@ -382,17 +580,17 @@ function appendRow(editor: FirstDraftTestEditor) {
 }
 
 function appendColumn(editor: FirstDraftTestEditor) {
-  return appendFirstDraftTableColumn(editor, tableId, readColumnIds(editor));
+  return appendFirstDraftTableColumn(editor, tableId);
 }
 
 function readColumnIds(editor: FirstDraftTestEditor): readonly string[] {
   const table = editor.getBlock(tableId);
   const firstRowId = editor.getChildBlockIds(tableId)[0];
   if (!table || !firstRowId) throw new Error("Missing test table");
-  return readFirstDraftTableColumnIds(
+  return resolveFirstDraftTableColumnIds(
     table.metadata,
     editor.getChildBlockIds(firstRowId).length,
-  );
+  ).ids;
 }
 
 function expectRectangularTable(
@@ -466,6 +664,29 @@ function legacyCounterIdentitySnapshot(): EditorInstanceSnapshot {
       source.opaqueContentCheckpoints,
       replace,
     ),
+  };
+}
+
+function snapshotWithTableMetadata(
+  columnIds: readonly string[] | undefined,
+  columnWidths: Readonly<Record<string, number>>,
+): EditorInstanceSnapshot {
+  const source = createFirstDraftSnapshot();
+  const table = source.blocks[tableId]!;
+  const metadata = {
+    ...table.metadata,
+    ...(columnIds === undefined
+      ? {}
+      : { [TABLE_COLUMN_IDS_FIELD]: [...columnIds] }),
+    [TABLE_COLUMN_WIDTHS_FIELD]: { ...columnWidths },
+  };
+  if (columnIds === undefined) delete metadata[TABLE_COLUMN_IDS_FIELD];
+  return {
+    ...source,
+    blocks: {
+      ...source.blocks,
+      [tableId]: { ...table, metadata },
+    },
   };
 }
 

@@ -8,10 +8,12 @@ import {
   createCanonicalBlockFragment,
   duplicateCanonicalBlockSubtrees,
   materializeCanonicalBlockCreation,
+  reidentifyCanonicalBlockFragment,
   validateCanonicalBlockFragment,
   type CanonicalBlockFragment,
   type CanonicalBlockRecord,
 } from "./canonical-fragment.ts";
+import { createCollisionSafeBlockIdAllocator } from "./block-editing/block-id-allocator.ts";
 
 const renderer = () => null;
 const definitions: Readonly<Record<string, BlockDefinition>> = {
@@ -292,5 +294,100 @@ describe("canonical block fragments", () => {
       id(91),
       id(92),
     ]);
+  });
+
+  it("reidentifies detached structure with one collision-safe reservation set", () => {
+    const root = id(40);
+    const child = id(41);
+    const metadata = { tone: "note" } as const;
+    const content = createBlockRichTextContentFromPlainText(
+      "paragraph",
+      "same content",
+    );
+    const source = createCanonicalBlockFragment({
+      blocks: [
+        { id: root, type: "quote", parentId: null, metadata },
+        {
+          id: child,
+          type: "paragraph",
+          parentId: root,
+          content,
+          plainText: "same content",
+        },
+      ],
+      rootBlockIds: [root],
+      start: { kind: "block", blockId: root },
+      end: { kind: "text", blockId: child },
+      blockDefinitions: definitions,
+    });
+    const before = structuredClone(source);
+    const live = id(42);
+    const tombstoned = id(43);
+    const first = id(44);
+    const second = id(45);
+    const candidates = [
+      "" as BlockId,
+      root,
+      live,
+      tombstoned,
+      first,
+      first,
+      second,
+    ];
+    const allocator = createCollisionSafeBlockIdAllocator({
+      createBlockId: () => candidates.shift() ?? id(46),
+      reservedBlockIds: new Set(source.blocks.map((block) => block.id)),
+      isBlockIdReserved: (blockId) =>
+        blockId === live || blockId === tombstoned,
+      purpose: "fragment test",
+    });
+
+    const result = reidentifyCanonicalBlockFragment({
+      fragment: source,
+      blockDefinitions: definitions,
+      allocateBlockId: allocator.allocateBlockId,
+    });
+
+    expect(result.blocks.map((block) => block.id)).toEqual([first, second]);
+    expect(result.blocks[1]?.parentId).toBe(first);
+    expect(result.rootBlockIds).toEqual([first]);
+    expect(result.start).toEqual({ kind: "block", blockId: first });
+    expect(result.end).toEqual({ kind: "text", blockId: second });
+    expect(result.blocks.map((block) => block.type)).toEqual([
+      "quote",
+      "paragraph",
+    ]);
+    expect(result.blocks[0]?.metadata).toBe(metadata);
+    expect(result.blocks[1]?.content).toBe(content);
+    expect(result.blocks[1]?.plainText).toBe("same content");
+    expect(source).toEqual(before);
+    expect(source.blocks[0]?.id).toBe(root);
+    expect(source.blocks[1]?.id).toBe(child);
+  });
+
+  it("fails clearly when destination-owned allocation is exhausted", () => {
+    const sourceId = id(50);
+    const source = createCanonicalBlockFragment({
+      blocks: [textRecord(sourceId)],
+      rootBlockIds: [sourceId],
+      start: { kind: "text", blockId: sourceId },
+      end: { kind: "text", blockId: sourceId },
+      blockDefinitions: definitions,
+    });
+    const collision = id(51);
+    const allocator = createCollisionSafeBlockIdAllocator({
+      createBlockId: () => collision,
+      reservedBlockIds: new Set([sourceId]),
+      isBlockIdReserved: (blockId) => blockId === collision,
+      purpose: "fragment test",
+    });
+
+    expect(() =>
+      reidentifyCanonicalBlockFragment({
+        fragment: source,
+        blockDefinitions: definitions,
+        allocateBlockId: allocator.allocateBlockId,
+      }),
+    ).toThrow("unable to allocate a unique block id for fragment test");
   });
 });

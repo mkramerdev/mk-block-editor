@@ -2,6 +2,22 @@ import { describe, expect, it } from "vitest";
 import { loadEditorRealtimeConfig } from "./config.ts";
 
 describe("editor realtime configuration", () => {
+  it("loads only the server and PostgreSQL settings", () => {
+    expect(
+      loadEditorRealtimeConfig({
+        NODE_ENV: "test",
+        EDITOR_REALTIME_HOST: "127.0.0.1",
+        EDITOR_REALTIME_PORT: "0",
+        EDITOR_DOCUMENT_POSTGRES_URL: "postgres://example.test/editor",
+      }),
+    ).toEqual({
+      host: "127.0.0.1",
+      port: 0,
+      nodeEnv: "test",
+      postgresUrl: "postgres://example.test/editor",
+    });
+  });
+
   it("uses the local editor PostgreSQL database in development", () => {
     expect(
       loadEditorRealtimeConfig({ NODE_ENV: "development" }).postgresUrl,

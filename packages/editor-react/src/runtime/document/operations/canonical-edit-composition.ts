@@ -50,6 +50,7 @@ export function resolveCanonicalEditComposition(input: {
   readonly graph: CanonicalEditCompositionGraph;
   readonly target: CanonicalEditTarget;
   readonly fragment: CanonicalBlockFragment;
+  readonly allocateBlockId?: () => BlockId;
 }): ResolvedStructuralEditComposition | null {
   const rootTypes = canonicalFragmentRootTypes(input.fragment);
   if (input.target.kind === "placement") {
@@ -70,6 +71,7 @@ export function resolveCanonicalEditComposition(input: {
       input.target,
       input.fragment,
       rootTypes,
+      input.allocateBlockId,
     );
   }
   return resolveSelectionComposition(
@@ -77,6 +79,7 @@ export function resolveCanonicalEditComposition(input: {
     input.target.range,
     input.fragment,
     rootTypes,
+    input.allocateBlockId,
   );
 }
 
@@ -95,6 +98,7 @@ function resolveCaretComposition(
   target: Extract<CanonicalEditTarget, { kind: "caret" }>,
   inputFragment: CanonicalBlockFragment,
   rootTypes: readonly BlockType[],
+  allocateBlockId: (() => BlockId) | undefined,
 ): ResolvedStructuralEditComposition | null {
   const block = graph.getBlock(target.blockId);
   if (!block || block.tombstone) return null;
@@ -157,6 +161,7 @@ function resolveCaretComposition(
     fragment,
     block.type,
     suffix,
+    allocateBlockId,
   );
   if (!fragmentWithSuffix) return null;
   fragment = fragmentWithSuffix;
@@ -235,6 +240,7 @@ function resolveSelectionComposition(
   inputRange: StructuralEditRange,
   inputFragment: CanonicalBlockFragment,
   rootTypes: readonly BlockType[],
+  allocateBlockId: (() => BlockId) | undefined,
 ): ResolvedStructuralEditComposition | null {
   const first = inputRange.blocks[0];
   const last = inputRange.blocks.at(-1);
@@ -302,6 +308,7 @@ function resolveSelectionComposition(
       fragment,
       last.blockType,
       suffix,
+      allocateBlockId,
     );
     if (!fragmentWithSuffix) return null;
     fragment = fragmentWithSuffix;
@@ -508,6 +515,7 @@ function attachTrailingContent(
   fragment: CanonicalBlockFragment,
   suffixType: BlockType,
   suffix: RichTextDocumentNodeJson,
+  allocateBlockId: (() => BlockId) | undefined,
 ): CanonicalBlockFragment | null {
   if (richTextDocumentContentSize(suffix) === 0) return fragment;
   if (boundaryTargetsRoot(fragment, fragment.end)) {
@@ -535,6 +543,7 @@ function attachTrailingContent(
     }
   }
   const suffixRecord = createCanonicalBlockRecord({
+    ...(allocateBlockId ? { id: allocateBlockId() } : {}),
     type: suffixType,
     parentId: null,
     content: suffix,

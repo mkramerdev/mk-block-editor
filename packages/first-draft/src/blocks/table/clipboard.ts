@@ -15,19 +15,23 @@ import type {
   JsonObject,
   MutableJsonObject,
 } from "@repo/editor-core/kernel";
-import { createBlockRecord } from "@repo/editor-core/metadata";
 import type { EditorContentCodecs } from "@repo/editor-web/document-runtime";
 import {
   decodeTableRangeSelection,
   resolveTableRange,
   TABLE_INTERNAL_SELECTION_SUBSYSTEM_ID,
 } from "./selection.ts";
+import {
+  createFirstDraftTableColumnIds,
+  createFirstDraftTableMetadata,
+  resolveFirstDraftTableColumnIds,
+  TABLE_COLUMN_IDS_FIELD,
+  TABLE_COLUMN_WIDTHS_FIELD,
+} from "./model.ts";
 
 const TABLE_TYPE = "table";
 const ROW_TYPE = "tableRow";
 const CELL_TYPE = "tableCell";
-const COLUMN_IDS = "columnIds";
-const COLUMN_WIDTHS = "columnWidths";
 
 type MaterializeInput = Parameters<
   NonNullable<
@@ -155,14 +159,14 @@ export function materializeFirstDraftTableCellRange(
   if (!table || table.type !== TABLE_TYPE || !range) return null;
   const sourceCells = selectedCells(input, input.hostBlockId, range);
   if (!sourceCells) return null;
+  const firstSourceRowId = input.getChildBlockIds(input.hostBlockId)[0];
+  if (!firstSourceRowId) return null;
+  const sourceColumnCount = input.getChildBlockIds(firstSourceRowId).length;
   const rowCount = Math.abs(range.head.row - range.anchor.row) + 1;
   const startColumn = Math.min(range.anchor.column, range.head.column);
   const endColumn = Math.max(range.anchor.column, range.head.column);
   const columnCount = endColumn - startColumn + 1;
-  const newColumnIds = Array.from(
-    { length: columnCount },
-    () => createBlockRecord({ type: CELL_TYPE }).id,
-  );
+  const newColumnIds = createFirstDraftTableColumnIds(columnCount);
   const root = createCanonicalBlockRecord({
     type: TABLE_TYPE,
     metadata: selectedMetadata(
@@ -170,6 +174,7 @@ export function materializeFirstDraftTableCellRange(
       startColumn,
       endColumn,
       newColumnIds,
+      sourceColumnCount,
     ),
   });
   const records: CanonicalBlockRecord[] = [root];
@@ -242,18 +247,23 @@ function selectedMetadata(
   start: number,
   end: number,
   newIds: readonly string[],
+  sourceColumnCount: number,
 ): JsonObject {
+  const canonicalMetadata = createFirstDraftTableMetadata(newIds);
   const result = Object.fromEntries(
     Object.entries(source ?? {}).filter(
-      ([key]) => key !== COLUMN_IDS && key !== COLUMN_WIDTHS,
+      ([key]) =>
+        key !== TABLE_COLUMN_IDS_FIELD && key !== TABLE_COLUMN_WIDTHS_FIELD,
     ),
   ) as MutableJsonObject;
-  result[COLUMN_IDS] = [...newIds];
-  const sourceIds = source?.[COLUMN_IDS];
-  const sourceWidths = source?.[COLUMN_WIDTHS];
+  Object.assign(result, canonicalMetadata);
+  const sourceResolution = resolveFirstDraftTableColumnIds(
+    source,
+    sourceColumnCount,
+  );
+  const sourceIds = sourceResolution.ids;
+  const sourceWidths = source?.[TABLE_COLUMN_WIDTHS_FIELD];
   if (
-    Array.isArray(sourceIds) &&
-    sourceIds.every((id) => typeof id === "string") &&
     sourceWidths &&
     typeof sourceWidths === "object" &&
     !Array.isArray(sourceWidths)
@@ -267,7 +277,9 @@ function selectedMetadata(
           : [];
       }),
     );
-    if (Object.keys(retained).length > 0) result[COLUMN_WIDTHS] = retained;
+    if (Object.keys(retained).length > 0) {
+      result[TABLE_COLUMN_WIDTHS_FIELD] = retained;
+    }
   }
   return result;
 }
@@ -288,12 +300,10 @@ function plainTextTableFragment(
   matrix: readonly (readonly string[])[],
   definitions: MaterializeInput["blockDefinitions"],
 ): CanonicalBlockFragment | null {
-  const columns = matrix[0]!.map(
-    () => createBlockRecord({ type: CELL_TYPE }).id,
-  );
+  const columns = createFirstDraftTableColumnIds(matrix[0]!.length);
   const root = createCanonicalBlockRecord({
     type: TABLE_TYPE,
-    metadata: { width: 0, viewId: "", [COLUMN_IDS]: columns },
+    metadata: createFirstDraftTableMetadata(columns),
   });
   const records: CanonicalBlockRecord[] = [root];
   for (const values of matrix) {
@@ -357,14 +367,9 @@ function parseSemanticTable(
   }
   const root = createCanonicalBlockRecord({
     type: TABLE_TYPE,
-    metadata: {
-      width: 0,
-      viewId: "",
-      [COLUMN_IDS]: Array.from(
-        { length: columns! },
-        () => createBlockRecord({ type: CELL_TYPE }).id,
-      ),
-    },
+    metadata: createFirstDraftTableMetadata(
+      createFirstDraftTableColumnIds(columns!),
+    ),
   });
   const records: CanonicalBlockRecord[] = [root];
   for (const parsedCells of parsedRows) {

@@ -10,62 +10,51 @@
   "exports": {
     "./block-renderer": {
       "types": "./src/api/block-renderer.ts",
-      "development": "./src/api/block-renderer.ts",
       "import": "./dist/api/block-renderer.js"
     },
     "./document-runtime": {
       "types": "./src/api/document-runtime.ts",
-      "development": "./src/api/document-runtime.ts",
       "import": "./dist/api/document-runtime.js"
     },
     "./editor-definition": {
       "types": "./src/api/editor-definition.ts",
-      "development": "./src/api/editor-definition.ts",
       "import": "./dist/api/editor-definition.js"
     },
     "./read-runtime": {
       "types": "./src/api/read-runtime.ts",
-      "development": "./src/api/read-runtime.ts",
       "import": "./dist/api/read-runtime.js"
     },
     "./editor": {
       "types": "./src/api/editor.ts",
-      "development": "./src/api/editor.ts",
       "import": "./dist/api/editor.js"
     },
     "./clipboard-runtime": {
       "types": "./src/api/clipboard-runtime.ts",
-      "development": "./src/api/clipboard-runtime.ts",
       "import": "./dist/api/clipboard-runtime.js"
     },
     "./editable-block-renderer": {
       "types": "./src/api/editable-block-renderer.ts",
-      "development": "./src/api/editable-block-renderer.ts",
       "import": "./dist/api/editable-block-renderer.js"
     },
     "./keybindings": {
       "types": "./src/api/keybindings.ts",
-      "development": "./src/api/keybindings.ts",
       "import": "./dist/api/keybindings.js"
     },
     "./block-operations": {
       "types": "./src/api/block-operations.ts",
-      "development": "./src/api/block-operations.ts",
       "import": "./dist/api/block-operations.js"
     },
     "./typing-triggers": {
       "types": "./src/api/typing-triggers.ts",
-      "development": "./src/api/typing-triggers.ts",
       "import": "./dist/api/typing-triggers.js"
     },
     "./styles.css": {
-      "development": "./src/styles/editor.css",
       "default": "./dist/index.css"
     }
   },
   "scripts": {
     "build": "pnpm run clean && tsc -p tsconfig.build.json && node -e \"require('node:fs').copyFileSync('src/styles/editor.css', 'dist/index.css')\"",
-    "dev": "tsc -p tsconfig.build.json --watch",
+    "dev:compiler": "tsc -p tsconfig.build.json --watch",
     "check-types:source": "tsc --noEmit -p tsconfig.json",
     "check-types:tests": "tsc --noEmit -p tsconfig.test.json",
     "check-types": "pnpm run check-types:source && pnpm run check-types:tests && pnpm run typecheck:contracts",

@@ -4,7 +4,7 @@ This Vite and React playground runs on
 [http://localhost:3001](http://localhost:3001).
 
 ```sh
-pnpm --filter playground-react dev
+pnpm dev:playground-react
 ```
 
 Registered routes are:

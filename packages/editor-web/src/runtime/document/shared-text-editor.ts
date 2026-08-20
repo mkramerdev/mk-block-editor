@@ -156,9 +156,7 @@ export class SharedTextEditor {
       active.host.projection.removeAttribute("data-editor-text-root");
     if (view.dom.dataset.editorInputOwner !== "true")
       view.dom.dataset.editorInputOwner = "true";
-    if (view.dom.parentElement !== active.host.slot) {
-      active.host.slot.append(view.dom);
-    }
+    this.attachViewToHost(view, active.host.slot);
     const canonicalRange = readActivationCanonicalRange(
       this.editor,
       obligation,
@@ -435,7 +433,9 @@ export class SharedTextEditor {
     const options = this.createViewOptions(active);
     if (!this.view) {
       this.view = createBlockLocalProseMirrorView(options);
+      this.attachViewToHost(this.view, active.host.slot);
     } else {
+      this.attachViewToHost(this.view, active.host.slot);
       this.view.setProps(createBlockLocalProseMirrorViewProps(options));
     }
     if (
@@ -504,7 +504,7 @@ export class SharedTextEditor {
         : {}),
     });
     const mount =
-      this.view?.dom ?? active.host.shell.ownerDocument.createElement("div");
+      this.view?.dom ?? active.host.slot.ownerDocument.createElement("div");
     return {
       mount,
       blockId: block.id,
@@ -552,6 +552,11 @@ export class SharedTextEditor {
     } else {
       delete view.dom.dataset.editorPlaceholderVisibility;
     }
+  }
+
+  private attachViewToHost(view: EditorView, host: HTMLElement): void {
+    if (view.dom.parentElement !== host) host.append(view.dom);
+    view.updateRoot();
   }
 
   private detachActiveBlock(): void {

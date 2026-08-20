@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev:prepare": "node ../../scripts/assert-runtime-resolution.mjs editor-realtime",
+    "dev:consumer": "tsx src/index.ts",
     "build": "tsc -p tsconfig.build.json",
     "start": "node --enable-source-maps dist/index.js",
     "check-types": "tsc --noEmit",
@@ -12,7 +13,7 @@
     "lint": "eslint . --max-warnings 0",
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "build:dependencies": "pnpm --filter \"@repo/editor-realtime^...\" build",
-    "test": "pnpm run build:dependencies && vitest run",
+    "test": "node scripts/run-default-tests.mjs",
     "test:postgres": "pnpm run build:dependencies && vitest run --config vitest.postgres.config.ts",
     "test:watch": "pnpm run build:dependencies && vitest",
     "test:coverage": "pnpm run build:dependencies && vitest run --coverage"

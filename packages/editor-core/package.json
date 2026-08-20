@@ -7,72 +7,58 @@
   "exports": {
     "./kernel": {
       "types": "./src/api/kernel.ts",
-      "development": "./src/api/kernel.ts",
       "import": "./dist/api/kernel.js"
     },
     "./document": {
       "types": "./src/api/document.ts",
-      "development": "./src/api/document.ts",
       "import": "./dist/api/document.js"
     },
     "./definitions": {
       "types": "./src/api/definitions.ts",
-      "development": "./src/api/definitions.ts",
       "import": "./dist/api/definitions.js"
     },
     "./selection": {
       "types": "./src/api/selection.ts",
-      "development": "./src/api/selection.ts",
       "import": "./dist/api/selection.js"
     },
     "./operations": {
       "types": "./src/api/operations.ts",
-      "development": "./src/api/operations.ts",
       "import": "./dist/api/operations.js"
     },
     "./editing": {
       "types": "./src/api/editing.ts",
-      "development": "./src/api/editing.ts",
       "import": "./dist/api/editing.js"
     },
     "./content": {
       "types": "./src/api/content.ts",
-      "development": "./src/api/content.ts",
       "import": "./dist/api/content.js"
     },
     "./content/rich-text": {
       "types": "./src/api/content/rich-text.ts",
-      "development": "./src/api/content/rich-text.ts",
       "import": "./dist/api/content/rich-text.js"
     },
     "./content/marks": {
       "types": "./src/api/content/marks.ts",
-      "development": "./src/api/content/marks.ts",
       "import": "./dist/api/content/marks.js"
     },
     "./content/inline-atoms": {
       "types": "./src/api/content/inline-atoms.ts",
-      "development": "./src/api/content/inline-atoms.ts",
       "import": "./dist/api/content/inline-atoms.js"
     },
     "./content/urls": {
       "types": "./src/api/content/urls.ts",
-      "development": "./src/api/content/urls.ts",
       "import": "./dist/api/content/urls.js"
     },
     "./metadata": {
       "types": "./src/api/metadata.ts",
-      "development": "./src/api/metadata.ts",
       "import": "./dist/api/metadata.js"
     },
     "./codecs": {
       "types": "./src/api/codecs.ts",
-      "development": "./src/api/codecs.ts",
       "import": "./dist/api/codecs.js"
     },
     "./testing": {
       "types": "./src/api/testing.ts",
-      "development": "./src/api/testing.ts",
       "import": "./dist/api/testing.js"
     }
   },
@@ -82,7 +68,7 @@
   ],
   "scripts": {
     "build": "pnpm run clean && tsc -p tsconfig.build.json",
-    "dev": "tsc -p tsconfig.build.json --watch",
+    "dev:compiler": "tsc -p tsconfig.build.json --watch",
     "check-types:source": "tsc --noEmit -p tsconfig.json",
     "check-types:tests": "tsc --noEmit -p tsconfig.test.json",
     "check-types": "pnpm run check-types:source && pnpm run check-types:tests",

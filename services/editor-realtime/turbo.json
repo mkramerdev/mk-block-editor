@@ -5,10 +5,11 @@
     "check-types": {
       "dependsOn": ["^build", "^check-types"]
     },
-    "dev": {
+    "dev:consumer": {
       "dependsOn": ["^build"],
       "cache": false,
       "persistent": true,
+      "interruptible": true,
       "passThroughEnv": [
         "EDITOR_DOCUMENT_POSTGRES_URL",
         "EDITOR_REALTIME_*",

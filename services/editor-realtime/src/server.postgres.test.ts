@@ -36,8 +36,6 @@ describe.skipIf(postgresUrl === null)(
             config: {
               host: "127.0.0.1",
               port: 0,
-              authMode: "dev-shared",
-              devSharedToken: "startup-test-token",
               nodeEnv: "test",
               postgresUrl: postgresUrl!,
             },

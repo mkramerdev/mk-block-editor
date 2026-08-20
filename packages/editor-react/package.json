@@ -9,33 +9,28 @@
   "exports": {
     ".": {
       "types": "./src/api/index.ts",
-      "development": "./src/api/index.ts",
       "import": "./dist/api/index.js"
     },
     "./store": {
       "types": "./src/api/store.ts",
-      "development": "./src/api/store.ts",
       "import": "./dist/api/store.js"
     },
     "./selection": {
       "types": "./src/api/selection.ts",
-      "development": "./src/api/selection.ts",
       "import": "./dist/api/selection.js"
     },
     "./selection-model": {
       "types": "./src/selection/model/types.ts",
-      "development": "./src/selection/model/types.ts",
       "import": "./dist/selection/model/types.js"
     },
     "./editor": {
       "types": "./src/api/editor.ts",
-      "development": "./src/api/editor.ts",
       "import": "./dist/api/editor.js"
     }
   },
   "scripts": {
     "build": "pnpm run clean && tsc -p tsconfig.build.json",
-    "dev": "tsc -p tsconfig.build.json --watch",
+    "dev:compiler": "tsc -p tsconfig.build.json --watch",
     "check-types:source": "tsc --noEmit -p tsconfig.json",
     "check-types:tests": "tsc --noEmit -p tsconfig.test.json",
     "check-types": "pnpm run check-types:source && pnpm run check-types:tests",

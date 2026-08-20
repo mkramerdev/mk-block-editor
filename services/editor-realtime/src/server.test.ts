@@ -16,6 +16,8 @@ import {
   type EditorTransactionWebSocket,
   type FirstDraftMessage,
   type FirstDraftConnectionSocket,
+  type FirstDraftParticipantUpdateMessage,
+  type FirstDraftSelectionUpdateMessage,
   type FirstDraftSessionIdentity,
 } from "@repo/editor-first-draft/transport";
 import type { FirstDraftTransactionPersistence } from "@repo/editor-first-draft/server";
@@ -34,12 +36,18 @@ import {
   type EditorRealtimeTimeoutScheduler,
 } from "./server.ts";
 
-const authenticationToken = "dev-editor-realtime-token";
 const documentOne = "document-one";
 const documentTwo = "document-two";
 const textBlockId = asBlockId("fd-paragraph-intro");
 const metadataBlockId = asBlockId("fd-check-unchecked");
 const createdBlockId = asBlockId("phase-1-live-created-block");
+type BlockInternalSelection = Extract<
+  Extract<
+    FirstDraftSelectionUpdateMessage["selection"],
+    { readonly kind: "selection" }
+  >["selection"],
+  { readonly kind: "block-internal" }
+>;
 
 function initializeEditableEditor(options: {
   readonly definition: ReturnType<typeof createFirstDraftEditorDefinition>;
@@ -126,7 +134,7 @@ describe("the sole editor realtime WebSocket service", () => {
     });
   });
 
-  it("authenticates one binary session handshake and cleans up its document room", async () => {
+  it("establishes one anonymous binary session and cleans up its document room", async () => {
     server = await startTestEditorRealtimeServer({
       config: testConfig(),
       persistence: acceptingPersistence(),
@@ -140,7 +148,7 @@ describe("the sole editor realtime WebSocket service", () => {
     await expect(health.json()).resolves.toMatchObject({
       ok: true,
       protocol: "first-draft",
-      protocolVersion: 4,
+      protocolVersion: 5,
     });
     const serverOnlyError = waitForMessage(
       socket,
@@ -148,47 +156,50 @@ describe("the sole editor realtime WebSocket service", () => {
     );
     socket.send(
       encodeFirstDraftMessage({
-        type: "first-draft-session-connected",
-        ...identity,
+        type: "connect-first-draft-session",
+        ...session("replacement", documentTwo),
       }),
     );
     await expect(serverOnlyError).resolves.toMatchObject({
       code: "invalid-client-message",
       fatal: false,
     });
+    expect(server.documentSessionCount(documentOne)).toBe(1);
+    expect(server.documentSessionCount(documentTwo)).toBe(0);
 
     await closeSocket(socket);
     await waitFor(() => server?.documentSessionCount(documentOne) === 0);
   });
 
-  it("rejects unauthorized sessions and non-binary transaction messages", async () => {
+  it("rejects malformed sessions, document switches, and non-binary messages", async () => {
     server = await startTestEditorRealtimeServer({
       config: testConfig(),
       persistence: acceptingPersistence(),
     });
-    const unauthorized = await openSocket(server);
-    sockets.push(unauthorized);
-    const unauthorizedError = waitForMessage(
-      unauthorized,
+    const malformed = await openSocket(server);
+    sockets.push(malformed);
+    const malformedError = waitForMessage(
+      malformed,
       (message) => message.type === "first-draft-protocol-error",
     );
-    unauthorized.send(
+    const removedCredential = ["authentication", "Token"].join("");
+    malformed.send(
       encodeFirstDraftMessage({
         type: "connect-first-draft-session",
-        authenticationToken: "wrong-token",
-        ...session("unauthorized", documentOne),
-      }),
+        ...session("malformed", documentOne),
+        [removedCredential]: "removed-token",
+      } as unknown as FirstDraftMessage),
     );
-    await expect(unauthorizedError).resolves.toMatchObject({
+    await expect(malformedError).resolves.toMatchObject({
       type: "first-draft-protocol-error",
-      code: "unauthorized",
+      code: "session-connection-required",
       fatal: true,
     });
     expect(server.documentSessionCount(documentOne)).toBe(0);
 
     const wrongDocument = await openSocket(server);
     sockets.push(wrongDocument);
-    await authenticateSession(
+    await establishSession(
       wrongDocument,
       session("wrong-document", documentOne),
     );
@@ -203,10 +214,20 @@ describe("the sole editor realtime WebSocket service", () => {
       }),
     );
     await expect(documentError).resolves.toMatchObject({
-      code: "unauthorized-document",
+      code: "session-document-mismatch",
       fatal: false,
     });
     expect(server.documentSessionCount(documentTwo)).toBe(0);
+
+    const subscriptionError = waitForMessage(
+      wrongDocument,
+      (message) => message.type === "first-draft-protocol-error",
+    );
+    wrongDocument.send(await createTextTransactionFrame("before-subscription"));
+    await expect(subscriptionError).resolves.toMatchObject({
+      code: "document-subscription-required",
+      fatal: false,
+    });
 
     const invalidTextClient = await openSocket(server);
     sockets.push(invalidTextClient);
@@ -243,7 +264,7 @@ describe("the sole editor realtime WebSocket service", () => {
     const identityB = session("presence-b", documentOne);
     const socketB = await openSocket(server);
     sockets.push(socketB);
-    await authenticateSession(socketB, identityB);
+    await establishSession(socketB, identityB);
     const [, participantSnapshot] = await subscribeSession(socketB, identityB);
     expect(participantSnapshot).toMatchObject({
       type: "first-draft-participant-snapshot",
@@ -344,6 +365,241 @@ describe("the sole editor realtime WebSocket service", () => {
     expect(server.documentSessionCount(documentOne)).toBe(1);
   });
 
+  it("treats reordered participant retries as equal and rejects real same-revision changes", async () => {
+    const diagnostics = vi.fn();
+    server = await startTestEditorRealtimeServer({
+      config: testConfig(),
+      persistence: acceptingPersistence(),
+      onProtocolDiagnostic: diagnostics,
+    });
+    const identityA = session("ordered-participant-a", documentOne);
+    const identityB = session("ordered-participant-b", documentOne);
+    const socketA = await connectSession(server, identityA);
+    const socketB = await connectSession(server, identityB);
+    sockets.push(socketA, socketB);
+
+    const initial = participantMessage(identityA, 0, true);
+    const initialFrame = encodeFirstDraftMessage(initial);
+    const firstUpdate = waitForMessage(
+      socketB,
+      (message) => message.type === "first-draft-participant-update",
+    );
+    socketA.send(initialFrame);
+    await expect(firstUpdate).resolves.toMatchObject(initial);
+
+    const reordered = {
+      metadata: { color: "#123abc", displayName: identityA.actorId },
+      active: true,
+      presenceRevision: 0,
+      subject: {
+        sessionId: identityA.sessionId,
+        clientId: identityA.clientId,
+        actorId: identityA.actorId,
+      },
+      documentId: identityA.documentId,
+      type: "first-draft-participant-update",
+    } satisfies FirstDraftParticipantUpdateMessage;
+    const reorderedFrame = encodeFirstDraftMessage(reordered);
+    const initialJson = encodedMetadataText(initialFrame);
+    const reorderedJson = encodedMetadataText(reorderedFrame);
+    expect(initialJson.indexOf('"type"')).toBeLessThan(
+      initialJson.indexOf('"metadata"'),
+    );
+    expect(reorderedJson.indexOf('"metadata"')).toBeLessThan(
+      reorderedJson.indexOf('"type"'),
+    );
+    expect(initialJson.indexOf('"actorId"')).toBeLessThan(
+      initialJson.indexOf('"sessionId"'),
+    );
+    expect(reorderedJson.indexOf('"sessionId"')).toBeLessThan(
+      reorderedJson.indexOf('"actorId"'),
+    );
+    expect(initialJson.indexOf('"displayName"')).toBeLessThan(
+      initialJson.indexOf('"color"'),
+    );
+    expect(reorderedJson.indexOf('"color"')).toBeLessThan(
+      reorderedJson.indexOf('"displayName"'),
+    );
+
+    const retrySilence = expectNoMessage(
+      socketB,
+      (message) => message.type === "first-draft-participant-update",
+      50,
+    );
+    socketA.send(reorderedFrame);
+    await retrySilence;
+    expect(diagnostics).not.toHaveBeenCalledWith(
+      expect.objectContaining({ code: "presence-revision-conflict" }),
+    );
+
+    const identityC = session("ordered-participant-c", documentOne);
+    const socketC = await openSocket(server);
+    sockets.push(socketC);
+    await establishSession(socketC, identityC);
+    const [, snapshot] = await subscribeSession(socketC, identityC);
+    expect(snapshot).toMatchObject({
+      participants: [
+        expect.objectContaining({
+          subject: subject(identityA),
+          presenceRevision: 0,
+          active: true,
+          metadata: { displayName: identityA.actorId, color: "#123abc" },
+        }),
+      ],
+    });
+
+    const higherUpdate = waitForMessage(
+      socketB,
+      (message) =>
+        message.type === "first-draft-participant-update" &&
+        message.presenceRevision === 1,
+    );
+    socketA.send(
+      encodeFirstDraftMessage(participantMessage(identityA, 1, true)),
+    );
+    await higherUpdate;
+
+    const conflicts: FirstDraftParticipantUpdateMessage[] = [
+      participantMessage(identityA, 1, false),
+      {
+        ...participantMessage(identityA, 1, true),
+        metadata: { displayName: "Different", color: "#123abc" },
+      },
+      {
+        ...participantMessage(identityA, 1, true),
+        metadata: { displayName: identityA.actorId, color: "#abcdef" },
+      },
+    ];
+    for (const conflict of conflicts) {
+      const error = waitForMessage(
+        socketA,
+        (message) => message.type === "first-draft-protocol-error",
+      );
+      const peerSilence = expectNoMessage(
+        socketB,
+        (message) => message.type === "first-draft-participant-update",
+        50,
+      );
+      socketA.send(encodeFirstDraftMessage(conflict));
+      await expect(error).resolves.toMatchObject({
+        code: "presence-revision-conflict",
+      });
+      await peerSilence;
+    }
+
+    const identityD = session("ordered-participant-d", documentOne);
+    const socketD = await openSocket(server);
+    sockets.push(socketD);
+    await establishSession(socketD, identityD);
+    const [, finalSnapshot] = await subscribeSession(socketD, identityD);
+    expect(finalSnapshot).toMatchObject({
+      participants: [
+        expect.objectContaining({
+          subject: subject(identityA),
+          presenceRevision: 1,
+          active: true,
+          metadata: { displayName: identityA.actorId, color: "#123abc" },
+        }),
+      ],
+    });
+  });
+
+  it("uses JSON semantics for block-internal selection retries", async () => {
+    const diagnostics = vi.fn();
+    server = await startTestEditorRealtimeServer({
+      config: testConfig(),
+      persistence: acceptingPersistence(),
+      onProtocolDiagnostic: diagnostics,
+    });
+    const identityA = session("ordered-selection-a", documentOne);
+    const identityB = session("ordered-selection-b", documentOne);
+    const socketA = await connectSession(server, identityA);
+    const socketB = await connectSession(server, identityB);
+    sockets.push(socketA, socketB);
+
+    const initialSelection = blockInternalSelection({
+      outer: { first: 1, second: { enabled: true, label: "cell" } },
+      order: [1, 2],
+    });
+    const initialFrame = encodeFirstDraftMessage(
+      selectionMessage(identityA, 0, initialSelection),
+    );
+    const firstUpdate = waitForMessage(
+      socketB,
+      (message) => message.type === "first-draft-selection-update",
+    );
+    socketA.send(initialFrame);
+    await firstUpdate;
+
+    const reorderedSelection = blockInternalSelection({
+      order: [1, 2],
+      outer: { second: { label: "cell", enabled: true }, first: 1 },
+    });
+    const reorderedFrame = encodeFirstDraftMessage(
+      selectionMessage(identityA, 0, reorderedSelection),
+    );
+    const initialJson = encodedMetadataText(initialFrame);
+    const reorderedJson = encodedMetadataText(reorderedFrame);
+    expect(initialJson.indexOf('"first"')).toBeLessThan(
+      initialJson.indexOf('"second"'),
+    );
+    expect(reorderedJson.indexOf('"second"')).toBeLessThan(
+      reorderedJson.indexOf('"first"'),
+    );
+
+    const retrySilence = expectNoMessage(
+      socketB,
+      (message) => message.type === "first-draft-selection-update",
+      50,
+    );
+    socketA.send(reorderedFrame);
+    await retrySilence;
+    expect(diagnostics).not.toHaveBeenCalledWith(
+      expect.objectContaining({ code: "selection-revision-conflict" }),
+    );
+
+    const identityC = session("ordered-selection-c", documentOne);
+    const socketC = await openSocket(server);
+    sockets.push(socketC);
+    await establishSession(socketC, identityC);
+    const [, , snapshot] = await subscribeSession(socketC, identityC);
+    expect(snapshot).toMatchObject({
+      selections: [
+        expect.objectContaining({
+          subject: subject(identityA),
+          selectionRevision: 0,
+          selection: initialSelection,
+        }),
+      ],
+    });
+
+    const conflict = waitForMessage(
+      socketA,
+      (message) => message.type === "first-draft-protocol-error",
+    );
+    const conflictSilence = expectNoMessage(
+      socketB,
+      (message) => message.type === "first-draft-selection-update",
+      50,
+    );
+    socketA.send(
+      encodeFirstDraftMessage(
+        selectionMessage(
+          identityA,
+          0,
+          blockInternalSelection({
+            outer: { first: 1, second: { enabled: true, label: "cell" } },
+            order: [2, 1],
+          }),
+        ),
+      ),
+    );
+    await expect(conflict).resolves.toMatchObject({
+      code: "selection-revision-conflict",
+    });
+    await conflictSilence;
+  });
+
   it("expires unchanged selection presence at 30 seconds without expiring its participant", async () => {
     const scheduler = manualTimeoutScheduler();
     server = await startTestEditorRealtimeServer({
@@ -400,7 +656,7 @@ describe("the sole editor realtime WebSocket service", () => {
     const identityC = session("lease-c", documentOne);
     const socketC = await openSocket(server);
     sockets.push(socketC);
-    await authenticateSession(socketC, identityC);
+    await establishSession(socketC, identityC);
     const [, participantSnapshot, expiredSelectionSnapshot] =
       await subscribeSession(socketC, identityC);
     expect(participantSnapshot).toMatchObject({
@@ -681,7 +937,7 @@ describe("the sole editor realtime WebSocket service", () => {
       encodeFirstDraftMessage(selectionMessage(identityB, 1, blockSelection())),
     );
     await expect(impersonationError).resolves.toMatchObject({
-      code: "unauthorized-presence",
+      code: "presence-session-mismatch",
       fatal: false,
     });
     await peerSilence;
@@ -718,7 +974,7 @@ describe("the sole editor realtime WebSocket service", () => {
     expect(server.documentSessionCount(documentOne)).toBe(1);
   });
 
-  it("fans out an accepted canonical frame only after persistence to peers in the authorized document", async () => {
+  it("fans out an accepted canonical frame only after persistence to peers in the established document", async () => {
     server = await startTestEditorRealtimeServer({
       config: testConfig(),
       persistence: acceptingPersistence(),
@@ -788,7 +1044,7 @@ describe("the sole editor realtime WebSocket service", () => {
     const joiningIdentity = session("gap-joining", documentOne);
     const joining = await openSocket(server);
     sockets.push(joining);
-    await authenticateSession(joining, joiningIdentity);
+    await establishSession(joining, joiningIdentity);
     let replayCount = 0;
     joining.on("message", (data, isBinary) => {
       if (!isBinary) return;
@@ -1534,8 +1790,6 @@ function testConfig() {
   return {
     host: "127.0.0.1",
     port: 0,
-    authMode: "dev-shared" as const,
-    devSharedToken: authenticationToken,
     nodeEnv: "test",
     postgresUrl: "postgres://unused-in-injected-tests",
   };
@@ -1576,7 +1830,7 @@ function participantMessage(
 function selectionMessage(
   identity: FirstDraftSessionIdentity,
   selectionRevision: number,
-  selection: ReturnType<typeof blockSelection> | { readonly kind: "none" },
+  selection: FirstDraftSelectionUpdateMessage["selection"],
 ) {
   return {
     type: "first-draft-selection-update" as const,
@@ -1584,6 +1838,20 @@ function selectionMessage(
     subject: subject(identity),
     selectionRevision,
     selection,
+  };
+}
+
+function blockInternalSelection(
+  payload: BlockInternalSelection["payload"],
+): FirstDraftSelectionUpdateMessage["selection"] {
+  return {
+    kind: "selection",
+    selection: {
+      kind: "block-internal",
+      blockId: textBlockId,
+      subsystem: "test-block-internal",
+      payload,
+    },
   };
 }
 
@@ -1695,12 +1963,12 @@ async function connectSession(
   identity: FirstDraftSessionIdentity,
 ): Promise<WebSocket> {
   const socket = await openSocket(server);
-  await authenticateSession(socket, identity);
+  await establishSession(socket, identity);
   await subscribeSession(socket, identity);
   return socket;
 }
 
-async function authenticateSession(
+async function establishSession(
   socket: WebSocket,
   identity: FirstDraftSessionIdentity,
 ): Promise<void> {
@@ -1711,7 +1979,6 @@ async function authenticateSession(
   socket.send(
     encodeFirstDraftMessage({
       type: "connect-first-draft-session",
-      authenticationToken,
       ...identity,
     }),
   );
@@ -1779,6 +2046,12 @@ function waitForMessage(
     socket.on("message", onMessage);
     socket.on("close", onClose);
   });
+}
+
+function encodedMetadataText(frame: ArrayBuffer): string {
+  const view = new DataView(frame);
+  const metadataLength = view.getUint32(4);
+  return new TextDecoder().decode(new Uint8Array(frame, 8, metadataLength));
 }
 
 function waitForRawFrame(socket: WebSocket): Promise<ArrayBuffer> {

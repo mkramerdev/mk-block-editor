@@ -29,28 +29,23 @@ describe("the canonical First Draft PostgreSQL schema", () => {
     );
   });
 
-  it("is the schema source used by development, acceptance, and browser setup", () => {
+  it("is the schema source used by current development entry points", () => {
     const firstDraftPackage = source("packages/first-draft/package.json");
     const realtimePackage = source("services/editor-realtime/package.json");
     const seed = source(
       "packages/first-draft/scripts/seed-postgres-example.ts",
-    );
-    const browserServer = source(
-      "services/editor-realtime/test/first-draft-browser-server.ts",
     );
     const rootPackage = source("package.json");
     const combined = [
       firstDraftPackage,
       realtimePackage,
       seed,
-      browserServer,
       rootPackage,
     ].join("\n");
 
     expect(firstDraftPackage).not.toContain("@repo/editor-demo-postgres");
     expect(realtimePackage).not.toContain("@repo/editor-demo-postgres");
     expect(seed).toContain("seedFirstDraftPostgresDocument");
-    expect(browserServer).toContain("recreateFirstDraftPostgresDatabase");
     expect(rootPackage).toContain('"db:reset:first-draft"');
     expect(combined).not.toMatch(
       /editor_playwright|PGOPTIONS|search_path|skipSchemaBootstrap|editor_schema_metadata|schema_version/iu,
@@ -65,9 +60,9 @@ describe("the canonical First Draft PostgreSQL schema", () => {
     ).toEqual({ databaseName: "editor_document" });
     expect(
       assertSafeFirstDraftResetTarget(
-        "postgres://postgres:postgres@localhost:5435/editor_document_browser_test",
+        "postgres://postgres:postgres@localhost:5435/editor_document_test",
       ),
-    ).toEqual({ databaseName: "editor_document_browser_test" });
+    ).toEqual({ databaseName: "editor_document_test" });
     expect(() =>
       assertSafeFirstDraftResetTarget(
         "postgres://postgres:postgres@database.example.com/editor_document_test",
