@@ -2,10 +2,9 @@ import type { EditorBlockCommandRequest } from "@repo/editor-react/editor";
 import type { VersionedBlock } from "@repo/editor-core/document";
 import type {
   BlockDomKeyBehaviorEvent,
+  BlockDomKeyBehaviorResult,
   TextPlaceholder,
 } from "@repo/editor-dom/block-editor";
-import type { BlockLocalDocumentMappingOptions } from "@repo/editor-dom/schema";
-import { normalizeHeadingLevel } from "@repo/editor-core/document";
 import {
   createBlockLocalDomPlugins,
   createBlockLocalProseMirrorState,
@@ -20,14 +19,14 @@ import {
   type EditorView,
   type Plugin,
 } from "@repo/editor-dom/prosemirror";
-import type { EditorRuntimePort } from "./render-port.ts";
+import type { EditableEditorRuntimePort } from "./render-port.ts";
 import {
   createCollapsedCaretSelection,
   readEditorViewContentSize,
 } from "../../document/inline/editor-view-inline-formatting.ts";
 import { resolveRegisteredEditorCommand } from "../commands/command-routing.ts";
 import { createEditorKeybindingPlugin } from "../keybindings/block-keybinding-plugin.ts";
-import { executeCoreBlockKeyBehavior } from "./execute-core-block-key-behavior.ts";
+import { executeStructuralTextBoundaryCommand } from "../keybindings/resolver.ts";
 import {
   projectNativeCaret,
   type NativeCaretProjectionResult,
@@ -35,7 +34,11 @@ import {
 import { ActiveProseMirrorProposalAdapter } from "../../document/blocks/block-content-proposal-adapter.ts";
 import type { TextActivationObligation } from "./text-activation.ts";
 import { LocalTypingProvenanceBridge } from "../typing-triggers/local-typing-provenance-bridge.ts";
-import { createBlockPresentationDocumentMapping } from "./block-local-document-mapping.ts";
+import {
+  sameTextDomPresentation,
+  type ResolvedTextDomPresentation,
+} from "../../document/blocks/text-dom-presentation.ts";
+import { createTextDomNodeView } from "./text-dom-node-view.ts";
 
 export interface SharedTextEditorHost {
   readonly blockId: VersionedBlock["id"];
@@ -45,15 +48,15 @@ export interface SharedTextEditorHost {
   readonly projectionIdentity: symbol;
   readonly className: string;
   readonly placeholder?: TextPlaceholder;
+  readonly textDomPresentation: ResolvedTextDomPresentation;
 }
 
 interface ActiveBlockBinding {
   readonly block: VersionedBlock;
   readonly host: SharedTextEditorHost;
   readonly proposalAdapter: ActiveProseMirrorProposalAdapter;
-  readonly documentMapping: BlockLocalDocumentMappingOptions;
   readonly contentLease: ReturnType<
-    EditorRuntimePort["contentRuntime"]["acquireBlockContent"]
+    EditableEditorRuntimePort["contentRuntime"]["acquireBlockContent"]
   >;
   readonly triggerProvenanceBridge: LocalTypingProvenanceBridge | null;
   readonly captureBeforeInput: ((event: InputEvent) => void) | null;
@@ -61,6 +64,7 @@ interface ActiveBlockBinding {
   readonly unsubscribeContent: () => void;
   readonly unsubscribeBlock: () => void;
   placeholder?: TextPlaceholder;
+  readonly paragraphNodeView: ReturnType<typeof createTextDomNodeView>;
   installedActivation: TextActivationObligation | null;
 }
 
@@ -69,9 +73,10 @@ export class SharedTextEditor {
   private view: EditorView | null = null;
   private active: ActiveBlockBinding | null = null;
   private disposed = false;
+  private pendingPresentationRebuild = false;
   private readonly plugins: readonly Plugin[];
 
-  constructor(private readonly editor: EditorRuntimePort) {
+  constructor(private readonly editor: EditableEditorRuntimePort) {
     const activePlaceholder = () => this.active?.placeholder;
     const activeBlock = () => {
       const block = this.active?.block;
@@ -102,22 +107,8 @@ export class SharedTextEditor {
           },
         }),
       ],
-      emitBlockKeyBehavior: (event: BlockDomKeyBehaviorEvent) => {
-        const block = activeBlock();
-        return executeCoreBlockKeyBehavior({
-          editor,
-          blockId: block.id,
-          blockType: block.type,
-          key: event.key,
-          cursorOffset: event.cursorOffset,
-          ...(event.selectionRange === undefined
-            ? {}
-            : { selectionRange: event.selectionRange }),
-          ...(event.isComposing === undefined
-            ? {}
-            : { isComposing: event.isComposing }),
-        });
-      },
+      emitBlockKeyBehavior: (event: BlockDomKeyBehaviorEvent) =>
+        this.executeStructuralTextBoundary(event),
     });
   }
 
@@ -216,14 +207,35 @@ export class SharedTextEditor {
     active.host.projection.dataset.editorTextRoot = "true";
   }
 
-  updateHostOptions(
-    host: SharedTextEditorHost,
-    placeholder?: TextPlaceholder,
-  ): void {
+  updateHostOptions(host: SharedTextEditorHost): void {
     const active = this.active;
     if (!active || active.block.id !== host.blockId) return;
-    if (samePlaceholder(active.placeholder, placeholder)) return;
-    this.active = { ...active, host, placeholder };
+    const placeholderChanged = !samePlaceholder(
+      active.placeholder,
+      host.placeholder,
+    );
+    const presentationChanged = !sameTextDomPresentation(
+      active.host.textDomPresentation,
+      host.textDomPresentation,
+    );
+    const classNameChanged = active.host.className !== host.className;
+    if (!placeholderChanged && !presentationChanged && !classNameChanged) return;
+    this.active = {
+      ...active,
+      host,
+      placeholder: host.placeholder,
+      paragraphNodeView: presentationChanged
+        ? createTextDomNodeView(host.textDomPresentation)
+        : active.paragraphNodeView,
+    };
+    const view = this.readView();
+    if (
+      (presentationChanged || this.pendingPresentationRebuild) &&
+      (view?.composing || view?.dom.dataset.editorCompositionPinned === "true")
+    ) {
+      this.pendingPresentationRebuild = true;
+      return;
+    }
     this.rebuildActiveState(true);
   }
 
@@ -321,7 +333,13 @@ export class SharedTextEditor {
     const view = this.readView();
     if (!view) return;
     if (pinned) view.dom.dataset.editorCompositionPinned = "true";
-    else delete view.dom.dataset.editorCompositionPinned;
+    else {
+      delete view.dom.dataset.editorCompositionPinned;
+      if (this.pendingPresentationRebuild) {
+        this.pendingPresentationRebuild = false;
+        this.rebuildActiveState(true);
+      }
+    }
   }
 
   restoreCommittedProjectionAfterComposition(): void {
@@ -359,15 +377,11 @@ export class SharedTextEditor {
       this.editor.compiledDefinition.typingTriggers.definitions.length > 0
         ? new LocalTypingProvenanceBridge()
         : null;
-    const documentMapping = createBlockPresentationDocumentMapping(
-      () => this.editor.getBlock(block.id) ?? block,
-    );
     const proposalAdapter = new ActiveProseMirrorProposalAdapter({
       blockId: block.id,
       blockType: block.type,
       editor: this.editor,
       contentRuntime: this.editor.contentRuntime,
-      documentMapping,
       consumeLocalMutationProvenance: triggerProvenanceBridge
         ? () => triggerProvenanceBridge.consume()
         : null,
@@ -404,12 +418,7 @@ export class SharedTextEditor {
         proposalAdapter.reconcileFinalizedBlock(view);
         const latest = this.editor.getBlock(block.id);
         if (latest && !latest.tombstone && latest.type === block.type) {
-          const headingLevelChanged =
-            block.type === "heading" &&
-            normalizeHeadingLevel(active.block.metadata?.level) !==
-              normalizeHeadingLevel(latest.metadata?.level);
           this.active = { ...active, block: latest };
-          if (headingLevelChanged) this.rebuildActiveState(true);
         }
       }
     });
@@ -417,7 +426,6 @@ export class SharedTextEditor {
       block,
       host,
       proposalAdapter,
-      documentMapping,
       contentLease,
       triggerProvenanceBridge,
       captureBeforeInput,
@@ -425,6 +433,7 @@ export class SharedTextEditor {
       unsubscribeContent,
       unsubscribeBlock,
       placeholder: host.placeholder,
+      paragraphNodeView: createTextDomNodeView(host.textDomPresentation),
       installedActivation: null,
     };
   }
@@ -469,25 +478,12 @@ export class SharedTextEditor {
       editable: true,
       accessibilityLabel: `${block.type} block`,
       emitBlockKeyBehavior: (event: BlockDomKeyBehaviorEvent) =>
-        executeCoreBlockKeyBehavior({
-          editor: this.editor,
-          blockId: block.id,
-          blockType: block.type,
-          key: event.key,
-          cursorOffset: event.cursorOffset,
-          ...(event.selectionRange === undefined
-            ? {}
-            : { selectionRange: event.selectionRange }),
-          ...(event.isComposing === undefined
-            ? {}
-            : { isComposing: event.isComposing }),
-        }),
+        this.executeStructuralTextBoundary(event),
     };
     const doc = materializeCanonicalBlockLocalProseMirrorDocument(
       this.editor.contentRuntime.readBlockProjection(block.id, block.type),
       block.type,
       this.editor.contentResources.proseMirrorSchema,
-      active.documentMapping,
     );
     const state = createBlockLocalProseMirrorState({
       blockId: block.id,
@@ -511,14 +507,12 @@ export class SharedTextEditor {
       blockType: block.type,
       state,
       schema: this.editor.contentResources.proseMirrorSchema,
-      nodeViews: this.editor.contentResources.inlineNodeViews,
-      proposalAdapter: active.proposalAdapter,
-      pluginOptions: {
-        ...pluginOptions,
-        ...(block.type === "heading"
-          ? { headingLevel: normalizeHeadingLevel(block.metadata?.level) }
-          : {}),
+      nodeViews: {
+        ...this.editor.contentResources.inlineNodeViews,
+        paragraph: active.paragraphNodeView,
       },
+      proposalAdapter: active.proposalAdapter,
+      pluginOptions,
       attributes: {
         class: active.host.className,
         "data-editor-text-root": "true",
@@ -541,17 +535,51 @@ export class SharedTextEditor {
         view.state.selection.head,
         view.state,
       );
+    const wasFocused = view.hasFocus();
     view.setProps(
       createBlockLocalProseMirrorViewProps(this.createViewOptions(active)),
     );
-    if (preserveSelection)
-      installViewSelection(view, anchorOffset, focusOffset);
+    if (preserveSelection) {
+      const selection = createViewTextSelection(
+        view,
+        anchorOffset,
+        focusOffset,
+      );
+      if (!selection.eq(view.state.selection)) {
+        view.updateState(view.state.apply(view.state.tr.setSelection(selection)));
+      }
+      if (wasFocused) {
+        if (!view.hasFocus()) view.dom.focus({ preventScroll: true });
+        projectNativeViewSelection(view, selection);
+      }
+    }
     if (active.placeholder) {
       view.dom.dataset.editorPlaceholderVisibility =
         active.placeholder.visibility;
     } else {
       delete view.dom.dataset.editorPlaceholderVisibility;
     }
+  }
+
+  private executeStructuralTextBoundary(
+    event: BlockDomKeyBehaviorEvent,
+  ): BlockDomKeyBehaviorResult {
+    const active = this.active;
+    const view = this.readView();
+    if (!active || !view || event.isComposing) {
+      return { ok: false, handled: false, reason: "unhandled" };
+    }
+    const changed = executeStructuralTextBoundaryCommand(event, {
+      definition: this.editor.definition,
+      store: this.editor.store,
+      editor: this.editor,
+      blockId: active.block.id,
+      blockType: active.block.type,
+      view,
+    });
+    return changed
+      ? { ok: true, handled: true }
+      : { ok: true, handled: true, reason: "no-change" };
   }
 
   private attachViewToHost(view: EditorView, host: HTMLElement): void {
@@ -563,6 +591,7 @@ export class SharedTextEditor {
     const active = this.active;
     if (!active) return;
     this.active = null;
+    this.pendingPresentationRebuild = false;
     active.unsubscribeBlock();
     active.unsubscribeContent();
     if (active.captureBeforeInput && active.beforeInputTarget) {
@@ -701,7 +730,7 @@ function projectNativeViewSelection(
 }
 
 function readActivationCanonicalRange(
-  editor: EditorRuntimePort,
+  editor: EditableEditorRuntimePort,
   activation: TextActivationObligation,
 ): { readonly anchorOffset: number; readonly focusOffset: number } | null {
   const canonical = editor.selectionController.getCanonicalSnapshot();

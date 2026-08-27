@@ -34,6 +34,34 @@ describe("block-local keymap", () => {
     expect(bindings.Delete?.(range)).toBe(false);
   });
 
+  it("emits structural Enter with canonical offsets for a local text range", () => {
+    const emitBlockKeyBehavior = vi.fn(() => ({
+      ok: true as const,
+      handled: true as const,
+    }));
+    const bindings = createBlockKeyBindings({
+      blockId: testBlockId,
+      blockType: "textBlock",
+      emitBlockKeyBehavior,
+    });
+    const initial = createBlockLocalProseMirrorState({
+      blockId: testBlockId,
+      blockType: "textBlock",
+      doc: "abcd",
+    });
+    const range = initial.apply(
+      initial.tr.setSelection(TextSelection.create(initial.doc, 2, 4)),
+    );
+
+    expect(bindings.Enter?.(range)).toBe(true);
+    expect(emitBlockKeyBehavior).toHaveBeenCalledOnce();
+    expect(emitBlockKeyBehavior).toHaveBeenCalledWith({
+      key: "enter",
+      cursorOffset: 3,
+      selectionRange: { from: 1, to: 3 },
+    });
+  });
+
   it("handles one Backspace at text start with one backspace key behavior", () => {
     const emitBlockKeyBehavior = vi.fn(() => ({
       ok: true as const,

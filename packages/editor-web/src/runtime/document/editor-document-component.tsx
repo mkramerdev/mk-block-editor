@@ -4,11 +4,11 @@ import { type CSSProperties } from "react";
 import { BlockList } from "../../document/editor/block-list.tsx";
 import { resolveEditorRuntimePort } from "./runtime-port-registry.ts";
 import type {
-  Editor,
+  EditableEditor,
   EditorDocumentProps,
   EditorLayoutConfig,
 } from "./contracts.ts";
-import type { EditorRuntimePort } from "./render-port.ts";
+import type { EditableEditorRuntimePort } from "./render-port.ts";
 
 const neutralEditorLayout: EditorLayoutConfig = {
   sideLeftWidth: "0px",
@@ -20,9 +20,13 @@ type EditorLayoutStyle = CSSProperties & {
   "--editor-side-right-width": string;
 };
 
-export function EditorDocument<TEditor extends Editor>({
+export function EditorDocument<TEditor extends EditableEditor>({
   editor,
+  interactionEnabled = true,
   layout,
+  childOrderProjection,
+  children,
+  trailingContent,
   renderDocumentLayers,
   onSelectionDragStart,
   onSelectionDragUpdate,
@@ -46,12 +50,16 @@ export function EditorDocument<TEditor extends Editor>({
       <BlockList
         definition={renderEditor.definition}
         contentRuntime={renderEditor.contentRuntime}
-        editor={renderEditor as EditorRuntimePort<TEditor>}
+        editor={renderEditor as EditableEditorRuntimePort<TEditor>}
+        interactionEnabled={interactionEnabled}
+        childOrderProjection={childOrderProjection}
+        rootLeadingContent={children}
         renderDocumentLayers={renderDocumentLayers}
         onSelectionDragStart={onSelectionDragStart}
         onSelectionDragUpdate={onSelectionDragUpdate}
         onSelectionDragEnd={onSelectionDragEnd}
       />
+      {trailingContent}
     </div>
   );
 }

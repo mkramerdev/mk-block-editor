@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { BlockDefinition } from "@repo/editor-core/definitions";
 import type { BlockType, VersionedBlock } from "@repo/editor-core/document";
 import { asBlockId, type BlockId } from "@repo/editor-core/kernel";
@@ -21,129 +21,22 @@ import type {
   EditorSelectionRangeBlock,
   EditorSelectionSnapshot,
 } from "../model/types.ts";
-import { materializeEditorSelectionFragment } from "./materialize.ts";
+import { materializeEditorSelectionFragmentCandidate } from "./materialize.ts";
 
-const renderer = () => null;
 const definitions: Readonly<Record<BlockType, BlockDefinition>> = {
-  paragraph: {
+  textBlock: {
     kind: "text",
-    type: "paragraph",
-    renderer,
-    rootLayout: "normal",
-    split: { default: "paragraph", listItem: "listItem" },
+    type: "textBlock",
   },
-  divider: {
+  atomicBlock: {
     kind: "atomic",
-    type: "divider",
-    renderer,
-    rootLayout: "normal",
+    type: "atomicBlock",
   },
-  quote: {
+  wrapperBlock: {
     kind: "wrapper",
-    type: "quote",
-    renderer,
-    rootLayout: "normal",
+    type: "wrapperBlock",
     contentBoundary: false,
-    content: { required: ["paragraph"], additional: "paragraph" },
-  },
-  list: {
-    kind: "wrapper",
-    type: "list",
-    renderer,
-    rootLayout: "normal",
-    contentBoundary: false,
-    content: { required: ["listItem"], additional: "listItem" },
-    defaultContent: "listItem",
-    list: { kind: "container", itemType: "listItem" },
-  },
-  listItem: {
-    kind: "wrapper",
-    type: "listItem",
-    renderer,
-    rootLayout: "normal",
-    contentBoundary: false,
-    content: { required: ["paragraph"], additional: "block" },
-    parents: { allowed: ["list"] },
-    list: {
-      kind: "item",
-      containerType: "list",
-      primaryTextChildType: "paragraph",
-      emptyEnter: "lift-primary-out-of-container",
-    },
-  },
-  columns: {
-    kind: "wrapper",
-    type: "columns",
-    renderer,
-    rootLayout: "normal",
-    contentBoundary: false,
-    content: { required: ["column", "column"], additional: "column" },
-    selection: wrapperSelection({
-      fragment: { kind: "wrapper", inclusion: "multiple-selected-children" },
-    }),
-  },
-  column: {
-    kind: "wrapper",
-    type: "column",
-    renderer,
-    rootLayout: "normal",
-    contentBoundary: true,
-    content: { required: ["paragraph"], additional: "block" },
-    selection: wrapperSelection({
-      fragment: { kind: "wrapper", inclusion: "never" },
-    }),
-  },
-  tabs: {
-    kind: "wrapper",
-    type: "tabs",
-    renderer,
-    rootLayout: "normal",
-    contentBoundary: false,
-    content: { required: ["tabPane"], additional: "tabPane" },
-    selection: wrapperSelection({
-      fragment: {
-        kind: "wrapper",
-        contentScope: "visible",
-        preservedChildren: "all",
-      },
-    }),
-  },
-  tabPane: {
-    kind: "wrapper",
-    type: "tabPane",
-    renderer,
-    rootLayout: "normal",
-    contentBoundary: false,
-    content: { required: ["paragraph"], additional: "block" },
-    selection: wrapperSelection({
-      fragment: { kind: "wrapper", inclusion: "never" },
-    }),
-  },
-  toggle: {
-    kind: "wrapper",
-    type: "toggle",
-    renderer,
-    rootLayout: "normal",
-    contentBoundary: false,
-    content: { required: ["paragraph", "toggleBody"] },
-    selection: wrapperSelection({
-      fragment: {
-        kind: "wrapper",
-        contentScope: "visible",
-        preservedChildren: "all",
-      },
-    }),
-  },
-  toggleBody: {
-    kind: "wrapper",
-    type: "toggleBody",
-    renderer,
-    rootLayout: "normal",
-    contentBoundary: false,
-    content: { required: ["paragraph"], additional: "block" },
-    selection: wrapperSelection({
-      fragment: { kind: "wrapper", inclusion: "never" },
-    }),
+    content: { required: ["textBlock"], additional: "textBlock" },
   },
 };
 
@@ -153,7 +46,7 @@ describe("selection canonical-fragment materialization", () => {
     const graphFixture = fixture([
       {
         id: sourceId,
-        type: "paragraph",
+        type: "textBlock",
         content: {
           type: "doc",
           content: [
@@ -175,14 +68,14 @@ describe("selection canonical-fragment materialization", () => {
     const result = materialize(
       graphFixture,
       snapshot([
-        range(sourceId, "paragraph", "partial", { kind: "content" }, 6, 11),
+        range(sourceId, "textBlock", "partial", { kind: "content" }, 6, 11),
       ]),
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.fragment.blocks).toHaveLength(1);
-    expect(result.fragment.blocks[0]).toMatchObject({
-      type: "paragraph",
+    expect(result.candidate.blocks).toHaveLength(1);
+    expect(result.candidate.blocks[0]).toMatchObject({
+      type: "textBlock",
       plainText: "world",
       content: {
         type: "doc",
@@ -200,10 +93,10 @@ describe("selection canonical-fragment materialization", () => {
         ],
       },
     });
-    expect(result.fragment.blocks[0]?.id).not.toBe(sourceId);
-    expect(result.fragment.start.kind).toBe("text");
-    expect(result.fragment.end.kind).toBe("text");
-    const serialized = JSON.stringify(result.fragment);
+    expect(result.candidate.blocks[0]?.id).not.toBe(sourceId);
+    expect(result.candidate.start.kind).toBe("text");
+    expect(result.candidate.end.kind).toBe("text");
+    const serialized = JSON.stringify(result.candidate);
     expect(serialized).not.toContain(sourceId);
     expect(serialized).not.toContain("coverage");
   });
@@ -211,54 +104,54 @@ describe("selection canonical-fragment materialization", () => {
   it("distinguishes complete text content from a complete text block", () => {
     const sourceId = id(2);
     const graphFixture = fixture([
-      { id: sourceId, type: "paragraph", text: "complete" },
+      { id: sourceId, type: "textBlock", text: "complete" },
     ]);
     const content = materialize(
       graphFixture,
       snapshot([
-        range(sourceId, "paragraph", "complete-content", { kind: "content" }),
+        range(sourceId, "textBlock", "complete-content", { kind: "content" }),
       ]),
     );
     const block = materialize(
       graphFixture,
       snapshot([
-        range(sourceId, "paragraph", "complete-block", { kind: "block" }),
+        range(sourceId, "textBlock", "complete-block", { kind: "block" }),
       ]),
     );
-    expect(content.ok && content.fragment.blocks[0]?.plainText).toBe(
+    expect(content.ok && content.candidate.blocks[0]?.plainText).toBe(
       "complete",
     );
-    expect(content.ok && content.fragment.start.kind).toBe("text");
-    expect(block.ok && block.fragment.start.kind).toBe("block");
-    expect(block.ok && block.fragment.end.kind).toBe("block");
+    expect(content.ok && content.candidate.start.kind).toBe("text");
+    expect(block.ok && block.candidate.start.kind).toBe("block");
+    expect(block.ok && block.candidate.end.kind).toBe("block");
   });
 
   it("materializes an atomic block without text fields", () => {
     const sourceId = id(3);
     const result = materialize(
-      fixture([{ id: sourceId, type: "divider" }]),
+      fixture([{ id: sourceId, type: "atomicBlock" }]),
       snapshot([
-        range(sourceId, "divider", "complete-block", { kind: "block" }),
+        range(sourceId, "atomicBlock", "complete-block", { kind: "block" }),
       ]),
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.fragment.blocks[0]).toMatchObject({ type: "divider" });
-    expect(result.fragment.blocks[0]).not.toHaveProperty("content");
-    expect(result.fragment.blocks[0]).not.toHaveProperty("plainText");
-    expect(result.fragment.start.kind).toBe("block");
+    expect(result.candidate.blocks[0]).toMatchObject({ type: "atomicBlock" });
+    expect(result.candidate.blocks[0]).not.toHaveProperty("content");
+    expect(result.candidate.blocks[0]).not.toHaveProperty("plainText");
+    expect(result.candidate.start.kind).toBe("block");
   });
 
   it("unwraps a wrapper when only some of its contents are selected", () => {
-    const quote = id(10);
+    const wrapper = id(10);
     const first = id(11);
     const second = id(12);
     const graph = fixture([
-      { id: quote, type: "quote", children: [first, second] },
-      { id: first, type: "paragraph", parentId: quote, text: "first" },
-      { id: second, type: "paragraph", parentId: quote, text: "second" },
+      { id: wrapper, type: "wrapperBlock", children: [first, second] },
+      { id: first, type: "textBlock", parentId: wrapper, text: "first" },
+      { id: second, type: "textBlock", parentId: wrapper, text: "second" },
     ]);
-    const wrapperRange = range(quote, "quote", "partial", { kind: "wrapper" });
+    const wrapperRange = range(wrapper, "wrapperBlock", "partial", { kind: "wrapper" });
     wrapperRange.coverageResult = {
       ...wrapperRange.coverageResult,
       childCoverages: [{ blockId: first, coverage: "complete-content" }],
@@ -267,36 +160,47 @@ describe("selection canonical-fragment materialization", () => {
       graph,
       snapshot([
         wrapperRange,
-        range(first, "paragraph", "complete-content", { kind: "content" }),
+        range(first, "textBlock", "complete-content", { kind: "content" }),
       ]),
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.fragment.blocks.map((block) => block.type)).toEqual([
-      "paragraph",
+    expect(result.candidate.blocks.map((block) => block.type)).toEqual([
+      "textBlock",
     ]);
-    expect(result.fragment.blocks[0]?.parentId).toBeNull();
-    expect(result.fragment.blocks.map((block) => block.id)).not.toContain(
+    expect(result.candidate.blocks[0]?.parentId).toBeNull();
+    expect(result.candidate.blocks.map((block) => block.id)).not.toContain(
       first,
     );
   });
 
   it("preserves a wrapper only when endpoint offsets cover every child completely", () => {
-    const quote = id(13);
+    const wrapper = id(13);
     const first = id(14);
     const second = id(15);
     const graph = fixture([
-      { id: quote, type: "quote", children: [first, second] },
-      { id: first, type: "paragraph", parentId: quote, text: "first" },
-      { id: second, type: "paragraph", parentId: quote, text: "second" },
+      { id: wrapper, type: "wrapperBlock", children: [first, second] },
+      { id: first, type: "textBlock", parentId: wrapper, text: "first" },
+      { id: second, type: "textBlock", parentId: wrapper, text: "second" },
     ]);
+    const wrapperRange = range(wrapper, "wrapperBlock", "partial", {
+      kind: "wrapper",
+    });
+    wrapperRange.coverageResult = {
+      ...wrapperRange.coverageResult,
+      childCoverages: [
+        { blockId: first, coverage: "complete-content" },
+        { blockId: second, coverage: "complete-content" },
+      ],
+    };
     const result = materialize(
       graph,
       snapshot([
-        range(first, "paragraph", "partial", { kind: "content" }, 0),
+        wrapperRange,
+        range(first, "textBlock", "partial", { kind: "content" }, 0),
         range(
           second,
-          "paragraph",
+          "textBlock",
           "partial",
           { kind: "content" },
           undefined,
@@ -306,360 +210,237 @@ describe("selection canonical-fragment materialization", () => {
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.fragment.blocks.map((block) => block.type)).toEqual([
-      "quote",
-      "paragraph",
-      "paragraph",
+    expect(result.candidate.blocks.map((block) => block.type)).toEqual([
+      "wrapperBlock",
+      "textBlock",
+      "textBlock",
     ]);
     expect(
-      result.fragment.blocks.slice(1).map((block) => block.parentId),
-    ).toEqual([result.fragment.blocks[0]?.id, result.fragment.blocks[0]?.id]);
+      result.candidate.blocks.slice(1).map((block) => block.parentId),
+    ).toEqual([result.candidate.blocks[0]?.id, result.candidate.blocks[0]?.id]);
   });
 
   it("preserves multi-root order and mixed outer boundary semantics", () => {
     const first = id(20);
     const second = id(21);
     const graph = fixture([
-      { id: first, type: "paragraph", text: "alpha" },
-      { id: second, type: "paragraph", text: "beta" },
+      { id: first, type: "textBlock", text: "alpha" },
+      { id: second, type: "textBlock", text: "beta" },
     ]);
     const result = materialize(
       graph,
       snapshot([
-        range(first, "paragraph", "partial", { kind: "content" }, 1, 5),
-        range(second, "paragraph", "complete-block", { kind: "block" }),
+        range(first, "textBlock", "partial", { kind: "content" }, 1, 5),
+        range(second, "textBlock", "complete-block", { kind: "block" }),
       ]),
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(
-      result.fragment.rootBlockIds.map(
+      result.candidate.rootBlockIds.map(
         (rootId) =>
-          result.fragment.blocks.find((block) => block.id === rootId)
+          result.candidate.blocks.find((block) => block.id === rootId)
             ?.plainText,
       ),
     ).toEqual(["lpha", "beta"]);
-    expect(result.fragment.start.kind).toBe("text");
-    expect(result.fragment.end.kind).toBe("block");
+    expect(result.candidate.start.kind).toBe("text");
+    expect(result.candidate.end.kind).toBe("block");
   });
 
-  it("wraps selected canonical list items in one declared container", () => {
-    const list = id(30);
-    const firstItem = id(31);
-    const firstText = id(32);
-    const secondItem = id(33);
-    const secondText = id(34);
-    const graph = fixture([
-      { id: list, type: "list", children: [firstItem, secondItem] },
-      {
-        id: firstItem,
-        type: "listItem",
-        parentId: list,
-        children: [firstText],
-      },
-      { id: firstText, type: "paragraph", parentId: firstItem, text: "A" },
-      {
-        id: secondItem,
-        type: "listItem",
-        parentId: list,
-        children: [secondText],
-      },
-      { id: secondText, type: "paragraph", parentId: secondItem, text: "B" },
-    ]);
+  it("reads only one selected region in a 1,000-root graph", () => {
+    const rootIds = Array.from({ length: 1_000 }, (_, index) => id(1_000 + index));
+    const graphFixture = fixture(
+      rootIds.map((blockId, index) => ({
+        id: blockId,
+        type: "textBlock" as BlockType,
+        text: `root-${index}`,
+      })),
+    );
+    const selected = rootIds[500]!;
+    const getBlock = vi.spyOn(graphFixture.graph, "getBlock");
+    const getParentId = vi.spyOn(graphFixture.graph, "getParentId");
+    const getRootBlockIds = vi.spyOn(graphFixture.graph, "getRootBlockIds");
+    const getChildBlockIds = vi.spyOn(graphFixture.graph, "getChildBlockIds");
+
     const result = materialize(
-      graph,
+      graphFixture,
       snapshot([
-        range(firstItem, "listItem", "complete-block", { kind: "block" }),
-        range(secondItem, "listItem", "complete-block", { kind: "block" }),
+        range(selected, "textBlock", "complete-content", {
+          kind: "content",
+        }),
+      ]),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(getBlock).toHaveBeenCalledTimes(1);
+    expect(getBlock).toHaveBeenCalledWith(selected);
+    expect(getParentId).toHaveBeenCalledTimes(1);
+    expect(getChildBlockIds).not.toHaveBeenCalled();
+    expect(getRootBlockIds).not.toHaveBeenCalled();
+  });
+
+  it("keeps canonical output order for a backward normalized range", () => {
+    const first = id(2_100);
+    const second = id(2_101);
+    const graphFixture = fixture([
+      { id: first, type: "textBlock", text: "first" },
+      { id: second, type: "textBlock", text: "second" },
+    ]);
+    const forward = snapshot([
+      range(first, "textBlock", "complete-content", { kind: "content" }),
+      range(second, "textBlock", "complete-content", { kind: "content" }),
+    ]);
+    const backward: EditorSelectionSnapshot = {
+      ...forward,
+      direction: "backward",
+      anchor: forward.normalizedEnd,
+      focus: forward.normalizedStart,
+    };
+    const result = materialize(graphFixture, backward);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.candidate.blocks.map((block) => block.plainText)).toEqual([
+      "first",
+      "second",
+    ]);
+    expect(new Set(result.candidate.blocks.map((block) => block.id)).size).toBe(
+      result.candidate.blocks.length,
+    );
+    expect(result.candidate.start.kind).toBe("text");
+    expect(result.candidate.end.kind).toBe("text");
+  });
+
+  it("rejects stale revisions and missing selected blocks", () => {
+    const selected = id(2_200);
+    const graphFixture = fixture([
+      { id: selected, type: "textBlock", text: "selected" },
+    ]);
+    const selectedSnapshot = snapshot([
+      range(selected, "textBlock", "complete-content", { kind: "content" }),
+    ]);
+    expect(
+      materializeEditorSelectionFragmentCandidate({
+        snapshot: selectedSnapshot,
+        graph: graphFixture.graph,
+        graphRevision: 2,
+        readBlockContent: graphFixture.readBlockContent,
+        readBlockPlainText: graphFixture.readBlockPlainText,
+        blockDefinitions: definitions,
+      }),
+    ).toEqual({ ok: false, reason: "stale-graph" });
+
+    const missing = id(2_201);
+    const malformed = materialize(
+      graphFixture,
+      snapshot([
+        range(missing, "textBlock", "complete-content", { kind: "content" }),
+      ]),
+    );
+    expect(malformed).toMatchObject({ ok: false, reason: "invalid" });
+  });
+
+  it("promotes a selected descendant when its wrapper is not included", () => {
+    const wrapper = id(2_300);
+    const selected = id(2_301);
+    const unrelated = id(2_302);
+    const graphFixture = fixture([
+      { id: wrapper, type: "wrapperBlock", children: [selected, unrelated] },
+      { id: selected, type: "textBlock", parentId: wrapper, text: "keep" },
+      {
+        id: unrelated,
+        type: "textBlock",
+        parentId: wrapper,
+        text: "ignore",
+      },
+    ]);
+    const getBlock = vi.spyOn(graphFixture.graph, "getBlock");
+    const result = materialize(
+      graphFixture,
+      snapshot([
+        range(selected, "textBlock", "complete-content", {
+          kind: "content",
+        }),
       ]),
     );
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.fragment.rootBlockIds).toHaveLength(1);
-    expect(result.fragment.blocks.map((block) => block.type)).toEqual([
-      "list",
-      "listItem",
-      "paragraph",
-      "listItem",
-      "paragraph",
+    expect(result.candidate.blocks.map((block) => block.plainText)).toEqual([
+      "keep",
     ]);
-    const containerId = result.fragment.rootBlockIds[0]!;
-    expect(
-      result.fragment.blocks
-        .filter((block) => block.type === "listItem")
-        .map((block) => block.parentId),
-    ).toEqual([containerId, containerId]);
+    expect(getBlock).not.toHaveBeenCalledWith(wrapper);
+    expect(getBlock).not.toHaveBeenCalledWith(unrelated);
   });
 
-  it("keeps a list container for one fully selected item but unwraps a partial item", () => {
-    const list = id(40);
-    const firstItem = id(41);
-    const firstText = id(42);
-    const secondItem = id(43);
-    const secondText = id(44);
-    const graph = fixture([
-      { id: list, type: "list", children: [firstItem, secondItem] },
-      {
-        id: firstItem,
-        type: "listItem",
-        parentId: list,
-        children: [firstText],
-      },
-      { id: firstText, type: "paragraph", parentId: firstItem, text: "Alpha" },
-      {
-        id: secondItem,
-        type: "listItem",
-        parentId: list,
-        children: [secondText],
-      },
-      { id: secondText, type: "paragraph", parentId: secondItem, text: "Beta" },
-    ]);
-
-    const complete = materialize(
-      graph,
+  it("materializes a custom fragment descriptor once", () => {
+    const source = id(2_400);
+    const customContent = createBlockRichTextContentFromPlainText(
+      "textBlock",
+      "custom",
+    );
+    const result = materialize(
+      fixture([{ id: source, type: "atomicBlock" }]),
       snapshot([
-        range(firstText, "paragraph", "partial", { kind: "content" }, 0, 5),
+        range(source, "atomicBlock", "complete-block", {
+          kind: "custom",
+          nodes: [
+            {
+              type: "textBlock",
+              content: customContent,
+            },
+          ],
+        }),
       ]),
     );
-    expect(complete.ok).toBe(true);
-    if (complete.ok) {
-      expect(complete.fragment.blocks.map((block) => block.type)).toEqual([
-        "list",
-        "listItem",
-        "paragraph",
-      ]);
-    }
 
-    const partial = materialize(
-      graph,
-      snapshot([
-        range(firstText, "paragraph", "partial", { kind: "content" }, 2, 5),
-      ]),
-    );
-    expect(partial.ok).toBe(true);
-    if (partial.ok) {
-      expect(partial.fragment.blocks.map((block) => block.type)).toEqual([
-        "paragraph",
-      ]);
-      expect(partial.fragment.blocks[0]?.plainText).toBe("pha");
-    }
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.candidate.blocks).toHaveLength(1);
+    expect(result.candidate.blocks[0]).toMatchObject({
+      type: "textBlock",
+      plainText: "custom",
+    });
   });
 
-  it("unwraps one selected column and preserves the selected lane count for multiple columns", () => {
-    const columns = id(50);
-    const firstColumn = id(51);
-    const firstText = id(52);
-    const secondColumn = id(53);
-    const secondText = id(54);
-    const graph = fixture([
-      { id: columns, type: "columns", children: [firstColumn, secondColumn] },
-      {
-        id: firstColumn,
-        type: "column",
-        parentId: columns,
-        children: [firstText],
-      },
-      {
-        id: firstText,
-        type: "paragraph",
-        parentId: firstColumn,
-        text: "Alpha",
-      },
-      {
-        id: secondColumn,
-        type: "column",
-        parentId: columns,
-        children: [secondText],
-      },
-      {
-        id: secondText,
-        type: "paragraph",
-        parentId: secondColumn,
-        text: "Beta",
-      },
+  it("uses the wrapper visible-child policy without reading hidden siblings", () => {
+    const wrapper = id(2_500);
+    const hidden = id(2_501);
+    const visible = id(2_502);
+    const graphFixture = fixture([
+      { id: wrapper, type: "wrapperBlock", children: [hidden, visible] },
+      { id: hidden, type: "textBlock", parentId: wrapper, text: "hidden" },
+      { id: visible, type: "textBlock", parentId: wrapper, text: "visible" },
     ]);
-    const columnsFragment = {
+    const wrapperRange = range(wrapper, "wrapperBlock", "partial", {
       kind: "wrapper",
-      inclusion: "multiple-selected-children",
-    } as const;
-    const transparent = { kind: "wrapper", inclusion: "never" } as const;
-
-    const single = materialize(
-      graph,
-      snapshot([
-        range(columns, "columns", "partial", columnsFragment),
-        range(firstColumn, "column", "partial", transparent),
-        range(firstText, "paragraph", "partial", { kind: "content" }, 2, 5),
-      ]),
-    );
-    expect(single.ok).toBe(true);
-    if (single.ok) {
-      expect(single.fragment.blocks.map((block) => block.type)).toEqual([
-        "paragraph",
-      ]);
-    }
-
-    const multiple = materialize(
-      graph,
-      snapshot([
-        range(columns, "columns", "partial", columnsFragment),
-        range(firstColumn, "column", "partial", transparent),
-        range(firstText, "paragraph", "partial", { kind: "content" }, 2),
-        range(secondColumn, "column", "partial", transparent),
-        range(
-          secondText,
-          "paragraph",
-          "partial",
-          { kind: "content" },
-          undefined,
-          2,
-        ),
-      ]),
-    );
-    expect(multiple.ok).toBe(true);
-    if (multiple.ok) {
-      expect(multiple.fragment.blocks.map((block) => block.type)).toEqual([
-        "columns",
-        "column",
-        "paragraph",
-        "column",
-        "paragraph",
-      ]);
-    }
-  });
-
-  it("copies all tabs when the visible pane is complete and unwraps a partial pane", () => {
-    const tabs = id(60);
-    const firstPane = id(61);
-    const firstText = id(62);
-    const secondPane = id(63);
-    const secondText = id(64);
-    const graph = fixture([
-      { id: tabs, type: "tabs", children: [firstPane, secondPane] },
-      { id: firstPane, type: "tabPane", parentId: tabs, children: [firstText] },
-      { id: firstText, type: "paragraph", parentId: firstPane, text: "Hidden" },
-      {
-        id: secondPane,
-        type: "tabPane",
-        parentId: tabs,
-        children: [secondText],
-      },
-      {
-        id: secondText,
-        type: "paragraph",
-        parentId: secondPane,
-        text: "Visible",
-      },
-    ]);
-    const tabsFragment = {
-      kind: "wrapper",
+      inclusion: "selected-children",
       contentScope: "visible",
-      preservedChildren: "all",
-    } as const;
-    const transparent = { kind: "wrapper", inclusion: "never" } as const;
-    const visibleSecond = ({
-      blockType,
-      childBlockIds,
-    }: {
-      blockType: BlockType;
-      childBlockIds: readonly BlockId[];
-    }) => (blockType === "tabs" ? [secondPane] : childBlockIds);
-
-    const complete = materialize(
-      graph,
+    });
+    const getBlock = vi.spyOn(graphFixture.graph, "getBlock");
+    const result = materialize(
+      graphFixture,
       snapshot([
-        range(tabs, "tabs", "partial", tabsFragment),
-        range(secondPane, "tabPane", "partial", transparent),
-        range(secondText, "paragraph", "partial", { kind: "content" }, 0, 7),
+        wrapperRange,
+        range(visible, "textBlock", "complete-content", { kind: "content" }),
       ]),
-      visibleSecond,
+      () => [visible],
     );
-    expect(complete.ok).toBe(true);
-    if (complete.ok) {
-      expect(complete.fragment.blocks.map((block) => block.type)).toEqual([
-        "tabs",
-        "tabPane",
-        "paragraph",
-        "tabPane",
-        "paragraph",
-      ]);
-    }
 
-    const partial = materialize(
-      graph,
-      snapshot([
-        range(tabs, "tabs", "partial", tabsFragment),
-        range(secondPane, "tabPane", "partial", transparent),
-        range(secondText, "paragraph", "partial", { kind: "content" }, 2, 7),
-      ]),
-      visibleSecond,
-    );
-    expect(partial.ok).toBe(true);
-    if (partial.ok) {
-      expect(partial.fragment.blocks.map((block) => block.type)).toEqual([
-        "paragraph",
-      ]);
-      expect(partial.fragment.blocks[0]?.plainText).toBe("sible");
-    }
-  });
-
-  it("copies a collapsed toggle whole and unwraps an incomplete expanded toggle body", () => {
-    const toggle = id(70);
-    const summary = id(71);
-    const body = id(72);
-    const bodyText = id(73);
-    const graph = fixture([
-      { id: toggle, type: "toggle", children: [summary, body] },
-      { id: summary, type: "paragraph", parentId: toggle, text: "Summary" },
-      { id: body, type: "toggleBody", parentId: toggle, children: [bodyText] },
-      { id: bodyText, type: "paragraph", parentId: body, text: "Body" },
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.candidate.blocks.map((block) => block.type)).toEqual([
+      "wrapperBlock",
+      "textBlock",
     ]);
-    const toggleFragment = {
-      kind: "wrapper",
-      contentScope: "visible",
-      preservedChildren: "all",
-    } as const;
-    const transparent = { kind: "wrapper", inclusion: "never" } as const;
-
-    const collapsed = materialize(
-      graph,
-      snapshot([
-        range(toggle, "toggle", "partial", toggleFragment),
-        range(summary, "paragraph", "partial", { kind: "content" }, 0, 7),
-      ]),
-      ({ blockType, childBlockIds }) =>
-        blockType === "toggle" ? childBlockIds.slice(0, 1) : childBlockIds,
-    );
-    expect(collapsed.ok).toBe(true);
-    if (collapsed.ok) {
-      expect(collapsed.fragment.blocks.map((block) => block.type)).toEqual([
-        "toggle",
-        "paragraph",
-        "toggleBody",
-        "paragraph",
-      ]);
-    }
-
-    const expandedPartial = materialize(
-      graph,
-      snapshot([
-        range(toggle, "toggle", "partial", toggleFragment),
-        range(summary, "paragraph", "partial", { kind: "content" }, 3, 7),
-        range(body, "toggleBody", "complete-content", transparent),
-        range(bodyText, "paragraph", "complete-content", { kind: "content" }),
-      ]),
-    );
-    expect(expandedPartial.ok).toBe(true);
-    if (expandedPartial.ok) {
-      expect(
-        expandedPartial.fragment.blocks.map((block) => block.type),
-      ).toEqual(["paragraph", "paragraph"]);
-      expect(
-        expandedPartial.fragment.blocks.map((block) => block.plainText),
-      ).toEqual(["mary", "Body"]);
-    }
+    expect(result.candidate.blocks[1]?.plainText).toBe("visible");
+    expect(getBlock).not.toHaveBeenCalledWith(hidden);
   });
+
+
+
+
+
 });
 
 interface FixtureBlock {
@@ -703,7 +484,7 @@ function fixture(input: readonly FixtureBlock[]) {
       const type = blocks[blockId]?.type;
       const configured = type ? definitions[type]?.selection : undefined;
       if (configured) return configured;
-      if (type === "paragraph") return contentSelection();
+      if (type === "textBlock") return contentSelection();
       if (type && definitions[type]?.kind === "wrapper")
         return wrapperSelection();
       return wholeSelection();
@@ -724,11 +505,11 @@ function materialize(
   selection: EditorSelectionSnapshot,
   resolveVisibleChildBlockIds?: NonNullable<
     Parameters<
-      typeof materializeEditorSelectionFragment
+      typeof materializeEditorSelectionFragmentCandidate
     >[0]["resolveVisibleChildBlockIds"]
   >,
 ) {
-  return materializeEditorSelectionFragment({
+  return materializeEditorSelectionFragmentCandidate({
     snapshot: selection,
     graph: value.graph,
     graphRevision: 1,

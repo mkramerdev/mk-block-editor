@@ -8,7 +8,6 @@ import {
   type Schema,
 } from "../../prosemirror/index.ts";
 import { canonicalOffsetToProseMirrorDocumentPosition } from "../../caret/coordinates/offset-codec.ts";
-import type { BlockLocalDocumentMappingOptions } from "../../schema/block-local/document-mapping.ts";
 import { blockLocalProseMirrorSchema } from "../../schema/block-local/schema.ts";
 import { parseBlockLocalProseMirrorDocument } from "../../schema/block-local/document-parsing.ts";
 import { createBlockLocalDomPlugins } from "../../plugins/aggregate/create-block-local-dom-plugins.ts";
@@ -19,7 +18,6 @@ export interface CreateBlockLocalProseMirrorStateOptions {
   blockType: BlockType;
   doc?: PMNode | string | Record<string, unknown> | null;
   schema?: Schema;
-  documentMapping?: BlockLocalDocumentMappingOptions;
   pluginOptions?: Partial<BlockLocalDomPluginOptions>;
   plugins?: readonly Plugin[];
   /** Canonical block-local caret installed in the first immutable state. */
@@ -36,7 +34,6 @@ export function createBlockLocalProseMirrorState(
         options.doc ?? null,
         options.blockType,
         schema,
-        options.documentMapping,
       );
   const pluginOptions: BlockLocalDomPluginOptions = {
     blockId: options.blockId,

@@ -3,28 +3,22 @@ import { getBlockEditorAttributes } from "./accessibility/attributes.ts";
 import { testBlockId } from "../testing/block-editor-test-support.ts";
 
 describe("block editor DOM contracts", () => {
-  it("maps block metadata to DOM accessibility attributes", () => {
-    const paragraphAttrs = getBlockEditorAttributes({
+  it("uses one neutral text accessibility contract for opaque block types", () => {
+    const primaryAttrs = getBlockEditorAttributes({
       blockId: testBlockId,
-      blockType: "paragraph",
+      blockType: "textBlock",
       label: "Body",
     });
-    expect(paragraphAttrs.role).toBe("textbox");
-    expect(paragraphAttrs["aria-multiline"]).toBe("true");
-    expect(paragraphAttrs["aria-label"]).toBe("Body");
+    expect(primaryAttrs.role).toBe("textbox");
+    expect(primaryAttrs["aria-multiline"]).toBe("true");
+    expect(primaryAttrs["aria-label"]).toBe("Body");
 
-    const listItemAttrs = getBlockEditorAttributes({
+    const alternateAttrs = getBlockEditorAttributes({
       blockId: testBlockId,
-      blockType: "bulletListItem",
+      blockType: "alternateTextBlock",
     });
-    expect(listItemAttrs.role).toBe("group");
-    expect(listItemAttrs["aria-label"]).toBe("bulletListItem block");
-
-    const listTextAttrs = getBlockEditorAttributes({
-      blockId: testBlockId,
-      blockType: "paragraph",
-    });
-    expect(listTextAttrs.role).toBe("textbox");
-    expect(listTextAttrs["aria-multiline"]).toBe("true");
+    expect(alternateAttrs.role).toBe("textbox");
+    expect(alternateAttrs["aria-multiline"]).toBe("true");
+    expect(alternateAttrs["aria-label"]).toBeUndefined();
   });
 });

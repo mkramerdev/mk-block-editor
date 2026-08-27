@@ -8,7 +8,7 @@ import {
 import type { BlockId } from "@repo/editor-core/kernel";
 import { createBlockRecord } from "@repo/editor-core/metadata";
 import { describe, expect, it, vi } from "vitest";
-import type { EditorRuntimePort } from "../runtime/document/render-port.ts";
+import type { EditableEditorRuntimePort } from "../runtime/document/render-port.ts";
 import { testEditableEditorDefinition } from "./test-editor-definition.ts";
 import { initializeTestEditableEditor } from "./test-editor-initializers.ts";
 import { createTestEditorSnapshot } from "./editor-snapshot-fixtures.ts";
@@ -20,11 +20,11 @@ const childId = "01890f07-1c00-7000-8000-000000009003" as BlockId;
 describe("ordinary terminal-child reads and canonical application insertion", () => {
   it("reads maintained root and direct-child sequence tails without flattened traversal", () => {
     const editor = createEditor([
-      block(rootId, "paragraph"),
-      block(wrapperId, "callout"),
-      block(childId, "paragraph", wrapperId),
+      block(rootId, "textBlock"),
+      block(wrapperId, "containerWrapper"),
+      block(childId, "textBlock", wrapperId),
     ]);
-    const runtime = editor as EditorRuntimePort;
+    const runtime = editor as EditableEditorRuntimePort;
     const previous = vi.spyOn(runtime, "getPreviousBlock");
     const next = vi.spyOn(runtime, "getNextBlock");
 
@@ -40,14 +40,14 @@ describe("ordinary terminal-child reads and canonical application insertion", ()
     const published = vi.fn();
     const editor = createEditor(
       [
-        block(rootId, "paragraph"),
-        block(wrapperId, "callout"),
-        block(childId, "paragraph", wrapperId),
+        block(rootId, "textBlock"),
+        block(wrapperId, "containerWrapper"),
+        block(childId, "textBlock", wrapperId),
       ],
       published,
     );
 
-    const rootFragment = paragraphFragment("");
+    const rootFragment = textBlockFragment("");
     const rootResult = editor.insertCanonicalBlockFragment(
       { parentId: null, childIndex: 2 },
       rootFragment,
@@ -57,7 +57,7 @@ describe("ordinary terminal-child reads and canonical application insertion", ()
     expect(editor.getLastChildBlockId(null)).toBe(rootInsertedId);
     expect(published).toHaveBeenCalledTimes(1);
 
-    const nestedFragment = paragraphFragment("");
+    const nestedFragment = textBlockFragment("");
     const nestedResult = editor.insertCanonicalBlockFragment(
       { parentId: wrapperId, childIndex: 1 },
       nestedFragment,
@@ -71,8 +71,8 @@ describe("ordinary terminal-child reads and canonical application insertion", ()
   });
 
   it("inserts fully materialized definition structure", () => {
-    const editor = createEditor([block(rootId, "paragraph")]);
-    const fragment = calloutFragment();
+    const editor = createEditor([block(rootId, "textBlock")]);
+    const fragment = containerFragment();
     const result = editor.insertCanonicalBlockFragment(
       { parentId: null, childIndex: 1 },
       fragment,
@@ -81,24 +81,24 @@ describe("ordinary terminal-child reads and canonical application insertion", ()
     const insertedRootId = fragment.rootBlockIds[0]!;
     const createdChild = editor.getLastChildBlockId(insertedRootId);
     expect(createdChild).not.toBeNull();
-    expect(editor.getBlock(createdChild!)?.type).toBe("paragraph");
-    expect(editor.readBlockContent(createdChild!, "paragraph")).toStrictEqual(
-      createBlockRichTextContentFromPlainText("paragraph", ""),
+    expect(editor.getBlock(createdChild!)?.type).toBe("textBlock");
+    expect(editor.readBlockContent(createdChild!, "textBlock")).toStrictEqual(
+      createBlockRichTextContentFromPlainText("textBlock", ""),
     );
 
-    expect(editor.getBlock(insertedRootId)?.type).toBe("callout");
+    expect(editor.getBlock(insertedRootId)?.type).toBe("containerWrapper");
     editor.dispose();
   });
 
   it("publishes the finalized semantic update before releasing content observers", () => {
     const order: string[] = [];
     const transactions: unknown[] = [];
-    const editor = createEditor([block(rootId, "paragraph")], (change) => {
+    const editor = createEditor([block(rootId, "textBlock")], (change) => {
       order.push("semantic");
       transactions.push(change);
     });
-    const runtime = editor as EditorRuntimePort;
-    const fragment = paragraphFragment("committed");
+    const runtime = editor as EditableEditorRuntimePort;
+    const fragment = textBlockFragment("committed");
     const insertedId = fragment.rootBlockIds[0]!;
     const unsubscribeContent = runtime.contentRuntime.subscribeBlockProjection(
       insertedId,
@@ -140,9 +140,9 @@ describe("ordinary terminal-child reads and canonical application insertion", ()
     const strictWrapperId = "01890f07-1c00-7000-8000-000000009004" as BlockId;
     const strictChildId = "01890f07-1c00-7000-8000-000000009005" as BlockId;
     const editor = createEditor([
-      block(rootId, "paragraph"),
-      block(strictWrapperId, "quote"),
-      block(strictChildId, "paragraph", strictWrapperId),
+      block(rootId, "textBlock"),
+      block(strictWrapperId, "wrapperBlock"),
+      block(strictChildId, "textBlock", strictWrapperId),
     ]);
     const initialRootTail = editor.getLastChildBlockId(null);
 
@@ -158,19 +158,19 @@ describe("ordinary terminal-child reads and canonical application insertion", ()
           parentId: "01890f07-1c00-7000-8000-000000009099" as BlockId,
           childIndex: 0,
         },
-        paragraphFragment(""),
+        textBlockFragment(""),
       ),
     ).toMatchObject({ ok: false });
     expect(
       editor.insertCanonicalBlockFragment(
         { parentId: rootId, childIndex: 0 },
-        paragraphFragment(""),
+        textBlockFragment(""),
       ),
     ).toMatchObject({ ok: false });
     expect(
       editor.insertCanonicalBlockFragment(
         { parentId: strictWrapperId, childIndex: 1 },
-        paragraphFragment(""),
+        textBlockFragment(""),
       ),
     ).toMatchObject({ ok: false });
     expect(editor.getLastChildBlockId(null)).toBe(initialRootTail);
@@ -211,42 +211,42 @@ function createEditor(
   });
 }
 
-function paragraphFragment(text: string): CanonicalBlockFragment {
-  const content = createBlockRichTextContentFromPlainText("paragraph", text);
-  const paragraph = createCanonicalBlockRecord({
-    type: "paragraph",
+function textBlockFragment(text: string): CanonicalBlockFragment {
+  const content = createBlockRichTextContentFromPlainText("textBlock", text);
+  const textBlock = createCanonicalBlockRecord({
+    type: "textBlock",
     content,
     plainText: text,
   });
   return createCanonicalBlockFragment({
-    blocks: [paragraph],
-    rootBlockIds: [paragraph.id],
-    start: { kind: "block", blockId: paragraph.id },
-    end: { kind: "block", blockId: paragraph.id },
+    blocks: [textBlock],
+    rootBlockIds: [textBlock.id],
+    start: { kind: "block", blockId: textBlock.id },
+    end: { kind: "block", blockId: textBlock.id },
     blockDefinitions: testEditableEditorDefinition.blocks,
   });
 }
 
-function calloutFragment(): CanonicalBlockFragment {
-  const callout = createCanonicalBlockRecord({ type: "callout" });
-  const content = createBlockRichTextContentFromPlainText("paragraph", "");
-  const paragraph = createCanonicalBlockRecord({
-    type: "paragraph",
-    parentId: callout.id,
+function containerFragment(): CanonicalBlockFragment {
+  const container = createCanonicalBlockRecord({ type: "containerWrapper" });
+  const content = createBlockRichTextContentFromPlainText("textBlock", "");
+  const textBlock = createCanonicalBlockRecord({
+    type: "textBlock",
+    parentId: container.id,
     content,
     plainText: "",
   });
   return createCanonicalBlockFragment({
-    blocks: [callout, paragraph],
-    rootBlockIds: [callout.id],
-    start: { kind: "block", blockId: callout.id },
-    end: { kind: "block", blockId: callout.id },
+    blocks: [container, textBlock],
+    rootBlockIds: [container.id],
+    start: { kind: "block", blockId: container.id },
+    end: { kind: "block", blockId: container.id },
     blockDefinitions: testEditableEditorDefinition.blocks,
   });
 }
 
 function unknownTextFragment(): CanonicalBlockFragment {
-  const content = createBlockRichTextContentFromPlainText("paragraph", "");
+  const content = createBlockRichTextContentFromPlainText("textBlock", "");
   const record = createCanonicalBlockRecord({
     type: "missing" as BlockType,
     content,

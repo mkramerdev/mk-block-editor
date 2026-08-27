@@ -47,9 +47,9 @@ describe("ordered structural document validation", () => {
   });
 
   it("accepts a coherent ordered tree", () => {
-    const wrapper = block(id(1), "callout");
-    const first = block(id(2), "paragraph", wrapper.id);
-    const second = block(id(3), "divider", wrapper.id);
+    const wrapper = block(id(1), "containerWrapper");
+    const first = block(id(2), "textBlock", wrapper.id);
+    const second = block(id(3), "atomicBlock", wrapper.id);
     expect(
       validate({
         blocks: {
@@ -64,8 +64,8 @@ describe("ordered structural document validation", () => {
   });
 
   it("rejects children under leaf blocks", () => {
-    const parent = block(id(1), "paragraph");
-    const child = block(id(2), "paragraph", parent.id);
+    const parent = block(id(1), "textBlock");
+    const child = block(id(2), "textBlock", parent.id);
     const result = validate({
       blocks: { [parent.id]: parent, [child.id]: child },
       rootBlockIds: [parent.id],
@@ -79,44 +79,39 @@ describe("ordered structural document validation", () => {
     }
   });
 
-  it("rejects a constrained item at root and beneath a mismatched container", () => {
+  it("rejects a constrained constrainedWrapper at root and beneath a mismatched container", () => {
     const definitions: Readonly<Record<BlockType, BlockDefinition>> = {
-      paragraph: {
+      textBlock: {
         kind: "text",
-        type: "paragraph",
-        rootLayout: "normal",
-        split: { default: "paragraph" },
+        type: "textBlock",
       },
-      item: {
+      constrainedWrapper: {
         kind: "wrapper",
-        type: "item",
-        rootLayout: "normal",
-        content: { required: ["paragraph"] },
+        type: "constrainedWrapper",
+        content: { required: ["textBlock"] },
         contentBoundary: false,
-        parents: { allowed: ["list"] },
+        parents: { allowed: ["allowedContainer"] },
       },
-      list: {
+      allowedContainer: {
         kind: "wrapper",
-        type: "list",
-        rootLayout: "normal",
-        content: { required: ["item"], additional: "item" },
+        type: "allowedContainer",
+        content: { required: ["constrainedWrapper"], additional: "constrainedWrapper" },
         contentBoundary: false,
       },
-      otherList: {
+      alternateContainer: {
         kind: "wrapper",
-        type: "otherList",
-        rootLayout: "normal",
+        type: "alternateContainer",
         content: { required: ["block"], additional: "block" },
-        defaultContent: "paragraph",
+        defaultContent: "textBlock",
         contentBoundary: false,
       },
     };
-    const item = block(id(20), "item");
-    const paragraph = block(id(21), "paragraph", item.id);
+    const constrainedWrapper = block(id(20), "constrainedWrapper");
+    const textBlock = block(id(21), "textBlock", constrainedWrapper.id);
     const rootResult = validateStructuralDocument({
-      blocks: { [item.id]: item, [paragraph.id]: paragraph },
-      rootBlockIds: [item.id],
-      childIdsByParentId: { [item.id]: [paragraph.id] },
+      blocks: { [constrainedWrapper.id]: constrainedWrapper, [textBlock.id]: textBlock },
+      rootBlockIds: [constrainedWrapper.id],
+      childIdsByParentId: { [constrainedWrapper.id]: [textBlock.id] },
       blockDefinitions: definitions,
     });
     expect(rootResult.valid).toBe(false);
@@ -125,18 +120,18 @@ describe("ordered structural document validation", () => {
         "invalid-parent",
       );
 
-    const otherList = block(id(22), "otherList");
-    const nestedItem = { ...item, parentId: otherList.id };
+    const alternateContainer = block(id(22), "alternateContainer");
+    const nestedItem = { ...constrainedWrapper, parentId: alternateContainer.id };
     const mismatch = validateStructuralDocument({
       blocks: {
-        [otherList.id]: otherList,
+        [alternateContainer.id]: alternateContainer,
         [nestedItem.id]: nestedItem,
-        [paragraph.id]: paragraph,
+        [textBlock.id]: textBlock,
       },
-      rootBlockIds: [otherList.id],
+      rootBlockIds: [alternateContainer.id],
       childIdsByParentId: {
-        [otherList.id]: [nestedItem.id],
-        [nestedItem.id]: [paragraph.id],
+        [alternateContainer.id]: [nestedItem.id],
+        [nestedItem.id]: [textBlock.id],
       },
       blockDefinitions: definitions,
     });
@@ -148,12 +143,12 @@ describe("ordered structural document validation", () => {
   });
 
   it("rejects forbidden parent and child type combinations", () => {
-    const quote = block(id(1), "quote");
-    const divider = block(id(2), "divider", quote.id);
+    const fixedWrapper = block(id(1), "fixedWrapper");
+    const atomicBlock = block(id(2), "atomicBlock", fixedWrapper.id);
     const result = validate({
-      blocks: { [quote.id]: quote, [divider.id]: divider },
-      rootBlockIds: [quote.id],
-      childIdsByParentId: { [quote.id]: [divider.id] },
+      blocks: { [fixedWrapper.id]: fixedWrapper, [atomicBlock.id]: atomicBlock },
+      rootBlockIds: [fixedWrapper.id],
+      childIdsByParentId: { [fixedWrapper.id]: [atomicBlock.id] },
     });
     expect(result.valid).toBe(false);
     if (!result.valid) {
@@ -163,40 +158,8 @@ describe("ordered structural document validation", () => {
     }
   });
 
-  it("rejects a hydrated restorative-default wrapper with mixed children", () => {
-    const body = block(id(1), "toggleHeadingBody");
-    const placeholder = block(id(2), "placeholder", body.id);
-    const paragraph = block(id(3), "paragraph", body.id);
-    const result = validateStructuralDocument({
-      blocks: {
-        [body.id]: body,
-        [placeholder.id]: placeholder,
-        [paragraph.id]: paragraph,
-      },
-      rootBlockIds: [body.id],
-      childIdsByParentId: { [body.id]: [placeholder.id, paragraph.id] },
-      blockDefinitions: {
-        ...testBlockDefinitions,
-        placeholder: {
-          ...testBlockDefinitions.placeholder!,
-          replaceWith: "paragraph",
-        },
-      },
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.issues).toContainEqual(
-        expect.objectContaining({
-          kind: "invalid-child-sequence",
-          blockId: body.id,
-          actualChildTypes: ["placeholder", "paragraph"],
-        }),
-      );
-    }
-  });
-
   it("rejects unknown containment references", () => {
-    const root = block(id(1), "paragraph");
+    const root = block(id(1), "textBlock");
     const result = validate({
       blocks: { [root.id]: root },
       rootBlockIds: [id(2)],
@@ -209,8 +172,8 @@ describe("ordered structural document validation", () => {
   });
 
   it("rejects parent disagreement", () => {
-    const parent = block(id(1), "callout");
-    const child = block(id(2), "paragraph");
+    const parent = block(id(1), "containerWrapper");
+    const child = block(id(2), "textBlock");
     const result = validate({
       blocks: { [parent.id]: parent, [child.id]: child },
       rootBlockIds: [parent.id],
@@ -223,8 +186,8 @@ describe("ordered structural document validation", () => {
   });
 
   it("rejects unreachable live blocks", () => {
-    const root = block(id(1), "paragraph");
-    const detached = block(id(2), "paragraph");
+    const root = block(id(1), "textBlock");
+    const detached = block(id(2), "textBlock");
     const result = validate({
       blocks: { [root.id]: root, [detached.id]: detached },
       rootBlockIds: [root.id],
@@ -238,7 +201,7 @@ describe("ordered structural document validation", () => {
 
   it("rejects tombstones in live containment", () => {
     const root = {
-      ...block(id(1), "paragraph"),
+      ...block(id(1), "textBlock"),
       tombstone: { deletedAt: 1, reason: "user-delete" as const },
     };
     const result = validate({
@@ -254,7 +217,7 @@ describe("ordered structural document validation", () => {
 
   it("rejects unsupported persistence fields", () => {
     const root = {
-      ...block(id(1), "paragraph"),
+      ...block(id(1), "textBlock"),
       persistentRank: "a0",
     } as VersionedBlock;
     const result = validate({
@@ -272,7 +235,7 @@ describe("ordered structural document validation", () => {
 
   it("reads each text content value once during complete final validation", () => {
     const roots = Array.from({ length: 100 }, (_, index) =>
-      block(id(index + 1), "paragraph"),
+      block(id(index + 1), "textBlock"),
     );
     const readCounts = new Map<BlockId, number>();
     const result = validateStructuralDocument({
@@ -299,8 +262,8 @@ describe("ordered structural document validation", () => {
   });
 
   it("validates final selection offsets against staged text content", () => {
-    const root = block(id(1), "paragraph");
-    const content = createBlockRichTextContentFromPlainText("paragraph", "abc");
+    const root = block(id(1), "textBlock");
+    const content = createBlockRichTextContentFromPlainText("textBlock", "abc");
     const result = validateStructuralDocument({
       blocks: { [root.id]: root },
       rootBlockIds: [root.id],

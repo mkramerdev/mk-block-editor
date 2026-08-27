@@ -9,7 +9,7 @@ import {
 } from "@repo/editor-yjs/checkpoint-format";
 import { firstDraftBlockModelDefinitions } from "./block-definitions.ts";
 import type { FirstDraftPostgresTransactionClient } from "./postgres-acceptance.ts";
-import { validateFirstDraftBootstrap } from "../read-model/bootstrap.ts";
+import { validateFirstDraftBootstrap } from "../bootstrap/bootstrap.ts";
 import { deserializeFirstDraftTransactionFromDatabase } from "./persisted-transaction.ts";
 import type {
   FirstDraftAcceptedTransaction,
@@ -159,6 +159,7 @@ export async function loadFirstDraftAcceptedTransactionsFromPostgres(
       return {
         ok: false,
         reason: "revision-unavailable",
+        resynchronizationReason: "revision-ahead",
         message: `Requested revision ${options.revision} is ahead of head ${currentRevision}`,
       };
     }
@@ -219,6 +220,7 @@ export async function loadFirstDraftAcceptedTransactionsFromPostgres(
       return {
         ok: false,
         reason: "revision-unavailable",
+        resynchronizationReason: "invalid-history",
         message: `Accepted transaction log cannot satisfy revision ${options.revision} through ${currentRevision}`,
       };
     }
@@ -246,8 +248,8 @@ export async function loadFirstDraftAcceptedTransactionsFromPostgres(
 
 function materializeBootstrapBlocks(
   rows: readonly BlockRow[],
-): import("../read-model/bootstrap.ts").FirstDraftBootstrapBlock[] {
-  const entries: import("../read-model/bootstrap.ts").FirstDraftBootstrapBlock[] =
+): import("../bootstrap/bootstrap.ts").FirstDraftBootstrapBlock[] {
+  const entries: import("../bootstrap/bootstrap.ts").FirstDraftBootstrapBlock[] =
     [];
   for (const row of rows) {
     const blockId = requiredString(row.block_id, "block identity") as BlockId;

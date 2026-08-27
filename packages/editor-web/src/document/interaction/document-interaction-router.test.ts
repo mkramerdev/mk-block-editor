@@ -125,13 +125,16 @@ describe("document interaction router", () => {
     const unregister = registerDocumentInteractionOwner(document, editorOwner);
 
     editor.editable.dispatchEvent(pointerEvent("pointerdown", 1));
-    external.dispatchEvent(pointerEvent("pointerdown", 2));
+    const externalPointerdown = pointerEvent("pointerdown", 2);
+    external.dispatchEvent(externalPointerdown);
     document.body.dispatchEvent(
       new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }),
     );
 
     expect(editorOwner.releaseInteraction).toHaveBeenCalledOnce();
+    expect(editorOwner.revokeNativeSelectionOwnership).toHaveBeenCalledOnce();
     expect(editorOwner.keydown).not.toHaveBeenCalled();
+    expect(externalPointerdown.defaultPrevented).toBe(false);
     unregister();
   });
 
@@ -183,6 +186,7 @@ describe("document interaction router", () => {
     button.dispatchEvent(pointerEvent("pointerdown", 42));
 
     expect(editorOwner.releaseInteraction).not.toHaveBeenCalled();
+    expect(editorOwner.revokeNativeSelectionOwnership).not.toHaveBeenCalled();
     expect(editorOwner.pointerdown).toHaveBeenCalledTimes(2);
     unregister();
   });
@@ -209,6 +213,42 @@ describe("document interaction router", () => {
     unregisterSecond();
     unregisterFirst();
   });
+
+  it("revokes native-selection import for every mounted editor but releases only the active editor", () => {
+    const first = appendEditor("first");
+    const second = appendEditor("second");
+    const external = document.createElement("button");
+    document.body.append(external);
+    const firstOwner = owner(first.list);
+    const secondOwner = owner(second.list);
+    const unregisterFirst = registerDocumentInteractionOwner(
+      document,
+      firstOwner,
+    );
+    const unregisterSecond = registerDocumentInteractionOwner(
+      document,
+      secondOwner,
+    );
+    const click = vi.fn();
+    external.addEventListener("click", click);
+
+    first.editable.dispatchEvent(pointerEvent("pointerdown", 61));
+    vi.mocked(firstOwner.revokeNativeSelectionOwnership).mockClear();
+    vi.mocked(secondOwner.revokeNativeSelectionOwnership).mockClear();
+    const outsideDown = pointerEvent("pointerdown", 62);
+    external.dispatchEvent(outsideDown);
+    external.click();
+
+    expect(firstOwner.revokeNativeSelectionOwnership).toHaveBeenCalledOnce();
+    expect(secondOwner.revokeNativeSelectionOwnership).toHaveBeenCalledOnce();
+    expect(firstOwner.releaseInteraction).toHaveBeenCalledOnce();
+    expect(secondOwner.releaseInteraction).not.toHaveBeenCalled();
+    expect(outsideDown.defaultPrevented).toBe(false);
+    expect(click).toHaveBeenCalledOnce();
+
+    unregisterSecond();
+    unregisterFirst();
+  });
 });
 
 function appendEditor(label: string): {
@@ -231,6 +271,7 @@ function appendEditor(label: string): {
 function owner(list: HTMLElement): DocumentInteractionOwner {
   return {
     list,
+    revokeNativeSelectionOwnership: vi.fn(),
     releaseInteraction: vi.fn(),
     pointerdown: vi.fn(),
     pointermove: vi.fn(),

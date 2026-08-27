@@ -16,6 +16,7 @@ import type {
 } from "@repo/editor-core/content/rich-text";
 import type { EditorLogicalOperation } from "@repo/editor-core/operations";
 import type { EditorLogicalContentOperation } from "@repo/editor-core/operations";
+import type { EditorOperationAnchor } from "@repo/editor-core/operations";
 import type { EditorContentOperationUpdate } from "@repo/editor-core/content/rich-text";
 import type { EditorExternalStore } from "../../../store/contracts.ts";
 import type {
@@ -238,6 +239,13 @@ export interface InitializeEditorImplementationOptions {
         readonly textAnchor: EditorSelectionTextAnchor;
         readonly textOffset: number;
       }
+    | { readonly ok: false };
+  resolveOperationAnchors?: (input: {
+    readonly blockId: BlockId;
+    readonly blockType: BlockType;
+    readonly anchors: readonly EditorOperationAnchor[];
+  }) =>
+    | { readonly ok: true; readonly textOffsets: readonly number[] }
     | { readonly ok: false };
   /**
    * Operation-coordinator scope used while text focus or history preparation

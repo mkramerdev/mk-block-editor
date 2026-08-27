@@ -1,23 +1,30 @@
 {
   "$schema": "https://turborepo.dev/schema.json",
-  "globalEnv": [
+  "globalPassThroughEnv": [
     "EDITOR_DOCUMENT_POSTGRES_URL",
+    "EDITOR_REALTIME_*",
     "FIRST_DRAFT_SEED_DOCUMENT_ID",
-    "VITE_EDITOR_REALTIME_URL",
-    "VITE_FIRST_DRAFT_DOCUMENT_ID"
+    "FIRST_DRAFT_DOCUMENT_ID",
+    "NODE_ENV"
   ],
-  "ui": "tui",
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "inputs": ["$TURBO_DEFAULT$", ".env*"],
-      "outputs": [".next/**", "!.next/cache/**", "!.next/dev/**", "dist/**"]
+      "env": ["VITE_EDITOR_REALTIME_URL", "VITE_FIRST_DRAFT_DOCUMENT_ID"],
+      "outputs": [
+        "dist/**",
+        ".next/**",
+        "!.next/cache/**",
+        "!.next/standalone/node_modules/**"
+      ]
     },
     "lint": {
-      "dependsOn": ["^lint"]
+      "dependsOn": ["^lint"],
+      "outputs": []
     },
     "check-types": {
-      "dependsOn": ["^check-types"]
+      "dependsOn": ["^check-types"],
+      "outputs": []
     },
     "test": {
       "dependsOn": ["^build"],
@@ -28,6 +35,10 @@
       "cache": false
     },
     "db:seed": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "db:restore-document": {
       "dependsOn": ["^build"],
       "cache": false
     },

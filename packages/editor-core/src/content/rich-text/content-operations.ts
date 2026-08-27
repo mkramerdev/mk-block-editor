@@ -124,7 +124,20 @@ export function createInverseLogicalContentOperation(
             blockId: operation.blockId,
             blockType: operation.blockType,
             target: operation.target,
-            range: operation.range,
+            range: {
+              from: operation.range.from,
+              to: {
+                blockId: operation.range.from.blockId,
+                offset:
+                  operation.range.from.offset +
+                  richInlineNodeSize(operation.entity),
+                ...(operation.range.from.contentVersion === undefined
+                  ? {}
+                  : {
+                      contentVersion: operation.range.from.contentVersion,
+                    }),
+              },
+            },
             content: operation.deletedContent,
             deletedContent: [operation.entity],
           }

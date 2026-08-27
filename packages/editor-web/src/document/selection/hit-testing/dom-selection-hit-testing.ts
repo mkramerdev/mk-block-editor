@@ -343,7 +343,7 @@ function resolveTextSelectionOffset({
   }
 
   const readMount = shell.querySelector<HTMLElement>(
-    "[data-editor-read-row='true']",
+    "[data-editor-inactive-text-root='true']",
   );
   if (readMount) {
     const readLayout = createSemanticDomTextLayout(readMount);

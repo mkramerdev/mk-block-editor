@@ -3,6 +3,14 @@ import type { EditorSelectionTextAffinity } from "@repo/editor-react/selection";
 
 export type NativeFocusTargetKind = "text" | "atomic";
 
+export type ResolvedNativeFocusTarget =
+  | {
+      readonly kind: NativeFocusTargetKind;
+      readonly blockId: BlockId;
+      readonly registeredTarget: HTMLElement;
+    }
+  | null;
+
 export interface PendingNativeFocusRequest {
   readonly token: symbol;
   readonly blockId: BlockId;
@@ -51,7 +59,10 @@ export class NativeFocusCoordinator {
     atomic: new Map<BlockId, NativeTargetRegistration>(),
   };
   private ownerDocument: Document | null;
-  private readonly registeredTargetSet = new WeakSet<HTMLElement>();
+  private readonly atomicRegistrationsByTarget = new WeakMap<
+    HTMLElement,
+    NativeTargetRegistration
+  >();
   private pending: {
     readonly kind: "public" | "presentation";
     readonly request: PendingNativeFocusRequest;
@@ -81,7 +92,13 @@ export class NativeFocusCoordinator {
     for (const kind of ["text", "atomic"] as const) {
       for (const [blockId, registration] of this.registrations[kind]) {
         if (registration.target.ownerDocument !== ownerDocument) {
-          this.registeredTargetSet.delete(registration.target);
+          if (
+            registration.kind === "atomic" &&
+            this.atomicRegistrationsByTarget.get(registration.target) ===
+              registration
+          ) {
+            this.atomicRegistrationsByTarget.delete(registration.target);
+          }
           this.registrations[kind].delete(blockId);
         }
       }
@@ -138,33 +155,41 @@ export class NativeFocusCoordinator {
     return this.pending?.request ?? null;
   }
 
-  ownsTarget(target: EventTarget | null): boolean {
-    return (
-      isHTMLElement(target) && this.findOwningRegistration(target) !== null
-    );
-  }
+  resolveTarget(target: EventTarget | null): ResolvedNativeFocusTarget {
+    if (!isHTMLElement(target) || !target.isConnected) return null;
+    if (this.ownerDocument && target.ownerDocument !== this.ownerDocument) {
+      return null;
+    }
 
-  ownsActiveElement(document: Document): boolean {
-    const active = document.activeElement;
-    return (
-      isHTMLElement(active) && this.findOwningRegistration(active) !== null
-    );
-  }
+    const atomic = this.atomicRegistrationsByTarget.get(target);
+    if (atomic && this.isCurrentRegistration(atomic, target)) {
+      return resolvedRegistration(atomic);
+    }
 
-  ownsRegisteredTarget(
-    blockId: BlockId,
-    kind: NativeFocusTargetKind,
-    target?: HTMLElement,
-  ): boolean {
-    const registration = this.registrations[kind].get(blockId);
-    return Boolean(
-      registration &&
-      (!target || registration.target === target) &&
-      ownsElement(
-        registration.target,
-        registration.target.ownerDocument.activeElement,
-      ),
+    const textShell = resolveTextShell(target);
+    if (!textShell || !textShell.isConnected) return null;
+    if (
+      target.closest("[data-editor-block-list-root='true']") !==
+        textShell.closest("[data-editor-block-list-root='true']") ||
+      target.closest("[data-editor-interaction-scope='true']") !==
+        textShell.closest("[data-editor-interaction-scope='true']")
+    ) {
+      return null;
+    }
+    const blockShell = textShell.closest<HTMLElement>(
+      "[data-editor-block-shell='true'][data-editor-block-id]",
     );
+    const blockId = blockShell?.dataset.editorBlockId as BlockId | undefined;
+    if (!blockId || this.registrations.atomic.has(blockId)) return null;
+    const registration = this.registrations.text.get(blockId);
+    if (
+      !registration ||
+      registration.target !== textShell ||
+      !this.isCurrentRegistration(registration, textShell)
+    ) {
+      return null;
+    }
+    return resolvedRegistration(registration);
   }
 
   hasRegisteredTarget(
@@ -190,8 +215,7 @@ export class NativeFocusCoordinator {
   blurEditor(): boolean {
     this.pending = null;
     const active = this.ownerDocument?.activeElement ?? null;
-    if (!isHTMLElement(active) || !this.findOwningRegistration(active))
-      return false;
+    if (!isHTMLElement(active) || !this.resolveTarget(active)) return false;
     active.blur();
     return active.ownerDocument.activeElement !== active;
   }
@@ -202,7 +226,13 @@ export class NativeFocusCoordinator {
     this.pending = null;
     for (const kind of ["text", "atomic"] as const) {
       for (const registration of this.registrations[kind].values()) {
-        this.registeredTargetSet.delete(registration.target);
+        if (
+          registration.kind === "atomic" &&
+          this.atomicRegistrationsByTarget.get(registration.target) ===
+            registration
+        ) {
+          this.atomicRegistrationsByTarget.delete(registration.target);
+        }
       }
     }
     this.registrations.text.clear();
@@ -232,15 +262,38 @@ export class NativeFocusCoordinator {
       target,
     };
     const previous = this.registrations[kind].get(blockId);
-    if (previous) this.registeredTargetSet.delete(previous.target);
+    if (
+      previous?.kind === "atomic" &&
+      this.atomicRegistrationsByTarget.get(previous.target) === previous
+    ) {
+      this.atomicRegistrationsByTarget.delete(previous.target);
+    }
+    if (kind === "atomic") {
+      const previousForTarget = this.atomicRegistrationsByTarget.get(target);
+      if (
+        previousForTarget &&
+        this.registrations.atomic.get(previousForTarget.blockId) ===
+          previousForTarget
+      ) {
+        this.registrations.atomic.delete(previousForTarget.blockId);
+      }
+    }
     this.registrations[kind].set(blockId, registration);
-    this.registeredTargetSet.add(target);
+    if (kind === "atomic") {
+      this.atomicRegistrationsByTarget.set(target, registration);
+    }
     this.consumePendingRegistration();
     return () => {
       if (this.registrations[kind].get(blockId)?.token !== registration.token) {
         return;
       }
-      this.registeredTargetSet.delete(registration.target);
+      if (
+        registration.kind === "atomic" &&
+        this.atomicRegistrationsByTarget.get(registration.target) ===
+          registration
+      ) {
+        this.atomicRegistrationsByTarget.delete(registration.target);
+      }
       this.registrations[kind].delete(blockId);
     };
   }
@@ -252,6 +305,12 @@ export class NativeFocusCoordinator {
     const { target } = registration;
     if (!target.isConnected) {
       this.registrations[registration.kind].delete(registration.blockId);
+      if (
+        registration.kind === "atomic" &&
+        this.atomicRegistrationsByTarget.get(target) === registration
+      ) {
+        this.atomicRegistrationsByTarget.delete(target);
+      }
       return { status: "rejected", reason: "disconnected" };
     }
     if (this.ownerDocument && target.ownerDocument !== this.ownerDocument) {
@@ -290,29 +349,42 @@ export class NativeFocusCoordinator {
     }
   }
 
-  private findOwningRegistration(
-    target: HTMLElement,
-  ): NativeTargetRegistration | null {
-    if (this.registeredTargetSet.has(target)) {
-      for (const kind of ["text", "atomic"] as const) {
-        for (const registration of this.registrations[kind].values()) {
-          if (registration.target === target) return registration;
-        }
-      }
-    }
-    for (const kind of ["text", "atomic"] as const) {
-      for (const registration of this.registrations[kind].values()) {
-        if (
-          registration.kind === "text" &&
-          registration.target.contains(target) &&
-          target.closest("[data-editor-shared-text-view='true']")
-        ) {
-          return registration;
-        }
-      }
-    }
-    return null;
+  private isCurrentRegistration(
+    registration: NativeTargetRegistration,
+    registeredTarget: HTMLElement,
+  ): boolean {
+    return Boolean(
+      registration.target === registeredTarget &&
+        registration.target.isConnected &&
+        (!this.ownerDocument ||
+          registration.target.ownerDocument === this.ownerDocument) &&
+        this.registrations[registration.kind].get(registration.blockId) ===
+          registration &&
+        !this.registrations[
+          registration.kind === "text" ? "atomic" : "text"
+        ].has(registration.blockId),
+    );
   }
+}
+
+function resolveTextShell(target: HTMLElement): HTMLElement | null {
+  if (target.matches("[data-editor-text-shell='true']")) return target;
+  const sharedView = target.closest<HTMLElement>(
+    "[data-editor-shared-text-view='true']",
+  );
+  return sharedView?.closest<HTMLElement>(
+    "[data-editor-text-shell='true']",
+  ) ?? null;
+}
+
+function resolvedRegistration(
+  registration: NativeTargetRegistration,
+): Exclude<ResolvedNativeFocusTarget, null> {
+  return {
+    kind: registration.kind,
+    blockId: registration.blockId,
+    registeredTarget: registration.target,
+  };
 }
 
 function ownsElement(owner: HTMLElement, candidate: Element | null): boolean {

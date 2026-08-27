@@ -7,7 +7,7 @@ import type {
   SelectionController,
 } from "@repo/editor-react/selection";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { EditorRuntimePort } from "../../../runtime/document/render-port.ts";
+import type { EditableEditorRuntimePort } from "../../../runtime/document/render-port.ts";
 import { useCommittedSelectionTextInput } from "./committed-selection-text-input.ts";
 
 const semanticInsertion = vi.hoisted(() => vi.fn());
@@ -17,7 +17,7 @@ vi.mock("./committed-selection-input", () => ({
 }));
 
 const blockId = "composition-host" as BlockId;
-const blockType = "paragraph" as BlockType;
+const blockType = "textBlock" as BlockType;
 
 describe("committed selection browser input", () => {
   beforeEach(() => {
@@ -384,7 +384,7 @@ function browserFixture(
         contentRevision: 1,
       }),
     },
-  } as unknown as EditorRuntimePort;
+  } as unknown as EditableEditorRuntimePort;
 
   return {
     shell,

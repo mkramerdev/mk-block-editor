@@ -16,13 +16,53 @@ import {
   SharedTextEditor,
   type SharedTextEditorHost,
 } from "./shared-text-editor.ts";
+import {
+  defaultTextDomPresentation,
+  resolveTextDomPresentation,
+  type TextDomPresentation,
+} from "../../document/blocks/text-dom-presentation.ts";
 
-const firstParagraphId = asBlockId("realm-first-paragraph");
-const headingId = asBlockId("realm-heading");
-const atomParagraphId = asBlockId("realm-atom-paragraph");
-const finalParagraphId = asBlockId("realm-final-paragraph");
+const firstParagraphId = asBlockId("realm-first-textBlock");
+const alternateTextId = asBlockId("realm-alternate-text");
+const atomParagraphId = asBlockId("realm-atom-textBlock");
+const finalParagraphId = asBlockId("realm-final-textBlock");
 
 describe("the movable shared text EditorView", () => {
+  it("consumes unhandled structural Enter without creating a private textBlock and leaves composition native-owned", () => {
+    const editor = createRealmEditor();
+    const shared = new SharedTextEditor(editor);
+    const host = createHost(document, firstParagraphId);
+    try {
+      act(() => activate(shared, editor.getBlock(firstParagraphId), host));
+      const view = requiredView(shared);
+      expect(view.state.doc.childCount).toBe(1);
+
+      const enter = new KeyboardEvent("keydown", {
+        key: "Enter",
+        bubbles: true,
+        cancelable: true,
+      });
+      act(() => view.dom.dispatchEvent(enter));
+      expect(enter.defaultPrevented).toBe(true);
+      expect(view.state.doc.childCount).toBe(1);
+      expect(editor.getRootBlockIds()).toHaveLength(4);
+
+      const composingEnter = new KeyboardEvent("keydown", {
+        key: "Enter",
+        bubbles: true,
+        cancelable: true,
+      });
+      Object.defineProperty(composingEnter, "isComposing", { value: true });
+      act(() => view.dom.dispatchEvent(composingEnter));
+      expect(view.state.doc.childCount).toBe(1);
+      expect(editor.getRootBlockIds()).toHaveLength(4);
+    } finally {
+      shared.destroy();
+      editor.dispose();
+      host.shell.remove();
+    }
+  });
+
   it("reuses one view while rebuilding node views in each active document realm", () => {
     const realmA = document;
     const realmB = document.implementation.createHTMLDocument("realm-b");
@@ -34,7 +74,7 @@ describe("the movable shared text EditorView", () => {
     );
     const shared = new SharedTextEditor(editor);
     const hostA = createHost(realmA, firstParagraphId);
-    const headingHostB = createHost(realmB, headingId);
+    const alternateHostB = createHost(realmB, alternateTextId);
     const atomHostB = createHost(realmB, atomParagraphId);
     const finalHostA = createHost(realmA, finalParagraphId);
 
@@ -45,21 +85,23 @@ describe("the movable shared text EditorView", () => {
       expect(hostA.projection.hidden).toBe(true);
       expect(shared.readPlainText()).toBe("First realm");
 
-      act(() => activate(shared, editor.getBlock(headingId), headingHostB));
+      act(() =>
+        activate(shared, editor.getBlock(alternateTextId), alternateHostB),
+      );
       expect(requiredView(shared)).toBe(view);
       assertActiveRealm(view, realmB, realmB, [realmA, realmB]);
       expect(hostA.projection.hidden).toBe(false);
-      expect(headingHostB.projection.hidden).toBe(true);
-      const heading = view.dom.querySelector("h2");
+      expect(alternateHostB.projection.hidden).toBe(true);
+      const textNode = view.dom.querySelector("p");
       const hardBreak = view.dom.querySelector("br");
-      expect(heading?.ownerDocument).toBe(realmB);
+      expect(textNode?.ownerDocument).toBe(realmB);
       expect(hardBreak?.ownerDocument).toBe(realmB);
-      expect(shared.readPlainText()).toBe("Heading\nline");
+      expect(shared.readPlainText()).toBe("Alternate text\nline");
 
       act(() => activate(shared, editor.getBlock(atomParagraphId), atomHostB));
       expect(requiredView(shared)).toBe(view);
       assertActiveRealm(view, realmB, realmB, [realmA, realmB]);
-      expect(headingHostB.projection.hidden).toBe(false);
+      expect(alternateHostB.projection.hidden).toBe(false);
       expect(atomHostB.projection.hidden).toBe(true);
       const atom = view.dom.querySelector("[data-inline-atom-type='mention']");
       expect(atom?.ownerDocument).toBe(realmB);
@@ -77,7 +119,7 @@ describe("the movable shared text EditorView", () => {
 
       act(() => view.dispatch(view.state.tr.insertText("!", 1)));
       expect(shared.readPlainText()).toBe("!Final realm");
-      expect(editor.readBlockPlainText(finalParagraphId, "paragraph")).toBe(
+      expect(editor.readBlockPlainText(finalParagraphId, "textBlock")).toBe(
         "!Final realm",
       );
     } finally {
@@ -85,7 +127,7 @@ describe("the movable shared text EditorView", () => {
       portals.unmount();
       editor.dispose();
       hostA.shell.remove();
-      headingHostB.shell.remove();
+      alternateHostB.shell.remove();
       atomHostB.shell.remove();
       finalHostA.shell.remove();
     }
@@ -98,7 +140,7 @@ describe("the movable shared text EditorView", () => {
     const shadowContainer = document.createElement("div");
     const shadowRoot = shadowContainer.attachShadow({ mode: "open" });
     document.body.append(shadowContainer);
-    const shadowHost = createHost(document, headingId, shadowRoot);
+    const shadowHost = createHost(document, alternateTextId, shadowRoot);
 
     try {
       act(() =>
@@ -107,11 +149,13 @@ describe("the movable shared text EditorView", () => {
       const view = requiredView(shared);
       expect(view.root).toBe(document);
 
-      act(() => activate(shared, editor.getBlock(headingId), shadowHost));
+      act(() =>
+        activate(shared, editor.getBlock(alternateTextId), shadowHost),
+      );
       expect(requiredView(shared)).toBe(view);
       expect(view.root).toBe(shadowRoot);
       expect(view.dom.ownerDocument).toBe(shadowRoot.ownerDocument);
-      expect(view.dom.querySelector("h2")?.ownerDocument).toBe(
+      expect(view.dom.querySelector("p")?.ownerDocument).toBe(
         shadowRoot.ownerDocument,
       );
       expect(view.dom.querySelector("br")?.ownerDocument).toBe(
@@ -123,6 +167,89 @@ describe("the movable shared text EditorView", () => {
       editor.dispose();
       documentHost.shell.remove();
       shadowContainer.remove();
+    }
+  });
+
+  it("uses host semantic DOM and updates it without replacing focus, selection, or the shared view", () => {
+    const editor = createRealmEditor();
+    const shared = new SharedTextEditor(editor);
+    const host = createHost(document, alternateTextId, document.body, {
+      element: "h2",
+      attributes: { "data-neutral-presentation": "two" },
+    });
+    try {
+      act(() => activate(shared, editor.getBlock(alternateTextId), host));
+      const view = requiredView(shared);
+      const viewDom = view.dom;
+      const shell = host.shell;
+      const slot = host.slot;
+      expect(
+        view.dom.querySelector(
+          "h2[data-block-node='paragraph'][data-neutral-presentation='two']",
+        ),
+      ).not.toBeNull();
+      expect(view.dom.querySelector("p[data-block-node]")).toBeNull();
+      expect(view.dom.querySelector("h2 strong")?.textContent).toBe(
+        "Alternate",
+      );
+      expect(view.dom.querySelector("h2 a")?.textContent).toBe(" text");
+      expect(view.dom.querySelector("h2 br")).not.toBeNull();
+
+      expect(shared.reconcileNativeSelectionRange(5, 5)).toBe(true);
+      const nativeBefore = document.getSelection();
+      expect(document.activeElement).toBe(view.dom);
+      expect(shared.readSelectionOffset()).toBe(5);
+      expect(nativeBefore?.isCollapsed).toBe(true);
+
+      const updatedHost: SharedTextEditorHost = {
+        ...host,
+        textDomPresentation: resolveTextDomPresentation({
+          element: "h3",
+          attributes: { "data-neutral-presentation": "three" },
+        }),
+      };
+      act(() => shared.updateHostOptions(updatedHost));
+
+      expect(requiredView(shared)).toBe(view);
+      expect(view.dom).toBe(viewDom);
+      expect(host.shell).toBe(shell);
+      expect(host.slot).toBe(slot);
+      expect(document.activeElement).toBe(view.dom);
+      expect(shared.readSelectionOffset()).toBe(5);
+      expect(document.getSelection()?.focusNode?.parentElement?.closest("h3"))
+        .not.toBeNull();
+      expect(
+        view.dom.querySelector(
+          "h3[data-block-node='paragraph'][data-neutral-presentation='three']",
+        ),
+      ).not.toBeNull();
+      expect(view.dom.querySelector("h2, p[data-block-node]")).toBeNull();
+
+      shared.setCompositionPinned(true);
+      act(() =>
+        shared.updateHostOptions({
+          ...updatedHost,
+          textDomPresentation: resolveTextDomPresentation({
+            element: "h1",
+            attributes: { "data-neutral-presentation": "one" },
+          }),
+        }),
+      );
+      expect(view.dom.querySelector(":scope > h3")).not.toBeNull();
+      expect(requiredView(shared)).toBe(view);
+      shared.setCompositionPinned(false);
+      expect(
+        view.dom.querySelector(
+          "h1[data-block-node='paragraph'][data-neutral-presentation='one']",
+        ),
+      ).not.toBeNull();
+      expect(requiredView(shared)).toBe(view);
+      expect(document.activeElement).toBe(view.dom);
+      expect(shared.readSelectionOffset()).toBe(5);
+    } finally {
+      shared.destroy();
+      editor.dispose();
+      host.shell.remove();
     }
   });
 });
@@ -141,27 +268,34 @@ function createRealmEditor(): EditableEditorRuntimePort {
   return initializeTestEditableEditor({
     definition,
     snapshot: createTestEditorSnapshot([
-      { id: firstParagraphId, type: "paragraph", text: "First realm" },
+      { id: firstParagraphId, type: "textBlock", text: "First realm" },
       {
-        id: headingId,
-        type: "heading",
+        id: alternateTextId,
+        type: "alternateTextBlock",
         metadata: { level: 2 },
         content: documentContent([
-          { type: "text", text: "Heading" },
+          { type: "text", text: "Alternate", marks: [{ type: "strong" }] },
+          {
+            type: "text",
+            text: " text",
+            marks: [
+              { type: "link", attrs: { href: "https://example.test" } },
+            ],
+          },
           { type: "hard_break" },
           { type: "text", text: "line" },
         ]),
       },
       {
         id: atomParagraphId,
-        type: "paragraph",
+        type: "textBlock",
         content: documentContent([
           { type: "text", text: "Hello " },
           { type: "mention", metadata: { id: "ada" } },
           { type: "text", text: "!" },
         ]),
       },
-      { id: finalParagraphId, type: "paragraph", text: "Final realm" },
+      { id: finalParagraphId, type: "textBlock", text: "Final realm" },
     ]),
   }) as unknown as EditableEditorRuntimePort;
 }
@@ -179,6 +313,7 @@ function createHost(
   ownerDocument: Document,
   blockId: BlockId,
   root: HTMLElement | ShadowRoot = ownerDocument.body,
+  textDomPresentation?: TextDomPresentation,
 ): SharedTextEditorHost {
   const shell = ownerDocument.createElement("div");
   const projection = ownerDocument.createElement("div");
@@ -194,6 +329,9 @@ function createHost(
     slot,
     projectionIdentity: Symbol(`projection:${blockId}`),
     className: "realm-shared-editor",
+    textDomPresentation: textDomPresentation
+      ? resolveTextDomPresentation(textDomPresentation)
+      : defaultTextDomPresentation,
   };
 }
 

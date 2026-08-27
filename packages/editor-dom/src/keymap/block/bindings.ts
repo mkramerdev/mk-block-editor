@@ -26,12 +26,17 @@ export function createBlockKeyBindings(
         return false;
       const composing = isComposing(state);
       if (composing) return false;
-      if (!state.selection.empty) return false;
+      const from = proseMirrorPositionToCanonicalOffset(
+        state.selection.from,
+        state,
+      );
+      const to = proseMirrorPositionToCanonicalOffset(state.selection.to, state);
       return emitKeyBehavior(
         options,
         state,
         "enter",
         proseMirrorPositionToCanonicalOffset(state.selection.head, state),
+        state.selection.empty ? undefined : { from, to },
       );
     },
     Backspace(state, dispatch) {

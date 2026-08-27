@@ -35,7 +35,7 @@ describe("editor selection pointer hit testing", () => {
         id === blockId
           ? {
               id: blockId,
-              type: "divider",
+              type: "atomicBlock",
               parentId: null,
               tombstone: null,
               metadataVersion: "1",
@@ -81,7 +81,7 @@ describe("editor selection pointer hit testing", () => {
         id === blockId
           ? {
               id: blockId,
-              type: "paragraph",
+              type: "textBlock",
               parentId: null,
               tombstone: null,
               metadataVersion: "1",
@@ -152,7 +152,7 @@ describe("editor selection pointer hit testing", () => {
         id === blockId
           ? {
               id: blockId,
-              type: "paragraph",
+              type: "textBlock",
               parentId: null,
               tombstone: null,
               metadataVersion: "1",
@@ -189,8 +189,8 @@ describe("editor selection pointer hit testing", () => {
   });
 
   it("rejects wrapper geometry as an origin but allows it during extension", () => {
-    const wrapperId = "columns" as BlockId;
-    const childId = "heading" as BlockId;
+    const wrapperId = "parallelWrapper" as BlockId;
+    const childId = "alternateTextBlock" as BlockId;
     const list = document.createElement("div");
     const wrapper = document.createElement("div");
     const control = document.createElement("div");
@@ -206,7 +206,7 @@ describe("editor selection pointer hit testing", () => {
       editorBlockId: childId,
     });
     text.dataset.editorTextRoot = "true";
-    text.textContent = "heading";
+    text.textContent = "alternateTextBlock";
     child.append(text);
     wrapper.append(control, child);
     list.append(wrapper);
@@ -219,7 +219,7 @@ describe("editor selection pointer hit testing", () => {
         id === wrapperId || id === childId
           ? {
               id,
-              type: id === wrapperId ? "columns" : "heading",
+              type: id === wrapperId ? "parallelWrapper" : "alternateTextBlock",
               parentId: id === childId ? wrapperId : null,
               tombstone: null,
               metadataVersion: "1",
@@ -311,11 +311,11 @@ describe("editor selection pointer hit testing", () => {
       BlockId,
       ReturnType<EditorSelectionGraphReader["getBlock"]>
     >([
-      [containerId, versionedBlock(containerId, "bulletList", null, false)],
-      [itemAId, versionedBlock(itemAId, "bulletListItem", containerId, false)],
-      [textAId, versionedBlock(textAId, "paragraph", itemAId, true)],
-      [itemBId, versionedBlock(itemBId, "bulletListItem", containerId, false)],
-      [textBId, versionedBlock(textBId, "paragraph", itemBId, true)],
+      [containerId, versionedBlock(containerId, "sequenceWrapper", null, false)],
+      [itemAId, versionedBlock(itemAId, "childWrapper", containerId, false)],
+      [textAId, versionedBlock(textAId, "textBlock", itemAId, true)],
+      [itemBId, versionedBlock(itemBId, "childWrapper", containerId, false)],
+      [textBId, versionedBlock(textBId, "textBlock", itemBId, true)],
     ]);
     const graph: EditorSelectionGraphReader = {
       getBlock: (id) => blocks.get(id) ?? null,

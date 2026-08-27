@@ -9,49 +9,49 @@
   ],
   "exports": {
     "./block-renderer": {
-      "types": "./src/api/block-renderer.ts",
+      "types": "./dist/api/block-renderer.d.ts",
       "import": "./dist/api/block-renderer.js"
     },
     "./document-runtime": {
-      "types": "./src/api/document-runtime.ts",
+      "types": "./dist/api/document-runtime.d.ts",
       "import": "./dist/api/document-runtime.js"
     },
     "./editor-definition": {
-      "types": "./src/api/editor-definition.ts",
+      "types": "./dist/api/editor-definition.d.ts",
       "import": "./dist/api/editor-definition.js"
     },
-    "./read-runtime": {
-      "types": "./src/api/read-runtime.ts",
-      "import": "./dist/api/read-runtime.js"
-    },
     "./editor": {
-      "types": "./src/api/editor.ts",
+      "types": "./dist/api/editor.d.ts",
       "import": "./dist/api/editor.js"
     },
     "./clipboard-runtime": {
-      "types": "./src/api/clipboard-runtime.ts",
+      "types": "./dist/api/clipboard-runtime.d.ts",
       "import": "./dist/api/clipboard-runtime.js"
     },
     "./editable-block-renderer": {
-      "types": "./src/api/editable-block-renderer.ts",
+      "types": "./dist/api/editable-block-renderer.d.ts",
       "import": "./dist/api/editable-block-renderer.js"
     },
     "./keybindings": {
-      "types": "./src/api/keybindings.ts",
+      "types": "./dist/api/keybindings.d.ts",
       "import": "./dist/api/keybindings.js"
     },
     "./block-operations": {
-      "types": "./src/api/block-operations.ts",
+      "types": "./dist/api/block-operations.d.ts",
       "import": "./dist/api/block-operations.js"
     },
     "./typing-triggers": {
-      "types": "./src/api/typing-triggers.ts",
+      "types": "./dist/api/typing-triggers.d.ts",
       "import": "./dist/api/typing-triggers.js"
     },
     "./styles.css": {
       "default": "./dist/index.css"
     }
   },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "pnpm run clean && tsc -p tsconfig.build.json && node -e \"require('node:fs').copyFileSync('src/styles/editor.css', 'dist/index.css')\"",
     "dev:compiler": "tsc -p tsconfig.build.json --watch",
@@ -78,8 +78,8 @@
     "@testing-library/jest-dom": "6.9.1",
     "@testing-library/react": "^16.3.0",
     "@types/node": "^22.15.3",
-    "@types/react": "19.2.2",
-    "@types/react-dom": "19.2.2",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
     "@vitejs/plugin-react": "^6.0.5",
     "eslint": "^9.39.1",
     "jsdom": "^27.2.0",

@@ -6,7 +6,7 @@ import type {
   SelectionCompositionSessionSnapshot,
   SelectionController,
 } from "@repo/editor-react/selection";
-import type { EditorRuntimePort } from "../../../runtime/document/render-port.ts";
+import type { EditableEditorRuntimePort } from "../../../runtime/document/render-port.ts";
 import {
   editorBlockShellSelector,
   editorEditableTextRootSelector,
@@ -17,7 +17,7 @@ import { applyTextInsertionToCommittedSelection } from "./committed-selection-in
 export interface UseCommittedSelectionTextInputOptions {
   readonly enabled: boolean;
   readonly listElement: HTMLElement | null;
-  readonly editor: EditorRuntimePort;
+  readonly editor: EditableEditorRuntimePort;
   readonly selectionController: SelectionController;
   readonly composition: SelectionCompositionSessionSnapshot | null;
 }

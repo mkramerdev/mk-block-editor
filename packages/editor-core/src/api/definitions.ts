@@ -5,11 +5,6 @@ export type {
   BlockMetadataValidationContext,
   BlockMetadataValidator,
   BlockParentConstraint,
-  CanonicalListPolicy,
-  CanonicalRangeDeletionPolicy,
-  CompoundWrapperPolicy,
-  TextBlockSplitMap,
-  WrapperUnderflowPolicy,
 } from "../definitions/block-definition.ts";
 export {
   additionalChildType,
@@ -24,9 +19,7 @@ export {
   minimumChildTypes,
   requiredChildTypes,
   requiredChildTypeAt,
-  resolveRestorativeDefault,
 } from "../definitions/structural-queries.ts";
-export type { RestorativeDefaultRelationship } from "../definitions/structural-queries.ts";
 export {
   assertValidBlockDefinition,
   assertValidBlockDefinitions,

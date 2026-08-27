@@ -125,7 +125,6 @@ describe("generic block metadata normalization", () => {
 describe("author-owned block data validation", () => {
   const definition = {
     type: "asset",
-    renderer: () => null,
     data: { productSpecific: true },
   };
 

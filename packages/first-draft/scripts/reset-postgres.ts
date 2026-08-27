@@ -1,4 +1,4 @@
-import { createFirstDraftSnapshot } from "../src/first-draft-fixture.ts";
+import { createFirstDraftDefaultSnapshot } from "../src/first-draft-fixture.ts";
 import {
   FIRST_DRAFT_DEVELOPMENT_POSTGRES_URL,
   assertFirstDraftPostgresSchema,
@@ -21,7 +21,7 @@ try {
   const result = await seedFirstDraftPostgresDocument({
     client: pool,
     documentId,
-    snapshot: createFirstDraftSnapshot(),
+    snapshot: createFirstDraftDefaultSnapshot(),
   });
   await assertFirstDraftPostgresSchema(pool);
   console.log(

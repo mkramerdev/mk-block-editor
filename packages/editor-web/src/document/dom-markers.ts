@@ -1,5 +1,6 @@
 export const editorBlockListRootSelector =
   '[data-editor-block-list-root="true"]';
+export const editorDocumentRootSelector = '[data-editor-web="document"]';
 export const editorBlockShellSelector = '[data-editor-block-shell="true"]';
 export const editorTextRootSelector = '[data-editor-text-root="true"]';
 export const editorEditableTextRootSelector =

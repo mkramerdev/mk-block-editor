@@ -31,6 +31,7 @@ describe("selection paint stacking contract", () => {
     expect(declaration('[data-editor-object-root="true"]')).not.toMatch(
       /z-index/u,
     );
+    expect(declaration(".editor-web-block")).not.toMatch(/z-index|isolation/u);
   });
 
   it("keeps both bands non-interactive and preserves forced-color range paint", () => {
@@ -42,12 +43,12 @@ describe("selection paint stacking contract", () => {
     );
   });
 
-  it("defensively suppresses native range paint only for ordinary canonical-global roots", () => {
+  it("suppresses native range paint on every canonical document text root", () => {
     expect(css).toMatch(
       /data-editor-native-selection-paint-mode="hidden-for-global-selection"[\s\S]*data-editor-text-root="true"[\s\S]*::selection[\s\S]*background:\s*transparent/u,
     );
-    expect(css).toMatch(
-      /:not\([\s\S]*data-editor-block-internal-selection-host="true"[\s\S]*\)[\s\S]*::selection/u,
+    expect(css).not.toMatch(
+      /data-editor-block-internal-selection-host="true"[\s\S]*::selection/u,
     );
     expect(css).not.toMatch(
       /data-editor-native-selection-paint-mode="composition-owned"[\s\S]*::selection/u,

@@ -4,79 +4,59 @@ import type { BlockType, VersionedBlock } from "../../document/model/block.ts";
 import type { BlockId } from "../../kernel/identity/ids.ts";
 import { asBlockId } from "../../kernel/identity/uuid.ts";
 import { findAdjacentValidInsertionPlacement } from "./navigation.ts";
-
-const renderer = () => null;
 const definitions: Readonly<Record<BlockType, BlockDefinition>> = {
-  textLeaf: { kind: "text", rootLayout: "normal", type: "textLeaf", renderer },
+  textLeaf: { kind: "text", type: "textLeaf" },
   atomLeaf: {
     kind: "atomic",
-    rootLayout: "normal",
     type: "atomLeaf",
-    renderer,
   },
   flowShell: {
     kind: "wrapper",
-    rootLayout: "normal",
     type: "flowShell",
-    renderer,
     content: { required: ["block"], additional: "block" },
     contentBoundary: false,
     defaultContent: "textLeaf",
   },
   singleShell: {
     kind: "wrapper",
-    rootLayout: "normal",
     type: "singleShell",
-    renderer,
     content: { required: ["textLeaf"] },
     contentBoundary: false,
   },
   bodyShell: {
     kind: "wrapper",
-    rootLayout: "normal",
     type: "bodyShell",
-    renderer,
     content: { required: ["block"], additional: "block" },
     contentBoundary: false,
     defaultContent: "atomLeaf",
   },
   compoundShell: {
     kind: "wrapper",
-    rootLayout: "normal",
     type: "compoundShell",
-    renderer,
     content: { required: ["textLeaf", "bodyShell"] },
     contentBoundary: false,
   },
   innerShell: {
     kind: "wrapper",
-    rootLayout: "normal",
     type: "innerShell",
-    renderer,
     content: { required: ["textLeaf"] },
     contentBoundary: false,
   },
   outerShell: {
     kind: "wrapper",
-    rootLayout: "normal",
     type: "outerShell",
-    renderer,
     content: { required: ["innerShell"] },
     contentBoundary: false,
   },
   boundaryShell: {
     kind: "wrapper",
-    rootLayout: "normal",
     type: "boundaryShell",
-    renderer,
     content: { required: ["innerShell"] },
     contentBoundary: true,
   },
   boundaryFlow: {
     kind: "wrapper",
-    rootLayout: "normal",
     type: "boundaryFlow",
-    renderer,
     content: { required: ["block"], additional: "block" },
     contentBoundary: true,
     defaultContent: "textLeaf",

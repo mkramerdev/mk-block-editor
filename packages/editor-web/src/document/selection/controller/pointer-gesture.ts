@@ -1,7 +1,6 @@
 import { isEditorInteractiveControlTarget } from "../../interaction/interactive-targets.ts";
 
 const KEYBOARD_SELECTION_ACTIVE_DATASET_KEY = "editorKeyboardSelectionActive";
-const TEXT_SELECTION_DRAG_ACTIVE_DATASET_KEY = "editorTextSelectionDragActive";
 
 export function setSelectionPaintVisible(
   list: HTMLElement,
@@ -21,17 +20,6 @@ export function markKeyboardSelectionActive(list: HTMLElement): void {
 
 export function clearKeyboardSelectionActive(list: HTMLElement): void {
   delete list.dataset[KEYBOARD_SELECTION_ACTIVE_DATASET_KEY];
-}
-
-export function setTextSelectionDragActive(
-  list: HTMLElement,
-  active: boolean,
-): void {
-  if (active) {
-    list.dataset[TEXT_SELECTION_DRAG_ACTIVE_DATASET_KEY] = "true";
-  } else {
-    delete list.dataset[TEXT_SELECTION_DRAG_ACTIVE_DATASET_KEY];
-  }
 }
 
 export function suppressNativeSelection(list: HTMLElement): () => void {

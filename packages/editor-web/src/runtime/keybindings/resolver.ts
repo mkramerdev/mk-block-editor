@@ -1,13 +1,18 @@
 import type { BlockId } from "@repo/editor-core/kernel";
 import type { BlockType } from "@repo/editor-core/document";
 import type { EditorView } from "@repo/editor-dom/prosemirror";
+import type { BlockDomKeyBehaviorEvent } from "@repo/editor-dom/block-editor";
 import { blockTextCoordinateCodec } from "@repo/editor-dom/caret";
 import { resolveRegisteredEditorCommand } from "../commands/command-routing.ts";
 import type {
   EditorBlockCommandDefinition,
   EditorBlockCommandExecutionContext,
+  EditorStructuralTextBoundaryRequest,
 } from "../definition/contracts.ts";
-import type { EditorKeybindingPlatform } from "./chord.ts";
+import {
+  normalizeEditorKeyChord,
+  type EditorKeybindingPlatform,
+} from "./chord.ts";
 import {
   readKeyboardEventBinding,
   type EditorKeybindingResolution,
@@ -65,9 +70,73 @@ export function resolveBlockKeybinding(
   }
 }
 
+/** Routes one neutral block-local structural boundary through registered commands. */
+export function executeStructuralTextBoundaryCommand(
+  event: BlockDomKeyBehaviorEvent,
+  runtime: EditorBlockKeybindingRuntimeContext,
+): boolean {
+  if (event.isComposing) return false;
+  const block = runtime.editor.getBlock(runtime.blockId);
+  if (!block || block.tombstone) return false;
+  const chord = normalizeEditorKeyChord(
+    event.key === "shiftTab"
+      ? "Shift-Tab"
+      : event.key === "enter"
+        ? "Enter"
+        : event.key === "backspace"
+          ? "Backspace"
+          : event.key === "delete"
+            ? "Delete"
+            : "Tab",
+  );
+  const binding = runtime.editor.keybindings.block.get(chord);
+  if (!binding) return false;
+  const command = resolveRegisteredEditorCommand(
+    runtime.editor.commands,
+    binding.commandId,
+  );
+  if (!command || command.scope !== "block") return false;
+  const selection = event.selectionRange ?? {
+    from: event.cursorOffset,
+    to: event.cursorOffset,
+  };
+  const boundary: EditorStructuralTextBoundaryRequest = {
+    intent: event.key,
+    focusedBlock: block,
+    selection,
+    graph: {
+      getBlock: (blockId) => runtime.editor.getBlock(blockId),
+      getParentId: (blockId) => runtime.editor.getParentId(blockId),
+      getRootBlockIds: () => runtime.editor.getRootBlockIds(),
+      getChildBlockIds: (parentId) => runtime.editor.getChildBlockIds(parentId),
+    },
+    readBlockContent: (blockId, blockType) =>
+      runtime.editor.readBlockContent(blockId, blockType),
+    readBlockPlainText: (blockId, blockType) =>
+      runtime.editor.readBlockPlainText(blockId, blockType),
+    executeStructuralTransaction: (plan) =>
+      runtime.editor.executeStructuralTransaction(plan),
+    isComposing: false,
+  };
+  const context = createBlockCommandContext(
+    runtime,
+    command,
+    { commandId: command.id },
+    boundary,
+  );
+  if (command.isEnabled?.(context) === false) return false;
+  try {
+    return command.execute(context);
+  } catch {
+    return false;
+  }
+}
+
 function createBlockCommandContext(
   runtime: EditorBlockKeybindingRuntimeContext,
   command: EditorBlockCommandDefinition,
+  request = { commandId: command.id },
+  structuralTextBoundary?: EditorStructuralTextBoundaryRequest,
 ): EditorBlockCommandExecutionContext {
   const selection = runtime.view.state.selection;
   return {
@@ -91,6 +160,7 @@ function createBlockCommandContext(
       runtime.editor.executeStructuralTransaction(plan),
     dispatchProseMirrorTransaction: (transaction) =>
       runtime.view.dispatch(transaction),
-    request: { commandId: command.id },
+    request,
+    ...(structuralTextBoundary ? { structuralTextBoundary } : {}),
   };
 }

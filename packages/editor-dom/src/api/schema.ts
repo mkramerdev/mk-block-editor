@@ -4,4 +4,3 @@ export {
   createBlockLocalProseMirrorSchema,
 } from "../schema/block-local/schema.ts";
 export { proseMirrorRichTextToCanonicalJson } from "../schema/inline/atom-json.ts";
-export type { BlockLocalDocumentMappingOptions } from "../schema/block-local/document-mapping.ts";

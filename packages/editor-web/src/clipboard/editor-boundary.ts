@@ -1,12 +1,8 @@
-import {
-  createTextHtmlImportHandler,
-  parseHtmlCanonicalFragment,
-} from "@repo/editor-dom/clipboard";
+import { parseHtmlCanonicalFragment } from "@repo/editor-dom/clipboard";
 import type { Schema } from "@repo/editor-dom/prosemirror";
 import type { EditorClipboardBoundaryOptions } from "./boundary.ts";
 import { createEditorClipboardBoundary } from "./boundary.ts";
 import type { CompiledCanonicalEditorDefinition } from "../runtime/definition/compiled-editor-definition.ts";
-import type { EditorDefinition } from "../runtime/definition/contracts.ts";
 
 export function createDefinitionClipboardBoundary(options: {
   readonly compiledDefinition: CompiledCanonicalEditorDefinition;
@@ -34,39 +30,10 @@ export function createDefinitionClipboardBoundary(options: {
             limits,
           })
       : undefined,
-    htmlImportHandlers: [
-      ...defaultHtmlImportHandlers(definition),
-      ...codecs.htmlImportHandlers,
-    ],
+    htmlImportHandlers: codecs.htmlImportHandlers,
     htmlExportHandlers: codecs.htmlExportHandlers,
     plainTextImportHandlers: codecs.plainTextImportHandlers,
     plainTextExportHandlers: codecs.plainTextExportHandlers,
     materializeSelection: options.materializeSelection,
   });
-}
-
-function defaultHtmlImportHandlers(definition: EditorDefinition) {
-  const handlers = [];
-  if (definition.blocks.paragraph?.kind === "text") {
-    handlers.push(
-      createTextHtmlImportHandler({
-        id: "core.semantic-paragraph",
-        blockType: "paragraph",
-        tags: ["p"],
-      }),
-    );
-  }
-  if (definition.blocks.heading?.kind === "text") {
-    handlers.push(
-      createTextHtmlImportHandler({
-        id: "core.semantic-heading",
-        blockType: "heading",
-        tags: ["h1", "h2", "h3", "h4", "h5", "h6"],
-        metadata: (node) => ({
-          level: Number(node.tagName.slice(1).toLowerCase()),
-        }),
-      }),
-    );
-  }
-  return handlers;
 }

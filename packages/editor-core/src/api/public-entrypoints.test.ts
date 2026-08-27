@@ -27,15 +27,15 @@ describe("editor-core public API barrels", () => {
     const blockId = createBlockId();
     const block = createBlockRecord({
       id: blockId,
-      type: "paragraph",
+      type: "textBlock",
       metadata: { label: "A" },
     });
     const richText = createBlockRichTextContentFromPlainText(
-      "paragraph",
+      "textBlock",
       "Hello",
     );
     const detached = createCanonicalBlockRecord({
-      type: "paragraph",
+      type: "textBlock",
       content: richText,
       plainText: "Hello",
     });

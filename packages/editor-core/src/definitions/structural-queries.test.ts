@@ -1,65 +1,52 @@
 import { describe, expect, it } from "vitest";
 import type { BlockDefinition } from "./block-definition.ts";
 import {
+  blockDefinitionAcceptsInsertion,
   blockDefinitionAcceptsSequence,
-  resolveRestorativeDefault,
 } from "./structural-queries.ts";
 
-const renderer = () => null;
 const definitions: Readonly<Record<string, BlockDefinition>> = {
-  paragraph: {
-    kind: "text",
-    rootLayout: "normal",
-    type: "paragraph",
-    renderer,
-    split: { default: "paragraph" },
-  },
-  heading: {
-    kind: "text",
-    rootLayout: "normal",
-    type: "heading",
-    renderer,
-    split: { default: "paragraph" },
-  },
-  placeholder: {
-    kind: "atomic",
-    rootLayout: "normal",
-    type: "placeholder",
-    renderer,
-    replaceWith: "paragraph",
-  },
-  body: {
+  textBlock: { kind: "text", type: "textBlock" },
+  alternateTextBlock: { kind: "text", type: "alternateTextBlock" },
+  wrapperBlock: {
     kind: "wrapper",
-    rootLayout: "normal",
-    type: "body",
-    renderer,
+    type: "wrapperBlock",
     content: { required: ["block"], additional: "block" },
+    defaultContent: "textBlock",
     contentBoundary: false,
-    defaultContent: "placeholder",
+  },
+  fixedWrapper: {
+    kind: "wrapper",
+    type: "fixedWrapper",
+    content: { required: ["textBlock"] },
+    contentBoundary: false,
   },
 };
 
-describe("restorative default structural semantics", () => {
-  it("resolves the wrapper default atom and its editable replacement", () => {
-    expect(resolveRestorativeDefault(definitions, definitions.body!)).toEqual({
-      defaultType: "placeholder",
-      replacementType: "paragraph",
-    });
+describe("generic structural definition queries", () => {
+  it("checks opaque child sequences without product-type branches", () => {
     expect(
-      resolveRestorativeDefault(definitions, definitions.paragraph!),
-    ).toBeNull();
+      blockDefinitionAcceptsSequence(definitions, definitions.wrapperBlock!, [
+        "alternateTextBlock",
+        "textBlock",
+      ]),
+    ).toBe(true);
+    expect(
+      blockDefinitionAcceptsSequence(definitions, definitions.fixedWrapper!, [
+        "alternateTextBlock",
+      ]),
+    ).toBe(false);
   });
 
-  it.each([
-    [["placeholder"], true],
-    [["paragraph"], true],
-    [["paragraph", "heading"], true],
-    [["placeholder", "paragraph"], false],
-    [["paragraph", "placeholder"], false],
-    [["placeholder", "placeholder"], false],
-  ] as const)("validates the direct child sequence %j", (sequence, valid) => {
+  it("checks insertion against the same generic sequence contract", () => {
     expect(
-      blockDefinitionAcceptsSequence(definitions, definitions.body!, sequence),
-    ).toBe(valid);
+      blockDefinitionAcceptsInsertion(
+        definitions,
+        definitions.wrapperBlock!,
+        ["textBlock"],
+        1,
+        "alternateTextBlock",
+      ),
+    ).toBe(true);
   });
 });

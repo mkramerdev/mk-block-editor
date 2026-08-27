@@ -36,7 +36,6 @@ import {
   applyPlannedCanonicalYjsContentMutation,
   EDITOR_YJS_CONTENT_FORMAT,
   EDITOR_YJS_CONTENT_FORMAT_VERSION,
-  writeCanonicalYjsBlockContent,
   planCanonicalYjsContentMutation,
   type CanonicalYjsContentMutationPlan,
   type BlockContentDocContext,
@@ -50,11 +49,14 @@ import type {
   ValidatedContentCommit,
 } from "@repo/editor-core/operations";
 import {
+  operationAnchorRequirement,
   prepareLogicalContentOperations,
   ownPublishedLogicalContentOperations,
   validateContentCommitInput,
   type PreparedLogicalContentOperations,
   type PreparedLogicalContentTransition,
+  type EditorContentOperationReplayStep,
+  type EditorOperationAnchor,
 } from "@repo/editor-core/operations";
 import { createYjsRelativeTextPointCodec } from "../../text-points/relative-text-point-codec.ts";
 import { readYjsBlockContentDocument } from "../projection/block-content-mapping.ts";
@@ -99,7 +101,7 @@ interface ValidatedBlockState {
   readonly mutationEpoch: number;
   readonly contentOperations: readonly EditorLogicalContentOperation[];
   readonly inverseContentOperations: readonly EditorLogicalContentOperation[];
-  readonly mutationPlans: readonly CanonicalYjsContentMutationPlan[];
+  readonly transitions: readonly PreparedLogicalContentTransition[];
   readonly introduced: boolean;
   readonly remoteUpdate?: EditorContentOperationUpdate;
 }
@@ -120,7 +122,6 @@ interface ValidatedState {
   readonly removedBlocks: readonly ValidatedRemovedBlockState[];
   readonly origin: unknown;
   readonly remote: boolean;
-  readonly heldBlockIds: readonly BlockId[];
 }
 
 interface AppliedState {
@@ -131,6 +132,21 @@ interface AppliedState {
 interface ActiveCommit {
   readonly origins: Set<object>;
   readonly updatesByBlockId: Map<BlockId, Uint8Array[]>;
+}
+
+interface PreparedCommitBlock {
+  readonly validated: ValidatedBlockState;
+  readonly live: BlockState;
+  readonly mutationPlans: readonly CanonicalYjsContentMutationPlan[];
+  readonly introduced: boolean;
+  readonly initialUpdates: readonly Uint8Array[];
+}
+
+interface DetachedIntroducedBlock {
+  readonly state: BlockState;
+  readonly initialUpdates: readonly Uint8Array[];
+  install(): void;
+  destroy(): void;
 }
 
 const HYDRATION_ORIGIN = Object.freeze({
@@ -177,6 +193,7 @@ export function createYjsBlockContentRuntime(
     Set<(commit?: AppliedContentCommit) => void>
   >();
   const commitListeners = new Set<(commit: AppliedContentCommit) => void>();
+  const anchorInvalidationListeners = new Set<() => void>();
   const validatedStates = new WeakMap<ValidatedContentCommit, ValidatedState>();
   const appliedStates = new WeakMap<AppliedContentCommit, AppliedState>();
   const permittedInternalOrigins = new WeakSet<object>();
@@ -243,6 +260,9 @@ export function createYjsBlockContentRuntime(
     },
     reconcileContentData(data) {
       requireEditableContentAccess();
+      for (const listener of [...anchorInvalidationListeners]) {
+        notifyProjectionSubscriber(listener);
+      }
       assertValidBlockGraphVersion(data.blockGraphVersion);
       const liveIds = new Set(data.blockIds);
       const notifications = new Set<BlockId>();
@@ -396,14 +416,6 @@ export function createYjsBlockContentRuntime(
         if (prepared.content === live.projectionSnapshot) {
           return createValidated(input, [], false);
         }
-        const mutationPlans = planContentMutations(live, prepared.transitions);
-        if (!mutationPlans) {
-          return rejection(
-            "invalid-operation",
-            `Live Yjs content for ${blockId} cannot apply the canonical operation sequence`,
-            blockId,
-          );
-        }
         return createValidated(
           input,
           [
@@ -416,7 +428,7 @@ export function createYjsBlockContentRuntime(
               mutationEpoch: live.mutationEpoch,
               contentOperations: prepared.operations,
               inverseContentOperations: prepared.inverseOperations,
-              mutationPlans: Object.freeze(mutationPlans),
+              transitions: prepared.transitions,
               introduced: false,
             },
           ],
@@ -556,16 +568,6 @@ export function createYjsBlockContentRuntime(
             blockId,
           );
         }
-        const mutationPlans = live
-          ? planContentMutations(live, preparedOperations?.transitions ?? [])
-          : [];
-        if (!mutationPlans) {
-          return rejection(
-            "invalid-operation",
-            `Live Yjs content for ${blockId} cannot apply the canonical operation sequence`,
-            blockId,
-          );
-        }
         validatedBlocks.push({
           blockId,
           blockType: baseToken.blockType,
@@ -575,7 +577,7 @@ export function createYjsBlockContentRuntime(
           mutationEpoch: live?.mutationEpoch ?? 0,
           contentOperations,
           inverseContentOperations,
-          mutationPlans: Object.freeze(mutationPlans),
+          transitions: Object.freeze(preparedOperations?.transitions ?? []),
           introduced,
         });
       }
@@ -768,7 +770,7 @@ export function createYjsBlockContentRuntime(
           mutationEpoch: live?.mutationEpoch ?? 0,
           contentOperations: Object.freeze([]),
           inverseContentOperations: Object.freeze([]),
-          mutationPlans: Object.freeze([]),
+          transitions: Object.freeze([]),
           introduced: !live,
           ...(proposal
             ? { remoteUpdate: ownOperationUpdate(proposal.update) }
@@ -849,13 +851,17 @@ export function createYjsBlockContentRuntime(
       }
       return runtime.readBlockProjection(blockId, blockType);
     },
-    commitContent(validated) {
+    commitContent(validated, replayCapture) {
       requireEditableContentAccess();
       const validatedState = validatedStates.get(validated);
       if (!validatedState || validatedState.status !== "validated") {
         throw new Error(
           "Validated Yjs content commit is unknown or has already been used",
         );
+      }
+      if (activeCommit) {
+        validatedState.status = "failed";
+        throw new Error("A Yjs content commit is already active");
       }
       const graphFailure = validateGraphRevision(validatedState.graphRevision);
       if (graphFailure) {
@@ -897,7 +903,6 @@ export function createYjsBlockContentRuntime(
           );
         }
       }
-      validatedState.status = "applying";
       const commitScope = Object.freeze({});
       const origin: EditorYjsCommitOrigin = Object.freeze({
         kind: validatedState.remote
@@ -905,57 +910,161 @@ export function createYjsBlockContentRuntime(
           : "local-editor-commit",
         scope: commitScope,
       });
+      const acquiredLeases: EditorBlockContentLease[] = [];
+      const detachedIntroductions: DetachedIntroducedBlock[] = [];
+      const preparedBlocks: PreparedCommitBlock[] = [];
+      const removedInverseStepsByBlock: EditorContentOperationReplayStep[][] =
+        [];
+      const releasePreflightResources = () => {
+        for (const lease of acquiredLeases.splice(0).reverse()) {
+          lease.release();
+        }
+        for (const introduced of detachedIntroductions) introduced.destroy();
+      };
+      try {
+        for (const block of validatedState.blocks) {
+          if (block.introduced) {
+            const introduced = prepareDetachedIntroducedBlock(block, origin);
+            detachedIntroductions.push(introduced);
+            const mutationPlans = block.remoteUpdate
+              ? []
+              : planContentMutations(introduced.state, block.transitions);
+            if (!mutationPlans) {
+              throw new Error(
+                `Introduced Yjs content for ${block.blockId} cannot apply its canonical transitions`,
+              );
+            }
+            preparedBlocks.push({
+              validated: block,
+              live: introduced.state,
+              mutationPlans,
+              introduced: true,
+              initialUpdates: introduced.initialUpdates,
+            });
+            continue;
+          }
+          const live = requireBlock(block.blockId, block.blockType);
+          if (block.remoteUpdate) {
+            preparedBlocks.push({
+              validated: block,
+              live,
+              mutationPlans: [],
+              introduced: false,
+              initialUpdates: [],
+            });
+            continue;
+          }
+          const lease = runtime.acquireBlockContent(
+            block.blockId,
+            block.blockType,
+            "canonical-transaction",
+          );
+          acquiredLeases.push(lease);
+          if (
+            block.mutationEpoch !== live.mutationEpoch ||
+            block.baseToken.contentRevision !== live.contentRevision
+          ) {
+            throw new Error(
+              `Live Yjs state for ${block.blockId} changed during preflight`,
+            );
+          }
+          const mutationPlans = planContentMutations(live, block.transitions);
+          if (!mutationPlans) {
+            throw new Error(
+              `Live Yjs content for ${block.blockId} cannot apply the canonical operation sequence`,
+            );
+          }
+          preparedBlocks.push({
+            validated: block,
+            live,
+            mutationPlans,
+            introduced: false,
+            initialUpdates: [],
+          });
+        }
+        for (const block of validatedState.removedBlocks) {
+          const live = requireBlock(block.blockId, block.blockType);
+          if (
+            live.contentRevision !== block.contentRevision ||
+            live.mutationEpoch !== block.mutationEpoch
+          ) {
+            throw new Error(
+              `Validated Yjs content removal is stale for ${block.blockId}`,
+            );
+          }
+          if (replayCapture !== "inverse") continue;
+          const lease = runtime.acquireBlockContent(
+            block.blockId,
+            block.blockType,
+            "canonical-transaction",
+          );
+          acquiredLeases.push(lease);
+          removedInverseStepsByBlock.push(
+            block.inverseContentOperations.map((operation) =>
+              createYjsReplayStep(live.context, operation),
+            ),
+          );
+        }
+      } catch (error) {
+        validatedState.status = "failed";
+        releasePreflightResources();
+        throw error;
+      }
+
+      validatedState.status = "applying";
       activeCommit = {
         origins: new Set([origin]),
         updatesByBlockId: new Map(),
       };
       const appliedBlocks: AppliedContentBlock[] = [];
+      const inverseStepsByBlock: EditorContentOperationReplayStep[][] = [];
       try {
         for (const block of validatedState.blocks) {
           activeCommit.updatesByBlockId.set(block.blockId, []);
-          const live = block.introduced
-            ? createIntroducedBlock(block, origin)
-            : requireBlock(block.blockId, block.blockType);
-          if (
-            block.introduced &&
-            validatedState.heldBlockIds.includes(block.blockId)
-          ) {
-            live.leaseCount += 1;
-          }
-          if (!block.introduced && block.mutationEpoch !== live.mutationEpoch) {
-            throw new Error(
-              `Live Yjs state for ${block.blockId} changed during application`,
-            );
+        }
+        for (const introduced of detachedIntroductions) introduced.install();
+        for (const prepared of preparedBlocks) {
+          const block = prepared.validated;
+          const live = prepared.live;
+          if (prepared.initialUpdates.length > 0) {
+            activeCommit.updatesByBlockId
+              .get(block.blockId)!
+              .push(...prepared.initialUpdates);
           }
           if (block.remoteUpdate) {
-            if (!block.introduced) {
-              const context = live.peekContext();
-              if (context) {
-                applyYjsBlockContentUpdate(
-                  context,
-                  block.remoteUpdate.payload.copy(),
-                  origin,
-                );
-              }
+            if (!prepared.introduced) {
+              applyYjsBlockContentUpdate(
+                live.context,
+                block.remoteUpdate.payload.copy(),
+                origin,
+              );
             }
-          } else if (block.introduced) {
-            writeExplicitProjection(
-              live.context,
-              block.blockType,
-              block.after,
-              origin,
-            );
-          } else {
+          } else if (prepared.mutationPlans.length > 0) {
+            const capturedInverseSteps: EditorContentOperationReplayStep[] = [];
             live.context.doc.transact(() => {
-              for (const plan of block.mutationPlans) {
+              for (const [index, plan] of prepared.mutationPlans.entries()) {
                 applyPlannedCanonicalYjsContentMutation(plan);
+                if (replayCapture === "inverse") {
+                  const transition = block.transitions[index];
+                  if (!transition) {
+                    throw new Error(
+                      "Yjs replay capture lost transition ordering",
+                    );
+                  }
+                  capturedInverseSteps.unshift(
+                    createYjsReplayStep(
+                      live.context,
+                      transition.inverseOperation,
+                    ),
+                  );
+                }
               }
             }, origin);
+            inverseStepsByBlock.push(capturedInverseSteps);
           }
-          const nextProjection =
-            block.remoteUpdate && live.peekContext()
-              ? readAppliedRemoteProjection(live)
-              : block.after;
+          const nextProjection = block.remoteUpdate
+            ? readAppliedRemoteProjection(live)
+            : block.after;
           const captured = mergeCapturedUpdates(block.blockId);
           const operationUpdate = block.remoteUpdate
             ? ownOperationUpdate(block.remoteUpdate)
@@ -988,6 +1097,7 @@ export function createYjsBlockContentRuntime(
               inverseContentOperations: block.inverseContentOperations,
             }),
           );
+          live.releaseContext();
         }
         for (const block of validatedState.removedBlocks) {
           pendingRemovalBlockIds.add(block.blockId);
@@ -996,9 +1106,11 @@ export function createYjsBlockContentRuntime(
         activeCommit = null;
         validatedState.status = "failed";
         inconsistent = true;
+        releasePreflightResources();
         throw new Error("Fatal Yjs live mutation failure", { cause: error });
       }
       activeCommit = null;
+      releasePreflightResources();
       validatedState.status = "applied";
       const applied = Object.freeze({
         kind: "applied-content-commit" as const,
@@ -1009,11 +1121,21 @@ export function createYjsBlockContentRuntime(
           ...validatedState.removedBlocks.map((block) => block.blockId),
         ]),
         blocks: Object.freeze(appliedBlocks),
+        replayCapture:
+          replayCapture === "inverse"
+            ? Object.freeze({
+                kind: "inverse" as const,
+                steps: Object.freeze([
+                  ...inverseStepsByBlock.reverse().flat(),
+                  ...removedInverseStepsByBlock.reverse().flat(),
+                ]),
+              })
+            : Object.freeze({ kind: "none" as const }),
         ...(validatedState.origin === undefined
           ? {}
           : { origin: validatedState.origin }),
         id: nextAppliedId++,
-      });
+      }) as AppliedContentCommit;
       appliedStates.set(applied, {
         status: "applied",
         validated: validatedState,
@@ -1051,9 +1173,6 @@ export function createYjsBlockContentRuntime(
       for (const block of state.validated.blocks) {
         const blockState = blocks.get(block.blockId);
         if (!blockState) continue;
-        if (state.validated.heldBlockIds.includes(block.blockId)) {
-          blockState.leaseCount -= 1;
-        }
         blockState.releaseContext();
       }
     },
@@ -1084,6 +1203,24 @@ export function createYjsBlockContentRuntime(
       try {
         const context = requireOwnedLeaseContext(lease);
         return createAnchorInContext(context, lease.blockId, input);
+      } catch (error) {
+        return {
+          ok: false,
+          reason: "missing-text",
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+    createOperationAnchorInContext(lease, input) {
+      try {
+        const context = requireOwnedLeaseContext(lease);
+        const anchor = createYjsOperationAnchor(
+          context,
+          lease.blockId,
+          input.textOffset,
+          input.association,
+        );
+        return anchor ? { ok: true, anchor } : { ok: false, reason: "invalid" };
       } catch (error) {
         return {
           ok: false,
@@ -1125,6 +1262,15 @@ export function createYjsBlockContentRuntime(
         };
       }
     },
+    resolveOperationAnchorInContext(lease, anchor) {
+      return runtime.resolveTextAnchorInContext(lease, {
+        codec: anchor.codec,
+        payload: anchor.payload as unknown as {
+          encoded: string;
+          assoc?: -1 | 0 | 1;
+        },
+      });
+    },
     tryResolveTextAnchorInLiveContext(input) {
       if (input.codec !== YJS_RELATIVE_TEXT_ANCHOR_CODEC) {
         return { ok: false, reason: "invalid" };
@@ -1161,6 +1307,11 @@ export function createYjsBlockContentRuntime(
       commitListeners.add(listener);
       return () => commitListeners.delete(listener);
     },
+    subscribeOperationAnchorInvalidation(listener) {
+      requireLiveRuntime();
+      anchorInvalidationListeners.add(listener);
+      return () => anchorInvalidationListeners.delete(listener);
+    },
     getConsistencyState() {
       return inconsistent ? "inconsistent" : "healthy";
     },
@@ -1170,6 +1321,7 @@ export function createYjsBlockContentRuntime(
       activeCommit = null;
       blockListeners.clear();
       commitListeners.clear();
+      anchorInvalidationListeners.clear();
       for (const state of blocks.values()) state.detachGuard();
       blocks.clear();
       for (const context of liveContexts.values()) context.destroy();
@@ -1186,7 +1338,12 @@ export function createYjsBlockContentRuntime(
     // Object identity is therefore the authoritative base check for a local
     // prepared commit; rescanning live Yjs and the complete canonical text here
     // would only re-prove state guarded by the same exclusive commit owner.
-    if (before !== live.projectionSnapshot) return null;
+    if (
+      before !== live.projectionSnapshot &&
+      !jsonValuesEqual(before, live.projectionSnapshot)
+    ) {
+      return null;
+    }
     const plans: CanonicalYjsContentMutationPlan[] = [];
     for (const transition of transitions) {
       const plan = planCanonicalYjsContentMutation({
@@ -1234,7 +1391,6 @@ export function createYjsBlockContentRuntime(
         removedBlocks: Object.freeze([]),
         origin: input.origin,
         remote,
-        heldBlockIds: holdValidatedBlockContexts([block]),
       });
       return validated;
     }
@@ -1281,7 +1437,6 @@ export function createYjsBlockContentRuntime(
       removedBlocks: Object.freeze([...removedBlocks]),
       origin: input.origin,
       remote,
-      heldBlockIds: holdValidatedBlockContexts(validatedBlocks),
     });
     return validated;
   }
@@ -1389,14 +1544,85 @@ export function createYjsBlockContentRuntime(
       : { ok: false as const, reason: "invalid" as const };
   }
 
+  function createYjsOperationAnchor(
+    context: BlockContentDocContext,
+    blockId: BlockId,
+    textOffset: number,
+    association: -1 | 1,
+  ): EditorOperationAnchor | null {
+    const encoded = createYjsRelativeTextPointCodec(context).encode(
+      { blockId, offset: textOffset },
+      { assoc: association },
+    );
+    if (!encoded.ok || !encoded.point.relative) return null;
+    return Object.freeze({
+      codec: YJS_RELATIVE_TEXT_ANCHOR_CODEC,
+      payload: Object.freeze({ ...encoded.point.relative }),
+      association,
+    });
+  }
+
+  function createYjsReplayStep(
+    context: BlockContentDocContext,
+    operation: EditorLogicalContentOperation,
+  ): EditorContentOperationReplayStep {
+    const requirement = operationAnchorRequirement(operation);
+    if (requirement.kind === "position") {
+      if (operation.kind !== "insertInlineContent") {
+        throw new Error(
+          "Position replay requirements require insertion operations",
+        );
+      }
+      const position = createYjsOperationAnchor(
+        context,
+        operation.blockId,
+        requirement.offset,
+        requirement.association,
+      );
+      if (!position)
+        throw new Error("Yjs insertion replay anchor capture failed");
+      return Object.freeze({
+        kind: "content",
+        blockId: operation.blockId,
+        blockType: operation.blockType,
+        operation,
+        anchors: Object.freeze({ kind: "position", position }),
+      });
+    }
+    if (operation.kind === "insertInlineContent") {
+      throw new Error("Range replay requirements cannot target insertions");
+    }
+    const start = createYjsOperationAnchor(
+      context,
+      operation.blockId,
+      requirement.startOffset,
+      requirement.startAssociation,
+    );
+    const end = createYjsOperationAnchor(
+      context,
+      operation.blockId,
+      requirement.endOffset,
+      requirement.endAssociation,
+    );
+    if (!start || !end)
+      throw new Error("Yjs range replay anchor capture failed");
+    return Object.freeze({
+      kind: "content",
+      blockId: operation.blockId,
+      blockType: operation.blockType,
+      operation,
+      anchors: Object.freeze({ kind: "range", start, end }),
+    });
+  }
+
   function readAppliedRemoteProjection(
     live: BlockState,
   ): EditorRawBlockContent {
-    // A live block may already contain an unaccepted local change. Applying an
-    // accepted concurrent peer update therefore legitimately produces a state
-    // beyond the server's projection at that accepted revision. The inactive
-    // path can install the authoritative projection directly; the live path
-    // must project its actual merged block-local Y.Doc.
+    // A block may already contain an unaccepted local change in either its
+    // live context or its opaque checkpoint. Applying an accepted concurrent
+    // peer update therefore legitimately produces a state beyond the server's
+    // projection at that accepted revision. Always project the actual merged
+    // block-local Y.Doc, including after an inactive context is rehydrated.
     // The Yjs projection mapper is the canonical derivation boundary for a
     // live merged context. The accepted wire projection was already validated
     // above; traversing this result through the normalizer again would perform
@@ -1404,45 +1630,70 @@ export function createYjsBlockContentRuntime(
     return readContextProjection(live.context);
   }
 
-  function createIntroducedBlock(
+  function prepareDetachedIntroducedBlock(
     block: ValidatedBlockState,
     origin: EditorYjsCommitOrigin,
-  ): BlockState {
+  ): DetachedIntroducedBlock {
     const doc = new Doc();
     const initialUpdates: Uint8Array[] = [];
     const collect = (update: Uint8Array) =>
       initialUpdates.push(new Uint8Array(update));
     doc.on("update", collect);
-    if (block.remoteUpdate) {
-      applyUpdate(doc, block.remoteUpdate.payload.copy(), origin);
-    }
-    const context = createBlockContentDocContext({
-      blockId: block.blockId,
-      doc,
-      destroyDocOnDestroy: true,
-    });
-    liveContexts.set(block.blockId, context);
-    const state = createOpaqueBlockState(
-      block.blockId,
-      block.blockType,
-      opaqueCheckpointFromContext(context),
-      defaultProjection(block.blockType),
-      context,
-    );
-    state.contentRevision = block.baseToken.contentRevision;
-    blocks.set(block.blockId, state);
-    doc.off("update", collect);
-    const target = activeCommit?.updatesByBlockId.get(block.blockId) ?? [];
-    target.push(...initialUpdates);
-    activeCommit?.updatesByBlockId.set(block.blockId, target);
-    if (!block.remoteUpdate) {
-      ensureYjsBlockContent(context, {
-        blockType: block.blockType,
-        doc: defaultProjection(block.blockType),
-        origin,
+    try {
+      const context = createBlockContentDocContext({
+        blockId: block.blockId,
+        doc,
+        destroyDocOnDestroy: true,
       });
+      if (block.remoteUpdate) {
+        applyUpdate(doc, block.remoteUpdate.payload.copy(), origin);
+      } else {
+        ensureYjsBlockContent(context, {
+          blockType: block.blockType,
+          doc: defaultProjection(block.blockType),
+          origin,
+        });
+      }
+      const state = createOpaqueBlockState(
+        block.blockId,
+        block.blockType,
+        opaqueCheckpointFromContext(context),
+        block.before,
+      );
+      state.context = context;
+      state.contentRevision = block.baseToken.contentRevision;
+      let installed = false;
+      let destroyed = false;
+      return {
+        state,
+        initialUpdates: Object.freeze(initialUpdates),
+        install() {
+          if (installed) return;
+          if (destroyed) {
+            throw new Error(
+              `Detached Yjs content for ${block.blockId} was destroyed`,
+            );
+          }
+          if (blocks.has(block.blockId) || liveContexts.has(block.blockId)) {
+            throw new Error(`Introduced Yjs block ${block.blockId} now exists`);
+          }
+          liveContexts.set(block.blockId, context);
+          state.detachGuard = attachMutationGuard(block.blockId, context);
+          blocks.set(block.blockId, state);
+          installed = true;
+        },
+        destroy() {
+          if (installed || destroyed) return;
+          destroyed = true;
+          context.destroy();
+        },
+      };
+    } catch (error) {
+      doc.destroy();
+      throw error;
+    } finally {
+      doc.off("update", collect);
     }
-    return state;
   }
 
   function attachMutationGuard(
@@ -1503,15 +1754,6 @@ export function createYjsBlockContentRuntime(
       context.doc.off("beforeTransaction", beforeTransaction);
       context.doc.off("update", observer);
     };
-  }
-
-  function writeExplicitProjection(
-    context: BlockContentDocContext,
-    _blockType: BlockType,
-    projection: EditorRawBlockContent,
-    origin: unknown,
-  ): void {
-    writeCanonicalYjsBlockContent(context, projection, origin);
   }
 
   function mergeCapturedUpdates(blockId: BlockId): {
@@ -1616,26 +1858,6 @@ export function createYjsBlockContentRuntime(
     if (!context) return;
     liveContexts.delete(blockId);
     context.destroy();
-  }
-
-  function holdValidatedBlockContexts(
-    validatedBlocks: readonly ValidatedBlockState[],
-  ): readonly BlockId[] {
-    const held: BlockId[] = [];
-    for (const block of validatedBlocks) {
-      if (block.introduced) {
-        // The transaction owns the content context as soon as commit creates
-        // it. Recording the future lease here lets post-commit selection
-        // anchoring reuse that same context before publication releases it.
-        held.push(block.blockId);
-        continue;
-      }
-      const state = blocks.get(block.blockId);
-      if (!state?.peekContext()) continue;
-      state.leaseCount += 1;
-      held.push(block.blockId);
-    }
-    return Object.freeze(held);
   }
 
   function requireEditableContentAccess(): void {

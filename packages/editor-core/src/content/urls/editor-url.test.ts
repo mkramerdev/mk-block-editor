@@ -23,7 +23,7 @@ describe("editor link URL schema", () => {
   });
 
   it("allows explicit relative inline links", () => {
-    expect(sanitizeEditorLinkUrl("#heading")).toBe("#heading");
+    expect(sanitizeEditorLinkUrl("#alternateText")).toBe("#alternateText");
     expect(sanitizeEditorLinkUrl("/docs")).toBe("/docs");
     expect(sanitizeEditorLinkUrl("./docs")).toBe("./docs");
     expect(sanitizeEditorLinkUrl("../docs")).toBe("../docs");

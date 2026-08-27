@@ -95,8 +95,8 @@ export function createBlockGraphFromTypes(
     const id = testBlockId(index);
     blocks[id] = createVersionedBlockRecord({
       id,
-      type: types[index] ?? "paragraph",
-      metadata: metadataForType(types[index] ?? "paragraph"),
+      type: types[index] ?? "textBlock",
+      metadata: metadataForType(types[index] ?? "textBlock"),
     });
     rootBlockIds.push(id);
   }
@@ -235,20 +235,18 @@ export function blockDataFromBlockGraph(
 
 function metadataForType(type: BlockType): JsonObject | undefined {
   switch (type) {
-    case "checklistItem":
-      return { checked: true };
-    case "code":
+    case "fixedWrapper":
       return { language: "ts" };
-    case "image":
-    case "video":
-    case "audio":
-    case "file":
+    case "alternateAtomicBlock":
+    case "secondAtomicBlock":
+    case "thirdAtomicBlock":
+    case "fourthAtomicBlock":
       return { caption: `${type} caption` };
-    case "embed":
+    case "fifthAtomicBlock":
       return { url: "https://example.test" };
-    case "collection":
+    case "rootWrapper":
       return { width: 1600 };
-    case "database":
+    case "fullAtomicBlock":
       return { viewId: "view-1" };
     default:
       return undefined;

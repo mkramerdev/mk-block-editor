@@ -11,6 +11,9 @@ import {
   wrapperSelection,
 } from "@repo/editor-core/selection";
 import type { BlockType } from "@repo/editor-core/document";
+import { richTextDocumentContentSize } from "@repo/editor-core/content/rich-text";
+import type { StructuralEditRange } from "@repo/editor-core/editing";
+import type { EditorSelectionSnapshot } from "@repo/editor-react/selection";
 import type {
   EditorContentRuntimeDefinition,
   EditorContentCodecs,
@@ -22,22 +25,13 @@ import type {
 } from "@repo/editor-web/editor";
 import { createYjsBlockContentRuntime } from "@repo/editor-yjs-dom";
 import {
-  blockOperationCommands,
-  blockOperationKeybindings,
-} from "@repo/editor-web/block-operations";
-import {
   conventionalHistoryCommands,
   conventionalHistoryKeybindings,
 } from "@repo/editor-web/keybindings";
 import {
-  boldMarkDefinition,
-  codeMarkDefinition,
-  italicMarkDefinition,
-  linkMarkDefinition,
-  strikethroughMarkDefinition,
-  underlineMarkDefinition,
-} from "./inline/marks.ts";
-import { firstDraftMentionDefinition } from "./inline/mentions.tsx";
+  firstDraftInlineAtoms,
+  firstDraftInlineMarks,
+} from "./inline/definitions.ts";
 import { firstDraftMentionTypingTrigger } from "./mention-menu/index.ts";
 import {
   CalloutRenderer,
@@ -49,13 +43,11 @@ import {
   ListContainerRenderer,
   ListItemRenderer,
   ParagraphRenderer,
-  PlaceholderRenderer,
   QuoteRenderer,
   ToggleHeadingRenderer,
   ToggleListItemRenderer,
-  TransparentWrapperRenderer,
+  ToggleBodyRenderer,
 } from "./blocks/core/renderers.tsx";
-import { BookmarkRenderer } from "./blocks/media/renderers.tsx";
 import {
   ColumnRenderer,
   ColumnsRenderer,
@@ -72,36 +64,33 @@ import {
   tableRangeSelectionModel,
 } from "./blocks/table/selection.ts";
 import { firstDraftTableClipboardCodecs } from "./blocks/table/clipboard.ts";
-import {
-  firstDraftTableCellBoundaryCommands,
-  firstDraftTableCellBoundaryKeybindings,
-} from "./blocks/table/table-cell-boundary-commands.ts";
 import { validateFirstDraftTableStructure } from "./blocks/table/structural-validator.ts";
 import { firstDraftBlockModelDefinitions } from "./server/block-definitions.ts";
 import {
-  COLLAPSED_TOGGLE_ENTER_COMMAND_ID,
-  createCollapsedToggleEnterCommand,
-} from "./blocks/toggle-list-item/collapsed-toggle-enter-command.ts";
+  createFirstDraftStructuralTextCommand,
+  firstDraftStructuralTextKeybindings,
+} from "./block-operations/structural-text-command.ts";
+import { planFirstDraftStructuralRangeDeletion } from "./block-operations/structural-range-deletion.ts";
 import type { FirstDraftViewStateStore } from "./blocks/view-state.tsx";
 import { firstDraftSlashTypingTrigger } from "./slash-menu/trigger.ts";
+import { normalizeFirstDraftHeadingLevel } from "./heading-level.ts";
+
+export {
+  firstDraftInlineAtoms,
+  firstDraftInlineMarks,
+} from "./inline/definitions.ts";
 
 const paragraphDefinition = {
   ...firstDraftBlockModelDefinitions.paragraph,
+  rootLayout: "normal",
   selection: contentSelection(),
-  split: {
-    default: "paragraph",
-    bulletListItem: "bulletListItem",
-    orderedListItem: "orderedListItem",
-    checklistItem: "checklistItem",
-    toggleListItem: "toggleListItem",
-  },
   renderer: ParagraphRenderer,
 } satisfies WebBlockDefinition<EditableEditor>;
 
 const headingDefinition = {
   ...firstDraftBlockModelDefinitions.heading,
+  rootLayout: "normal",
   selection: contentSelection(),
-  split: { default: "paragraph" },
   renderer: HeadingRenderer,
 } satisfies WebBlockDefinition<EditableEditor>;
 
@@ -110,8 +99,10 @@ function listItemDefinition(
 ) {
   return {
     ...firstDraftBlockModelDefinitions[type],
+    rootLayout: "normal",
     renderer:
       type === "checklistItem" ? ChecklistItemRenderer : ListItemRenderer,
+    selection: firstDraftListItemSelection(),
     shellElement: "li",
   } satisfies WebBlockDefinition<EditableEditor>;
 }
@@ -122,10 +113,18 @@ function listContainerDefinition(
 ) {
   return {
     ...firstDraftBlockModelDefinitions[type],
+    rootLayout: "normal",
     renderer:
       type === "checklist" ? ChecklistContainerRenderer : ListContainerRenderer,
+    selection: wrapperSelection({
+      fragment: { kind: "wrapper", inclusion: "selected-children" },
+    }),
     shellElement,
   } satisfies WebBlockDefinition<EditableEditor>;
+}
+
+function firstDraftListItemSelection() {
+  return wrapperSelection();
 }
 
 export const firstDraftBlockDefinitions: Readonly<
@@ -141,18 +140,22 @@ export const firstDraftBlockDefinitions: Readonly<
   checklistItem: listItemDefinition("checklistItem"),
   quote: {
     ...firstDraftBlockModelDefinitions.quote,
+    rootLayout: "normal",
     renderer: QuoteRenderer,
   },
   code: {
     ...firstDraftBlockModelDefinitions.code,
+    rootLayout: "normal",
     renderer: CodeRenderer,
   },
   callout: {
     ...firstDraftBlockModelDefinitions.callout,
+    rootLayout: "normal",
     renderer: CalloutRenderer,
   },
   toggleHeading: {
     ...firstDraftBlockModelDefinitions.toggleHeading,
+    rootLayout: "normal",
     selection: wrapperSelection({
       fragment: {
         kind: "wrapper",
@@ -164,13 +167,15 @@ export const firstDraftBlockDefinitions: Readonly<
   },
   toggleHeadingBody: {
     ...firstDraftBlockModelDefinitions.toggleHeadingBody,
+    rootLayout: "normal",
     selection: wrapperSelection({
       fragment: { kind: "wrapper", inclusion: "never" },
     }),
-    renderer: TransparentWrapperRenderer,
+    renderer: ToggleBodyRenderer,
   },
   toggleListItem: {
     ...firstDraftBlockModelDefinitions.toggleListItem,
+    rootLayout: "normal",
     selection: wrapperSelection({
       fragment: {
         kind: "wrapper",
@@ -182,21 +187,20 @@ export const firstDraftBlockDefinitions: Readonly<
   },
   toggleListItemBody: {
     ...firstDraftBlockModelDefinitions.toggleListItemBody,
+    rootLayout: "normal",
     selection: wrapperSelection({
       fragment: { kind: "wrapper", inclusion: "never" },
     }),
-    renderer: TransparentWrapperRenderer,
+    renderer: ToggleBodyRenderer,
   },
   divider: {
     ...firstDraftBlockModelDefinitions.divider,
+    rootLayout: "normal",
     renderer: DividerRenderer,
-  },
-  bookmark: {
-    ...firstDraftBlockModelDefinitions.bookmark,
-    renderer: BookmarkRenderer,
   },
   columns: {
     ...firstDraftBlockModelDefinitions.columns,
+    rootLayout: "normal",
     selection: wrapperSelection({
       fragment: { kind: "wrapper", inclusion: "multiple-selected-children" },
     }),
@@ -204,6 +208,7 @@ export const firstDraftBlockDefinitions: Readonly<
   },
   column: {
     ...firstDraftBlockModelDefinitions.column,
+    rootLayout: "normal",
     selection: wrapperSelection({
       fragment: { kind: "wrapper", inclusion: "never" },
     }),
@@ -211,6 +216,7 @@ export const firstDraftBlockDefinitions: Readonly<
   },
   tabs: {
     ...firstDraftBlockModelDefinitions.tabs,
+    rootLayout: "normal",
     selection: wrapperSelection({
       fragment: {
         kind: "wrapper",
@@ -222,26 +228,26 @@ export const firstDraftBlockDefinitions: Readonly<
   },
   tabPane: {
     ...firstDraftBlockModelDefinitions.tabPane,
+    rootLayout: "normal",
     selection: wrapperSelection({
       fragment: { kind: "wrapper", inclusion: "never" },
     }),
     renderer: TabPaneRenderer,
   },
-  placeholder: {
-    ...firstDraftBlockModelDefinitions.placeholder,
-    renderer: PlaceholderRenderer,
-  },
   table: {
     ...firstDraftBlockModelDefinitions.table,
+    rootLayout: "full",
     selection: tableRangeSelectionModel(),
     renderer: TableRenderer,
   },
   tableRow: {
     ...firstDraftBlockModelDefinitions.tableRow,
+    rootLayout: "full",
     renderer: TableRowRenderer,
   },
   tableCell: {
     ...firstDraftBlockModelDefinitions.tableCell,
+    rootLayout: "normal",
     selection: contentSelection(),
     renderer: TableCellRenderer,
   },
@@ -251,12 +257,26 @@ const firstDraftContentRuntimeDefinition: EditorContentRuntimeDefinition = {
   createRuntime: createYjsBlockContentRuntime,
 };
 
+export interface FirstDraftEditorDefinitionOptions {
+  /**
+   * `null` selects the editor-web canonical content runtime. Browser editing
+   * otherwise uses First Draft's Yjs-backed runtime.
+   */
+  readonly contentRuntime?: EditorContentRuntimeDefinition | null;
+}
+
 export function createFirstDraftEditorDefinition(
   viewState: FirstDraftViewStateStore,
+  options: FirstDraftEditorDefinitionOptions = {},
 ): EditableEditorDefinition {
   return {
     blocks: firstDraftBlockDefinitions,
-    content: firstDraftContentRuntimeDefinition,
+    ...(options.contentRuntime === null
+      ? {}
+      : {
+          content:
+            options.contentRuntime ?? firstDraftContentRuntimeDefinition,
+        }),
     inlineMarks: firstDraftInlineMarks,
     inlineAtoms: firstDraftInlineAtoms,
     typingTriggers: [
@@ -270,7 +290,7 @@ export function createFirstDraftEditorDefinition(
     selectionFragment: {
       resolveVisibleChildBlockIds({ blockId, blockType, childBlockIds }) {
         if (blockType === "tabs") {
-          const selected = viewState.getSnapshot().selectedTabs[blockId];
+          const selected = viewState.getSelectedTab(blockId);
           const active =
             selected && childBlockIds.includes(selected)
               ? selected
@@ -285,44 +305,39 @@ export function createFirstDraftEditorDefinition(
         }
         return childBlockIds;
       },
+      resolveStructuralEditRange: resolveFirstDraftStructuralEditRange,
+      planStructuralRangeDeletion: (input) =>
+        planFirstDraftStructuralRangeDeletion(input, viewState),
     },
     documentValidators: [validateFirstDraftTableStructure],
     commands: [
-      createCollapsedToggleEnterCommand(viewState),
-      ...firstDraftTableCellBoundaryCommands,
+      createFirstDraftStructuralTextCommand(viewState),
       ...conventionalHistoryCommands,
-      ...blockOperationCommands,
     ],
     keybindings: [
-      {
-        key: "Enter",
-        commandId: COLLAPSED_TOGGLE_ENTER_COMMAND_ID,
-        scope: "block",
-      },
-      ...firstDraftTableCellBoundaryKeybindings,
+      ...firstDraftStructuralTextKeybindings,
       ...conventionalHistoryKeybindings,
-      ...blockOperationKeybindings,
     ],
   };
 }
-
-export const firstDraftInlineMarks = Object.freeze([
-  boldMarkDefinition,
-  italicMarkDefinition,
-  codeMarkDefinition,
-  linkMarkDefinition,
-  strikethroughMarkDefinition,
-  underlineMarkDefinition,
-]);
-
-export const firstDraftInlineAtoms = Object.freeze([
-  firstDraftMentionDefinition,
-]);
 
 function createFirstDraftContentCodecs(): EditorContentCodecs {
   return {
     htmlImportHandlers: [
       ...(firstDraftTableClipboardCodecs.htmlImportHandlers ?? []),
+      createFirstDraftSemanticWrapperImportHandler(),
+      {
+        id: "first-draft.heading-import",
+        elements: ["h1", "h2", "h3"],
+        parse(node, context) {
+          const match = /^h([1-3])$/u.exec(node.tagName.toLowerCase());
+          return match
+            ? context.parseTextBlock(node, "heading", {
+                level: Number(match[1]),
+              })
+            : null;
+        },
+      },
       {
         id: "first-draft.divider-import",
         elements: ["hr"],
@@ -354,6 +369,19 @@ function createFirstDraftContentCodecs(): EditorContentCodecs {
     ],
     htmlExportHandlers: [
       ...(firstDraftTableClipboardCodecs.htmlExportHandlers ?? []),
+      createFirstDraftSemanticWrapperExportHandler(),
+      {
+        id: "first-draft.heading-export",
+        export(block, context) {
+          if (block.type !== "heading") return null;
+          const heading = context.document.createElement(
+            `h${normalizeFirstDraftHeadingLevel(block.metadata?.level)}`,
+          );
+          const content = context.exportTextContent(block);
+          if (content) heading.append(content);
+          return heading;
+        },
+      },
       {
         id: "first-draft.divider-export",
         export(block, context) {
@@ -440,6 +468,108 @@ function createFirstDraftContentCodecs(): EditorContentCodecs {
   };
 }
 
+const firstDraftListItemTypes = new Set<BlockType>([
+  "bulletListItem",
+  "orderedListItem",
+  "checklistItem",
+]);
+
+function resolveFirstDraftStructuralEditRange(input: {
+  readonly snapshot: EditorSelectionSnapshot;
+  readonly range: StructuralEditRange;
+  readonly graph: {
+    getBlock(blockId: BlockId): import("@repo/editor-core/document").VersionedBlock | null;
+    getParentId(blockId: BlockId): BlockId | null;
+    getChildBlockIds(parentId: BlockId): readonly BlockId[];
+    getRootBlockIds(): readonly BlockId[];
+  };
+  readonly readBlockContent: (
+    blockId: BlockId,
+    blockType: BlockType,
+  ) => import("@repo/editor-core/content/rich-text").RichTextDocumentNodeJson | null;
+}): StructuralEditRange | null {
+  const selected = new Map(
+    input.snapshot.rangeBlocks.map((entry) => [entry.blockId, entry]),
+  );
+  const completeItems = new Set<BlockId>();
+
+  const completelySelected = (blockId: BlockId): boolean => {
+    const block = input.graph.getBlock(blockId);
+    if (!block) return false;
+    const definition = firstDraftBlockDefinitions[block.type];
+    const range = selected.get(blockId);
+    const coverage = range?.coverage;
+    if (definition?.kind !== "wrapper") {
+      const content = input.readBlockContent(block.id, block.type);
+      const size = content ? richTextDocumentContentSize(content) : null;
+      return coverage === "complete-content" ||
+        coverage === "complete-block" ||
+        (coverage === "partial" &&
+          size !== null &&
+          (range?.startOffset ?? 0) === 0 &&
+          (range?.endOffset ?? size) === size);
+    }
+    const children = input.graph.getChildBlockIds(blockId);
+    return children.length > 0 && children.every(completelySelected);
+  };
+
+  for (const entry of input.snapshot.rangeBlocks) {
+    let current = input.graph.getParentId(entry.blockId);
+    while (current) {
+      const block = input.graph.getBlock(current);
+      if (!block) break;
+      if (firstDraftListItemTypes.has(block.type)) {
+        if (completelySelected(current)) completeItems.add(current);
+        break;
+      }
+      current = input.graph.getParentId(current);
+    }
+  }
+  if (completeItems.size === 0) return input.range;
+
+  const emittedItems = new Set<BlockId>();
+  const blocks = input.range.blocks.flatMap((entry) => {
+    let current: BlockId | null = entry.blockId;
+    while (current) {
+      if (completeItems.has(current)) {
+        if (emittedItems.has(current)) return [];
+        emittedItems.add(current);
+        const item = input.graph.getBlock(current);
+        return item
+          ? [{
+              kind: "block" as const,
+              blockId: item.id,
+              blockType: item.type,
+              parentId: item.parentId,
+            }]
+          : [];
+      }
+      current = input.graph.getParentId(current);
+    }
+    return [entry];
+  });
+  if (blocks.length === 0) return null;
+  const boundary = (
+    entry: (typeof blocks)[number],
+    edge: "start" | "end",
+  ): StructuralEditRange["start"] =>
+    entry.kind === "block"
+      ? { kind: "block", blockId: entry.blockId }
+      : entry.kind === "text"
+        ? {
+            kind: "text",
+            blockId: entry.blockId,
+            offset: edge === "start" ? entry.from : entry.to,
+          }
+        : input.range[edge];
+  return {
+    ...input.range,
+    blocks,
+    start: boundary(blocks[0]!, "start"),
+    end: boundary(blocks.at(-1)!, "end"),
+  };
+}
+
 function createWrapperImportHandler(
   element: "blockquote" | "pre",
   wrapperType: "quote" | "code",
@@ -452,6 +582,87 @@ function createWrapperImportHandler(
       const text = context.parseTextBlock(node, "paragraph");
       if (!text || text.rootBlockIds.length !== 1) return null;
       return wrapFragment(text, wrapperType, context.blockDefinitions);
+    },
+  };
+}
+
+const firstDraftSemanticWrapperClasses = Object.freeze({
+  "first-draft-semantic-callout": "callout",
+  "first-draft-semantic-toggle-heading": "toggleHeading",
+  "first-draft-semantic-toggle-heading-body": "toggleHeadingBody",
+  "first-draft-semantic-toggle-list-item": "toggleListItem",
+  "first-draft-semantic-toggle-list-item-body": "toggleListItemBody",
+  "first-draft-semantic-columns": "columns",
+  "first-draft-semantic-column": "column",
+  "first-draft-semantic-tabs": "tabs",
+  "first-draft-semantic-tab-pane": "tabPane",
+} satisfies Readonly<Record<string, BlockType>>);
+
+const firstDraftSemanticWrapperClassByType = new Map<BlockType, string>(
+  Object.entries(firstDraftSemanticWrapperClasses).map(([className, type]) => [
+    type,
+    className,
+  ]),
+);
+
+function createFirstDraftSemanticWrapperImportHandler(): NonNullable<
+  EditorContentCodecs["htmlImportHandlers"]
+>[number] {
+  return {
+    id: "first-draft.semantic-wrapper-import",
+    parse(node, context) {
+      const wrapperType = Object.entries(firstDraftSemanticWrapperClasses).find(
+        ([className]) => node.classList.contains(className),
+      )?.[1];
+      if (!wrapperType) return null;
+      const children = context.parseChildren(node);
+      if (children) {
+        return wrapFragment(children, wrapperType, context.blockDefinitions);
+      }
+      if (
+        !isEmptySemanticWrapper(node) ||
+        (wrapperType !== "toggleHeadingBody" &&
+          wrapperType !== "toggleListItemBody" &&
+          wrapperType !== "tabPane")
+      ) {
+        return null;
+      }
+      const wrapper = createCanonicalBlockRecord({ type: wrapperType });
+      return createCanonicalBlockFragment({
+        blocks: [wrapper],
+        rootBlockIds: [wrapper.id],
+        start: { kind: "block", blockId: wrapper.id },
+        end: { kind: "block", blockId: wrapper.id },
+        blockDefinitions: context.blockDefinitions,
+      });
+    },
+  };
+}
+
+function isEmptySemanticWrapper(node: HTMLElement): boolean {
+  return Array.from(node.childNodes).every(
+    (child) => child.nodeType === 3 && !(child.textContent ?? "").trim(),
+  );
+}
+
+function createFirstDraftSemanticWrapperExportHandler(): NonNullable<
+  EditorContentCodecs["htmlExportHandlers"]
+>[number] {
+  return {
+    id: "first-draft.semantic-wrapper-export",
+    export(block, context) {
+      const className = firstDraftSemanticWrapperClassByType.get(block.type);
+      if (!className) return null;
+      const tagName =
+        block.type === "callout"
+          ? "aside"
+          : block.type === "toggleHeading" || block.type === "toggleListItem"
+            ? "details"
+            : "div";
+      const element = context.document.createElement(tagName);
+      element.className = className;
+      element.append(context.exportChildren(block.id));
+      return element;
     },
   };
 }
@@ -577,7 +788,7 @@ function isChecklistList(list: HTMLElement): boolean {
 
 function wrapFragment(
   fragment: CanonicalBlockFragment,
-  wrapperType: "quote" | "code",
+  wrapperType: BlockType,
   blockDefinitions: Readonly<Record<BlockType, BlockDefinition>>,
 ): CanonicalBlockFragment | null {
   const wrapper = createCanonicalBlockRecord({ type: wrapperType });

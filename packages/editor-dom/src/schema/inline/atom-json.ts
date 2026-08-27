@@ -51,7 +51,7 @@ export function proseMirrorInlineFragmentToCanonicalJson(
 function unwrapTextBlock(content: readonly unknown[]): readonly unknown[] {
   if (content.length !== 1 || !isRecord(content[0])) return content;
   const node = content[0];
-  return node.type === "paragraph" || node.type === "heading"
+  return node.type === "paragraph"
     ? Array.isArray(node.content)
       ? node.content
       : []
@@ -93,10 +93,6 @@ function mapJsonObject(
     delete mapped.attrs;
     mapped.metadata = metadata;
   }
-  if (direction === "prosemirror-to-canonical" && mapped.type === "heading") {
-    mapped.type = "paragraph";
-    delete mapped.attrs;
-  }
   return mapped;
 }
 
@@ -105,7 +101,6 @@ function isAtomNodeType(type: unknown): type is string {
     typeof type === "string" &&
     type !== "doc" &&
     type !== "paragraph" &&
-    type !== "heading" &&
     type !== "text" &&
     type !== "hard_break"
   );

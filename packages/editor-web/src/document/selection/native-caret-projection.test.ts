@@ -21,6 +21,7 @@ describe("native caret projection", () => {
     root.focus();
     vi.mocked(createSemanticDomTextLayout).mockReturnValue({
       length: 6,
+      canonicalRangeForNode: vi.fn(),
       pointFromCanonicalOffset: (offset) => ({ node: text, offset }),
       canonicalOffsetFromPoint: (_node, offset) => offset,
       hitTest: vi.fn(),

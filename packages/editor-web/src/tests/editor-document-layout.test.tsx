@@ -1,4 +1,4 @@
-import { StrictMode } from "react";
+import { StrictMode, type ReactNode } from "react";
 import { act, render, screen } from "@testing-library/react";
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import type { VersionedBlock } from "@repo/editor-core/document";
@@ -11,7 +11,7 @@ import type {
 import { createEditorLogicalSelectionPoint } from "@repo/editor-react/selection";
 import { EditorDocument } from "../runtime/document/editor-document-component.tsx";
 import type {
-  Editor,
+  EditableEditor,
   EditorDocumentProps,
   EditorLayoutConfig,
 } from "../runtime/document/contracts.ts";
@@ -21,25 +21,34 @@ import { initializeTestEditableEditor } from "./test-editor-initializers.ts";
 
 const blockListProbe = vi.hoisted(() => ({
   controllers: [] as SelectionController[],
+  interactionEnabled: [] as boolean[],
 }));
 
 vi.mock("../document/editor/block-list", () => ({
   BlockList: ({
     editor,
+    interactionEnabled,
+    rootLeadingContent,
   }: {
     editor: {
       readonly probeKey?: string;
       readonly selectionController: SelectionController;
     };
+    interactionEnabled: boolean;
+    rootLeadingContent?: ReactNode;
   }) => {
     blockListProbe.controllers.push(editor.selectionController);
+    blockListProbe.interactionEnabled.push(interactionEnabled);
     return (
       <div
         key={editor.probeKey}
         data-testid="block-list"
         role="list"
         aria-label="Document blocks"
-      />
+      >
+        {rootLeadingContent}
+        <div data-testid="canonical-root" />
+      </div>
     );
   },
 }));
@@ -54,8 +63,12 @@ describe("EditorDocument layout contract", () => {
       readonly sideRightWidth: string;
     }>();
     expectTypeOf<EditorDocumentProps>().toEqualTypeOf<{
-      readonly editor: Editor;
+      readonly editor: EditableEditor;
+      readonly interactionEnabled?: boolean;
       readonly layout?: EditorLayoutConfig;
+      readonly childOrderProjection?: EditorDocumentProps["childOrderProjection"];
+      readonly children?: EditorDocumentProps["children"];
+      readonly trailingContent?: EditorDocumentProps["trailingContent"];
       readonly renderDocumentLayers?: EditorDocumentProps["renderDocumentLayers"];
       readonly onSelectionDragStart?: EditorDocumentProps["onSelectionDragStart"];
       readonly onSelectionDragUpdate?: EditorDocumentProps["onSelectionDragUpdate"];
@@ -64,6 +77,31 @@ describe("EditorDocument layout contract", () => {
     expectTypeOf<{
       readonly sideLeftWidth: string;
     }>().not.toMatchTypeOf<EditorLayoutConfig>();
+  });
+
+  it("keeps leading content before roots and trailing content after the list", () => {
+    render(
+      <EditorDocument
+        editor={editor}
+        trailingContent={<button data-testid="trailing-content" />}
+      >
+        <div data-testid="leading-content" />
+      </EditorDocument>,
+    );
+
+    const shell = screen.getByTestId("editor-document");
+    const blockList = screen.getByRole("list", { name: "Document blocks" });
+    const leading = screen.getByTestId("leading-content");
+    const canonicalRoot = screen.getByTestId("canonical-root");
+    const trailing = screen.getByTestId("trailing-content");
+
+    expect(blockList.contains(leading)).toBe(true);
+    expect(leading.compareDocumentPosition(canonicalRoot)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(trailing.parentElement).toBe(shell);
+    expect(blockList.contains(trailing)).toBe(false);
+    expect(blockList.nextElementSibling).toBe(trailing);
   });
 
   it("owns the document root and projects every supplied layout value", () => {
@@ -112,6 +150,15 @@ describe("EditorDocument layout contract", () => {
     expect(shell.style.getPropertyValue("--editor-side-right-width")).toBe(
       "24px",
     );
+  });
+
+  it("defaults client effects on and forwards an explicit inert state", () => {
+    const view = render(<EditorDocument editor={editor} />);
+    expect(blockListProbe.interactionEnabled.at(-1)).toBe(true);
+    view.rerender(
+      <EditorDocument editor={editor} interactionEnabled={false} />,
+    );
+    expect(blockListProbe.interactionEnabled.at(-1)).toBe(false);
   });
 
   it("projects the private neutral layout when layout is omitted", () => {
@@ -324,12 +371,12 @@ function lastController(): SelectionController {
   return controller;
 }
 
-function createTestEditor(probeKey: string): Editor {
+function createTestEditor(probeKey: string): EditableEditor {
   return Object.assign(
     initializeTestEditableEditor({
       definition: testEditableEditorDefinition,
       snapshot: createTestEditorSnapshot([
-        { type: "paragraph", text: probeKey },
+        { type: "textBlock", text: probeKey },
       ]),
     }),
     { probeKey },
@@ -340,7 +387,7 @@ function createSelectionGraph(): EditorSelectionGraphReader {
   const blockId = "document-selection" as BlockId;
   const block: VersionedBlock = {
     id: blockId,
-    type: "callout",
+    type: "containerWrapper",
     parentId: null,
     tombstone: null,
     metadataVersion: "1",

@@ -4,10 +4,17 @@ import {
   resolveDocumentKeybinding,
 } from "./document-resolver.ts";
 import { readEditorKeybindingPlatform } from "./chord.ts";
+import type { ResolvedNativeFocusTarget } from "../document/native-focus-coordinator.ts";
 
 export interface EditorDocumentInputRouting {
-  readonly keydown: (event: KeyboardEvent) => void;
-  readonly beforeinput: (event: InputEvent) => void;
+  readonly keydown: (
+    event: KeyboardEvent,
+    nativeFocus: ResolvedNativeFocusTarget,
+  ) => void;
+  readonly beforeinput: (
+    event: InputEvent,
+    nativeFocus: ResolvedNativeFocusTarget,
+  ) => void;
 }
 
 export function createEditorDocumentInputRouting(
@@ -16,23 +23,12 @@ export function createEditorDocumentInputRouting(
 ): EditorDocumentInputRouting {
   const { definition, store, editor } = runtime;
   return {
-    keydown: (event) => {
-      if (event.defaultPrevented) return;
-      const target = event.target;
-      if (
-        !editor.editable ||
-        !editor.ownsNativeFocusTarget(target) ||
-        !editor.ownsActiveElement(doc)
-      ) {
-        return;
-      }
-      const editableBlockTarget = editor.ownsNativeFocusTarget(target);
+    keydown: (event, nativeFocus) => {
+      if (event.defaultPrevented || !nativeFocus) return;
       const platform = readEditorKeybindingPlatform(doc.defaultView);
       if (
-        (editableBlockTarget
-          ? (event.isComposing && !isEditorHistoryKeyboardEvent(event)) ||
-            hasConfiguredBlockKeybinding(event, runtime, platform)
-          : isNativeTextInputTarget(target)) ||
+        (event.isComposing && !isEditorHistoryKeyboardEvent(event)) ||
+        hasConfiguredBlockKeybinding(event, runtime, platform) ||
         isGlobalSelectionKeyOwner(
           event,
           editor.selection.getSnapshot().kind !== "none",
@@ -47,20 +43,14 @@ export function createEditorDocumentInputRouting(
       );
       if (result.kind === "handled") event.preventDefault();
     },
-    beforeinput: (event) => {
-      if (
-        !editor.editable ||
-        !editor.ownsNativeFocusTarget(event.target) ||
-        !editor.ownsActiveElement(doc)
-      ) {
-        return;
-      }
+    beforeinput: (event, nativeFocus) => {
       if (
         event.inputType !== "historyUndo" &&
         event.inputType !== "historyRedo"
       ) {
         return;
       }
+      if (!nativeFocus) return;
       event.preventDefault();
       if (event.inputType === "historyUndo") {
         editor.undo();
@@ -90,12 +80,5 @@ function isGlobalSelectionKeyOwner(
         event.key === "ArrowRight" ||
         event.key === "ArrowUp" ||
         event.key === "ArrowDown"))
-  );
-}
-
-function isNativeTextInputTarget(target: EventTarget | null): boolean {
-  return (
-    target instanceof Element &&
-    target.closest("input, textarea, select, [contenteditable='true']") !== null
   );
 }

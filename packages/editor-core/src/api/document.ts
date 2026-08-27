@@ -8,13 +8,6 @@ export type {
 } from "../document/model/block.ts";
 export { blocksHaveEqualCanonicalState } from "../document/model/block.ts";
 export type { RelativeTextPoint, TextPoint } from "../document/model/points.ts";
-export {
-  DEFAULT_HEADING_LEVEL,
-  MAX_HEADING_LEVEL,
-  MIN_HEADING_LEVEL,
-  normalizeHeadingLevel,
-  type HeadingLevel,
-} from "../document/model/heading-level.ts";
 export type {
   EditorTextBlockContent,
   EditorInstanceBlockSlice,

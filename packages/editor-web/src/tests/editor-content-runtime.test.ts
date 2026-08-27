@@ -43,7 +43,7 @@ describe("local content prepare/apply/release protocol", () => {
     const other = createRuntime({ [firstBlockId]: "other" });
     const foreignLease = owner.acquireBlockContent(
       firstBlockId,
-      "paragraph",
+      "textBlock",
       "active-editing",
     );
 
@@ -82,14 +82,14 @@ describe("local content prepare/apply/release protocol", () => {
         ],
       },
     });
-    const before = runtime.readBlockProjection(firstBlockId, "paragraph");
+    const before = runtime.readBlockProjection(firstBlockId, "textBlock");
     const prepared = requirePreparation(
       prepareInsert(runtime, firstBlockId, 9, " after"),
     );
     const preparedProjection = runtime.readValidatedBlockContent(
       prepared,
       firstBlockId,
-      "paragraph",
+      "textBlock",
     );
 
     expect(preparedProjection).not.toBe(before);
@@ -99,8 +99,8 @@ describe("local content prepare/apply/release protocol", () => {
       before.content[0]?.content?.[0],
     );
 
-    const applied = runtime.commitContent(prepared);
-    expect(runtime.readBlockProjection(firstBlockId, "paragraph")).toBe(
+    const applied = runtime.commitContent(prepared, "none");
+    expect(runtime.readBlockProjection(firstBlockId, "textBlock")).toBe(
       preparedProjection,
     );
     runtime.publishContentCommit(applied);
@@ -133,7 +133,7 @@ describe("local content prepare/apply/release protocol", () => {
 
   it("rejects stale graph, stale content, and block-type mismatches", () => {
     const runtime = createRuntime({ [firstBlockId]: "A" });
-    const token = runtime.readContentBaseToken(firstBlockId, "paragraph", 1);
+    const token = runtime.readContentBaseToken(firstBlockId, "textBlock", 1);
     const operation = insertOperation(firstBlockId, 1, "B");
 
     expect(
@@ -148,8 +148,8 @@ describe("local content prepare/apply/release protocol", () => {
         graphRevision: 1,
         changes: [
           {
-            baseToken: { ...token, blockType: "heading" },
-            operations: [{ ...operation, blockType: "heading" }],
+            baseToken: { ...token, blockType: "alternateTextBlock" },
+            operations: [{ ...operation, blockType: "alternateTextBlock" }],
           },
         ],
       }),
@@ -158,7 +158,7 @@ describe("local content prepare/apply/release protocol", () => {
     runtime.applyExternalContentUpdate({
       blockGraphVersion: 1,
       blockId: firstBlockId,
-      blockType: "paragraph",
+      blockType: "textBlock",
       update: createTestContentOperationUpdate(runtime),
       readProjection: richText("external"),
       revision: 1,
@@ -256,7 +256,7 @@ describe("local content prepare/apply/release protocol", () => {
               {
                 kind: "deleteInlineRange",
                 blockId: firstBlockId,
-                blockType: "paragraph",
+                blockType: "textBlock",
                 target: { kind: "text" },
                 range: {
                   from: { blockId: firstBlockId, offset: 0 },
@@ -271,7 +271,7 @@ describe("local content prepare/apply/release protocol", () => {
     expect(readText(runtime, firstBlockId)).toBe("AB");
   });
 
-  it("stores reverse-ordered inverses and effective rebased operations", () => {
+  it("rejects stale undo content at the requested range without relocating it", () => {
     const runtime = createRuntime({ [firstBlockId]: "abcabc" });
     const prepared = runtime.validateContentCommit({
       graphRevision: 1,
@@ -282,7 +282,7 @@ describe("local content prepare/apply/release protocol", () => {
             {
               kind: "deleteInlineRange",
               blockId: firstBlockId,
-              blockType: "paragraph",
+              blockType: "textBlock",
               target: { kind: "text" },
               range: {
                 from: { blockId: firstBlockId, offset: 0 },
@@ -290,21 +290,17 @@ describe("local content prepare/apply/release protocol", () => {
               },
               deletedContent: [{ type: "text", text: "bc" }],
             },
-            insertOperation(firstBlockId, 4, "Z"),
           ],
         },
       ],
       origin: "undo",
     });
-    const applied = requirePrepared(runtime, prepared);
-
-    expect(applied.blocks[0]?.contentOperations[0]).toMatchObject({
-      range: { from: { offset: 1 }, to: { offset: 3 } },
+    expect(prepared).toMatchObject({
+      ok: false,
+      reason: "invalid-operation",
+      message: "Logical content operation is inapplicable",
     });
-    expect(applied.blocks[0]?.inverseContentOperations).toMatchObject([
-      { kind: "deleteInlineRange", range: { from: { offset: 4 } } },
-      { kind: "insertInlineContent", position: { offset: 1 } },
-    ]);
+    expect(readText(runtime, firstBlockId)).toBe("abcabc");
   });
 
   it("enforces single-use prepared and applied values", () => {
@@ -312,9 +308,9 @@ describe("local content prepare/apply/release protocol", () => {
     const prepared = requirePreparation(
       prepareInsert(runtime, firstBlockId, 1, "B"),
     );
-    const applied = runtime.commitContent(prepared);
+    const applied = runtime.commitContent(prepared, "none");
 
-    expect(() => runtime.commitContent(prepared)).toThrow(
+    expect(() => runtime.commitContent(prepared, "none")).toThrow(
       /already been applied/,
     );
     runtime.publishContentCommit(applied);
@@ -331,16 +327,16 @@ describe("local content prepare/apply/release protocol", () => {
     runtime.applyExternalContentUpdate({
       blockGraphVersion: 1,
       blockId: firstBlockId,
-      blockType: "paragraph",
+      blockType: "textBlock",
       update: createTestContentOperationUpdate(runtime),
       readProjection: richText("external"),
       revision: 1,
     });
 
-    expect(() => runtime.commitContent(prepared)).toThrow(
+    expect(() => runtime.commitContent(prepared, "none")).toThrow(
       /Prepared content commit is stale/,
     );
-    expect(() => runtime.commitContent(prepared)).toThrow(
+    expect(() => runtime.commitContent(prepared, "none")).toThrow(
       /unknown or has already been applied/,
     );
     expect(readText(runtime, firstBlockId)).toBe("external");
@@ -447,6 +443,124 @@ describe("local content prepare/apply/release protocol", () => {
 });
 
 describe("local content stable text anchors", () => {
+  it("captures ordered inverse replay anchors at each transition revision", () => {
+    const runtime = createRuntime({ [firstBlockId]: "ab" });
+    const validated = requirePreparation(
+      runtime.validateContentCommit({
+        graphRevision: 1,
+        changes: [
+          {
+            baseToken: token(runtime, firstBlockId),
+            operations: [
+              insertOperation(firstBlockId, 1, "X"),
+              insertOperation(firstBlockId, 2, "Y"),
+            ],
+          },
+        ],
+      }),
+    );
+    const applied = runtime.commitContent(validated, "inverse");
+    expect(applied.replayCapture.kind).toBe("inverse");
+    if (applied.replayCapture.kind !== "inverse")
+      throw new Error("missing capture");
+    expect(
+      applied.replayCapture.steps.map((step) => step.operation.kind),
+    ).toEqual(["deleteInlineRange", "deleteInlineRange"]);
+    const lease = runtime.acquireBlockContent(
+      firstBlockId,
+      "textBlock",
+      "history",
+    );
+    const ranges = applied.replayCapture.steps.map((step) => {
+      if (step.anchors.kind !== "range") throw new Error("expected range");
+      if (!("codec" in step.anchors.start) || !("codec" in step.anchors.end)) {
+        throw new Error("expected opaque operation anchors");
+      }
+      const start = runtime.resolveOperationAnchorInContext(
+        lease,
+        step.anchors.start,
+      );
+      const end = runtime.resolveOperationAnchorInContext(
+        lease,
+        step.anchors.end,
+      );
+      return [start, end];
+    });
+    expect(ranges).toEqual([
+      [
+        { ok: true, textOffset: 2 },
+        { ok: true, textOffset: 3 },
+      ],
+      [
+        { ok: true, textOffset: 1 },
+        { ok: true, textOffset: 2 },
+      ],
+    ]);
+    lease.release();
+    runtime.publishContentCommit(applied);
+    const later = requirePrepared(
+      runtime,
+      prepareInsert(runtime, firstBlockId, 0, "Z"),
+    );
+    runtime.publishContentCommit(later);
+    const rebasedLease = runtime.acquireBlockContent(
+      firstBlockId,
+      "textBlock",
+      "history",
+    );
+    const firstStep = applied.replayCapture.steps[0]!;
+    if (firstStep.anchors.kind !== "range") throw new Error("expected range");
+    if (!("codec" in firstStep.anchors.start)) {
+      throw new Error("expected opaque operation anchor");
+    }
+    expect(
+      runtime.resolveOperationAnchorInContext(
+        rebasedLease,
+        firstStep.anchors.start,
+      ),
+    ).toEqual({ ok: true, textOffset: 3 });
+    rebasedLease.release();
+  });
+
+  it("preserves anchor lineage for a valid external canonical operation update", () => {
+    const runtime = createRuntime({ [firstBlockId]: "ab" });
+    const lease = runtime.acquireBlockContent(
+      firstBlockId,
+      "textBlock",
+      "history",
+    );
+    const created = runtime.createOperationAnchorInContext(lease, {
+      textOffset: 1,
+      association: 1,
+    });
+    lease.release();
+    if (!created.ok) throw new Error("missing operation anchor");
+
+    const donor = createRuntime({ [firstBlockId]: "ab" });
+    const donorApplied = requirePrepared(
+      donor,
+      prepareInsert(donor, firstBlockId, 0, "X"),
+    );
+    runtime.applyExternalContentUpdate({
+      blockGraphVersion: 1,
+      blockId: firstBlockId,
+      blockType: "textBlock",
+      update: donorApplied.blocks[0]!.operationUpdate,
+      readProjection: donor.readBlockProjection(firstBlockId, "textBlock"),
+      revision: 1,
+    });
+    const resolvingLease = runtime.acquireBlockContent(
+      firstBlockId,
+      "textBlock",
+      "history",
+    );
+    expect(
+      runtime.resolveOperationAnchorInContext(resolvingLease, created.anchor),
+    ).toEqual({ ok: true, textOffset: 2 });
+    resolvingLease.release();
+    donor.destroy();
+  });
+
   it.each([
     { splitOffset: 0, affinity: "backward" as const },
     { splitOffset: 5, affinity: "backward" as const },
@@ -458,7 +572,7 @@ describe("local content stable text anchors", () => {
       const anchor = requireAnchor(
         runtime.tryCreateTextAnchorInLiveContext({
           blockId: firstBlockId,
-          blockType: "paragraph",
+          blockType: "textBlock",
           textOffset: splitOffset,
           affinity,
         }),
@@ -476,7 +590,7 @@ describe("local content stable text anchors", () => {
                   {
                     kind: "deleteInlineRange",
                     blockId: firstBlockId,
-                    blockType: "paragraph",
+                    blockType: "textBlock",
                     target: { kind: "text" },
                     range: {
                       from: { blockId: firstBlockId, offset: splitOffset },
@@ -509,7 +623,7 @@ describe("local content stable text anchors", () => {
     const anchor = requireAnchor(
       runtime.tryCreateTextAnchorInLiveContext({
         blockId: firstBlockId,
-        blockType: "paragraph",
+        blockType: "textBlock",
         textOffset: 2,
         affinity: "forward",
       }),
@@ -524,7 +638,7 @@ describe("local content stable text anchors", () => {
     expect(
       runtime.tryResolveTextAnchorInLiveContext({
         blockId: firstBlockId,
-        blockType: "paragraph",
+        blockType: "textBlock",
         codec: anchor.codec,
         payload: anchor.payload,
       }),
@@ -536,7 +650,7 @@ describe("local content stable text anchors", () => {
     const backward = requireAnchor(
       runtime.tryCreateTextAnchorInLiveContext({
         blockId: firstBlockId,
-        blockType: "paragraph",
+        blockType: "textBlock",
         textOffset: 2,
         affinity: "backward",
       }),
@@ -544,7 +658,7 @@ describe("local content stable text anchors", () => {
     const forward = requireAnchor(
       runtime.tryCreateTextAnchorInLiveContext({
         blockId: firstBlockId,
-        blockType: "paragraph",
+        blockType: "textBlock",
         textOffset: 2,
         affinity: "forward",
       }),
@@ -574,7 +688,7 @@ describe("local content stable text anchors", () => {
             {
               kind: "deleteInlineRange",
               blockId: firstBlockId,
-              blockType: "paragraph",
+              blockType: "textBlock",
               target: { kind: "text" },
               range: {
                 from: { blockId: firstBlockId, offset: 1 },
@@ -606,7 +720,7 @@ describe("local content stable text anchors", () => {
     const anchor = requireAnchor(
       runtime.tryCreateTextAnchorInLiveContext({
         blockId: firstBlockId,
-        blockType: "paragraph",
+        blockType: "textBlock",
         textOffset: 3,
         affinity: "forward",
       }),
@@ -623,7 +737,7 @@ describe("local content stable text anchors", () => {
     runtime.applyExternalContentUpdate({
       blockGraphVersion: 1,
       blockId: firstBlockId,
-      blockType: "paragraph",
+      blockType: "textBlock",
       update: createTestContentOperationUpdate(runtime),
       readProjection: richText("replacement"),
       revision: 1,
@@ -640,7 +754,7 @@ describe("local content stable text anchors", () => {
     const anchor = requireAnchor(
       runtime.tryCreateTextAnchorInLiveContext({
         blockId: firstBlockId,
-        blockType: "paragraph",
+        blockType: "textBlock",
         textOffset: 2,
         affinity: "forward",
       }),
@@ -666,13 +780,13 @@ describe("local content stable text anchors", () => {
       runtime.validateContentCommit({
         graphRevision: 2,
         resultingGraphRevision: 3,
-        introducedBlocks: { [firstBlockId]: "paragraph" },
+        introducedBlocks: { [firstBlockId]: "textBlock" },
         changes: [
           {
             baseToken: {
               graphRevision: 2,
               blockId: firstBlockId,
-              blockType: "paragraph",
+              blockType: "textBlock",
               contentRevision: 0,
             },
             operations: [insertOperation(firstBlockId, 0, "abcd")],
@@ -712,12 +826,12 @@ describe("local content envelopes", () => {
 
   it("publishes one immutable byte value without per-subscriber copies", () => {
     const runtime = createRuntime({ [firstBlockId]: "immutable" });
-    const first = runtime.readBlockContentCheckpoint(firstBlockId, "paragraph");
+    const first = runtime.readBlockContentCheckpoint(firstBlockId, "textBlock");
     const originalByte = first.payload.byteAt(0);
     Reflect.set(first.payload, "0", 255);
     const second = runtime.readBlockContentCheckpoint(
       firstBlockId,
-      "paragraph",
+      "textBlock",
     );
 
     expect(second.payload.byteAt(0)).toBe(originalByte);
@@ -756,7 +870,7 @@ describe("local content envelopes", () => {
 function createRuntime(
   contentByBlockId: Record<BlockId, string | RichTextDocumentNodeJson>,
 ) {
-  const blockTypesById = {} as Record<BlockId, "paragraph">;
+  const blockTypesById = {} as Record<BlockId, "textBlock">;
   const contentById = {} as Record<BlockId, RichTextDocumentNodeJson>;
   const opaqueContentCheckpoints = {} as Record<
     BlockId,
@@ -766,7 +880,7 @@ function createRuntime(
     BlockId,
     string | RichTextDocumentNodeJson,
   ][]) {
-    blockTypesById[blockId] = "paragraph";
+    blockTypesById[blockId] = "textBlock";
     contentById[blockId] = typeof value === "string" ? richText(value) : value;
     const checkpoint = encodeLocalContentCheckpoint(contentById[blockId]);
     opaqueContentCheckpoints[blockId] = {
@@ -797,7 +911,7 @@ function token(
   runtime: EditorContentRuntime,
   blockId: BlockId,
 ): EditorContentBaseToken {
-  return runtime.readContentBaseToken(blockId, "paragraph", 1);
+  return runtime.readContentBaseToken(blockId, "textBlock", 1);
 }
 
 function prepareInsert(
@@ -821,7 +935,7 @@ function insertOperation(blockId: BlockId, offset: number, text: string) {
   return {
     kind: "insertInlineContent" as const,
     blockId,
-    blockType: "paragraph" as const,
+    blockType: "textBlock" as const,
     target: { kind: "text" as const },
     position: { blockId, offset },
     content: [{ type: "text" as const, text }],
@@ -839,11 +953,11 @@ function requirePrepared(
   runtime: EditorContentRuntime,
   value: ReturnType<EditorContentRuntime["validateContentCommit"]>,
 ) {
-  return runtime.commitContent(requirePreparation(value));
+  return runtime.commitContent(requirePreparation(value), "none");
 }
 
 function readText(runtime: EditorContentRuntime, blockId: BlockId): string {
-  return runtime.readBlockPlainText(blockId, "paragraph");
+  return runtime.readBlockPlainText(blockId, "textBlock");
 }
 
 function requireAnchor(
@@ -870,14 +984,14 @@ function resolveAnchor(
 ) {
   return runtime.tryResolveTextAnchorInLiveContext({
     blockId: firstBlockId,
-    blockType: "paragraph",
+    blockType: "textBlock",
     codec: anchor.codec,
     payload: anchor.payload,
   });
 }
 
 function richText(text: string): RichTextDocumentNodeJson {
-  return createBlockRichTextContentFromPlainText("paragraph", text);
+  return createBlockRichTextContentFromPlainText("textBlock", text);
 }
 
 function expectDeeplyFrozen(value: unknown): void {

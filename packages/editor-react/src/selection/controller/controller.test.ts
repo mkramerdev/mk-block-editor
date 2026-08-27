@@ -45,7 +45,7 @@ const transactionSettlement = {
   publication: { kind: "transaction", transactionId: "transaction-1" },
   cause: "programmatic-edit",
 } as const satisfies SelectionSettlementContext;
-const internalSubsystem = registerInternalSelectionSubsystem("test.table")!;
+const internalSubsystem = registerInternalSelectionSubsystem("test.gridWrapper")!;
 
 describe("selection controller settlement ownership", () => {
   it.each([null, "backward", "forward"] as const)(
@@ -74,6 +74,125 @@ describe("selection controller settlement ownership", () => {
       ).toBe("visible");
     },
   );
+
+  it("publishes text-pointer presentation without changing a collapsed canonical caret or paint", () => {
+    const controller = createSelectionController();
+    const graph = createGraph(["text"], contentSelection());
+    const point = textPoint(graph, "text", 2, "forward");
+    controller.commitCanonicalSelection(
+      { direction: "forward", anchor: point, focus: point },
+      graph,
+      1,
+      standalonePointer,
+      anchorResolver(),
+    );
+    const before = controller.getCanonicalSnapshot();
+    const modes: string[] = [];
+    controller.presentation.subscribe(() => {
+      modes.push(controller.getPresentationSnapshot().nativeSelectionPaintMode);
+    });
+
+    const claim = controller.claimTextPointerGesturePresentation();
+
+    expect(controller.getCanonicalSnapshot()).toBe(before);
+    expect(controller.localPaint.getSnapshot()).toEqual({ kind: "none" });
+    expect(controller.getPresentationSnapshot().nativeSelectionPaintMode).toBe(
+      "hidden-for-global-selection",
+    );
+    expect(modes).toEqual(["hidden-for-global-selection"]);
+    expect(() => controller.claimTextPointerGesturePresentation()).toThrow(
+      "Text pointer presentation already has an owner",
+    );
+
+    claim.release();
+
+    expect(controller.getCanonicalSnapshot()).toBe(before);
+    expect(controller.getPresentationSnapshot().nativeSelectionPaintMode).toBe(
+      "visible",
+    );
+    expect(modes).toEqual(["hidden-for-global-selection", "visible"]);
+    claim.release();
+    expect(modes).toEqual(["hidden-for-global-selection", "visible"]);
+  });
+
+  it("hands pointer presentation directly to settled noncollapsed presentation", () => {
+    const controller = createSelectionController();
+    const graph = createGraph(["text"], contentSelection());
+    const anchor = textPoint(graph, "text", 1, "forward");
+    const focus = textPoint(graph, "text", 4, "forward");
+    controller.commitCanonicalSelection(
+      { direction: "forward", anchor, focus: anchor },
+      graph,
+      1,
+      standalonePointer,
+      anchorResolver(),
+    );
+    const modes: string[] = [];
+    controller.presentation.subscribe(() => {
+      modes.push(controller.getPresentationSnapshot().nativeSelectionPaintMode);
+    });
+    const claim = controller.claimTextPointerGesturePresentation();
+
+    controller.commitCanonicalSelection(
+      { direction: "forward", anchor, focus },
+      graph,
+      1,
+      standalonePointer,
+      anchorResolver(),
+    );
+    expect(controller.getPresentationSnapshot().nativeSelectionPaintMode).toBe(
+      "hidden-for-global-selection",
+    );
+
+    claim.release();
+
+    expect(controller.getPresentationSnapshot().nativeSelectionPaintMode).toBe(
+      "hidden-for-global-selection",
+    );
+    expect(controller.localPaint.getSnapshot()).toMatchObject({
+      kind: "range",
+    });
+    expect(modes).toEqual([
+      "hidden-for-global-selection",
+      "hidden-for-global-selection",
+    ]);
+  });
+
+  it("keeps composition presentation above pointer ownership", () => {
+    const controller = createSelectionController();
+    const graph = createGraph(["text"], contentSelection());
+    const point = textPoint(graph, "text", 2, "forward");
+    controller.commitCanonicalSelection(
+      { direction: "forward", anchor: point, focus: point },
+      graph,
+      1,
+      standalonePointer,
+      anchorResolver(),
+    );
+    const frozenSelection = controller.getCommittedSnapshot();
+    if (!frozenSelection) throw new Error("Missing frozen caret selection");
+    const modes: string[] = [];
+    controller.presentation.subscribe(() => {
+      modes.push(controller.getPresentationSnapshot().nativeSelectionPaintMode);
+    });
+
+    const claim = controller.claimTextPointerGesturePresentation();
+    const composition = controller.beginCompositionSession({
+      frozenSelection,
+      graphRevision: 1,
+      baseTokens: [],
+      hostBlockId: "text" as BlockId,
+    });
+    expect(composition).not.toBeNull();
+    claim.release();
+    controller.completeCompositionSession(composition!.revision);
+
+    expect(modes).toEqual([
+      "hidden-for-global-selection",
+      "composition-owned",
+      "visible",
+    ]);
+  });
 
   it("publishes a truthful local range paint model independently of canonical caret revisions", () => {
     const controller = createSelectionController();
@@ -541,8 +660,8 @@ describe("selection controller settlement ownership", () => {
 
   it("projects a direct transport-safe block-internal payload", () => {
     const controller = createSelectionController();
-    const graph = createGraph(["table"], wholeSelection());
-    const target = readEditorBlockSelectionTarget(graph, id("table"));
+    const graph = createGraph(["gridWrapper"], wholeSelection());
+    const target = readEditorBlockSelectionTarget(graph, id("gridWrapper"));
     if (!target) throw new Error("Expected table selection target");
     const payload = {
       kind: "multi-cell",
@@ -574,8 +693,8 @@ describe("selection controller settlement ownership", () => {
       kind: "selection",
       selection: {
         kind: "block-internal",
-        blockId: id("table"),
-        subsystem: "test.table",
+        blockId: id("gridWrapper"),
+        subsystem: "test.gridWrapper",
         payload,
       },
     });
@@ -586,8 +705,8 @@ describe("selection controller settlement ownership", () => {
 
   it("treats reordered internal JSON descriptors as the same selection", () => {
     const controller = createSelectionController();
-    const graph = createGraph(["table"], wholeSelection());
-    const target = readEditorBlockSelectionTarget(graph, id("table"));
+    const graph = createGraph(["gridWrapper"], wholeSelection());
+    const target = readEditorBlockSelectionTarget(graph, id("gridWrapper"));
     if (!target) throw new Error("Expected table selection target");
     const coverage = (internal: JsonValue) =>
       ({
@@ -711,7 +830,7 @@ function createGraph(
         type:
           model.projection.endpoint.kind === "content"
             ? "paragraph"
-            : "callout",
+            : "containerWrapper",
         parentId: null,
         tombstone: null,
         metadataVersion: "1",

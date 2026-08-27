@@ -3,6 +3,7 @@ import type {
   EditorLogicalBlockMetadataOperation,
   EditorLogicalContentOperation,
 } from "@repo/editor-core/operations";
+import type { EditorOperationReplayPlan } from "@repo/editor-core/operations";
 import { cloneJsonValue } from "@repo/editor-core/kernel";
 import type { BlockSelectionCoverageResult } from "@repo/editor-core/selection";
 import type {
@@ -42,12 +43,28 @@ export interface EditorCompositeOperation {
   readonly operations: readonly EditorOperation[];
 }
 
-export interface EditorHistoryEntry {
-  readonly forward: EditorOperation;
-  readonly inverse: EditorOperation;
+interface EditorHistoryEntryBase {
+  readonly semanticForward: EditorOperation;
+  readonly semanticInverse: EditorOperation;
   readonly selectionBefore: EditorHistorySelection;
   readonly selectionAfter: EditorHistorySelection;
 }
+
+export type EditorHistoryReplayPlan =
+  EditorOperationReplayPlan<EditorOperation>;
+
+/** Only the replay plan for the entry's next state transition is valid. */
+export type EditorHistoryEntry = EditorHistoryEntryBase &
+  (
+    | {
+        readonly state: "applied";
+        readonly nextUndo: EditorHistoryReplayPlan;
+      }
+    | {
+        readonly state: "undone";
+        readonly nextRedo: EditorHistoryReplayPlan;
+      }
+  );
 
 export type EditorHistorySelection =
   | { readonly kind: "none" }
@@ -79,32 +96,33 @@ export const DEFAULT_MAXIMUM_HISTORY_ENTRIES = 100;
 export function cloneAndFreezeHistoryEntry(
   entry: EditorHistoryEntry,
 ): EditorHistoryEntry {
-  return Object.freeze({
-    forward: freezeHistoryOperation(entry.forward),
-    inverse: freezeHistoryOperation(entry.inverse),
-    selectionBefore: entry.selectionBefore,
-    selectionAfter: entry.selectionAfter,
-  });
+  const base = {
+    semanticForward: freezeHistoryOperation(entry.semanticForward),
+    semanticInverse: freezeHistoryOperation(entry.semanticInverse),
+    selectionBefore: freezeHistorySelection(entry.selectionBefore),
+    selectionAfter: freezeHistorySelection(entry.selectionAfter),
+  };
+  return entry.state === "applied"
+    ? Object.freeze({
+        ...base,
+        state: "applied" as const,
+        nextUndo: deepFreeze(cloneJsonValue(entry.nextUndo)),
+      })
+    : Object.freeze({
+        ...base,
+        state: "undone" as const,
+        nextRedo: deepFreeze(cloneJsonValue(entry.nextRedo)),
+      });
+}
+
+function freezeHistorySelection(
+  selection: EditorHistorySelection,
+): EditorHistorySelection {
+  return deepFreeze(cloneJsonValue(selection));
 }
 
 function freezeHistoryOperation(operation: EditorOperation): EditorOperation {
-  return contentOnlyOperation(operation)
-    ? deepFreeze(operation)
-    : deepFreeze(cloneJsonValue(operation));
-}
-
-function contentOnlyOperation(operation: EditorOperation): boolean {
-  if (operation.kind === "composite")
-    return operation.operations.every(contentOnlyOperation);
-  if (operation.kind === "structuralTransaction") return false;
-  return (
-    operation.kind === "insertInlineContent" ||
-    operation.kind === "deleteInlineRange" ||
-    operation.kind === "replaceInlineRange" ||
-    operation.kind === "setInlineEntity" ||
-    operation.kind === "addInlineMark" ||
-    operation.kind === "removeInlineMark"
-  );
+  return deepFreeze(cloneJsonValue(operation));
 }
 
 function deepFreeze<T>(value: T): T {

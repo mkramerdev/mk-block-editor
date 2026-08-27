@@ -6,12 +6,8 @@ import { createBlockRecord } from "@repo/editor-core/metadata";
 import { moveBlocks } from "@repo/editor-core/editing";
 import type { EditorRenderPort } from "../../runtime/document/render-port.ts";
 import { initializeTestEditableEditor } from "../../tests/test-editor-initializers.ts";
-import { initializeTestReadEditor } from "../../tests/test-editor-initializers.ts";
 import { createTestEditorSnapshot } from "../../tests/editor-snapshot-fixtures.ts";
-import {
-  testEditableEditorDefinition,
-  testReadEditorDefinition,
-} from "../../tests/test-editor-definition.ts";
+import { testEditableEditorDefinition } from "../../tests/test-editor-definition.ts";
 import { useDirectChildBlocks } from "./use-direct-child-blocks.ts";
 
 const parentAId = "hook-direct-parent-a" as BlockId;
@@ -129,9 +125,9 @@ describe("useDirectChildBlocks", () => {
     editor.dispose();
   });
 
-  it("uses the same projection contract for read-only remote updates", () => {
-    const editor = initializeTestReadEditor({
-      definition: testReadEditorDefinition,
+  it("updates the projection contract after remote transactions", () => {
+    const editor = initializeTestEditableEditor({
+      definition: testEditableEditorDefinition,
       snapshot: createHookSnapshot(),
     });
     const first = editor.getDirectChildBlocks(parentAId);
@@ -171,9 +167,9 @@ function createHookEditor() {
       ...testEditableEditorDefinition,
       blocks: {
         ...testEditableEditorDefinition.blocks,
-        code: {
-          ...testEditableEditorDefinition.blocks.code!,
-          content: { required: ["paragraph"], additional: "block" },
+        fixedWrapper: {
+          ...testEditableEditorDefinition.blocks.fixedWrapper!,
+          content: { required: ["textBlock"], additional: "block" },
         },
       },
     },
@@ -183,12 +179,12 @@ function createHookEditor() {
 
 function createHookSnapshot() {
   const snapshot = createTestEditorSnapshot([
-    { id: parentAId, type: "callout" },
-    { id: childOneId, type: "paragraph", text: "one" },
-    { id: childTwoId, type: "paragraph", text: "two" },
-    { id: parentBId, type: "code" },
-    { id: childBId, type: "paragraph", text: "b" },
-    { id: unrelatedId, type: "paragraph", text: "unrelated" },
+    { id: parentAId, type: "containerWrapper" },
+    { id: childOneId, type: "textBlock", text: "one" },
+    { id: childTwoId, type: "textBlock", text: "two" },
+    { id: parentBId, type: "fixedWrapper" },
+    { id: childBId, type: "textBlock", text: "b" },
+    { id: unrelatedId, type: "textBlock", text: "unrelated" },
   ]);
   return {
     ...snapshot,
@@ -196,32 +192,32 @@ function createHookSnapshot() {
       ...snapshot.blocks,
       [parentAId]: createBlockRecord({
         id: parentAId,
-        type: "callout",
+        type: "containerWrapper",
         parentId: null,
       }),
       [childOneId]: createBlockRecord({
         id: childOneId,
-        type: "paragraph",
+        type: "textBlock",
         parentId: parentAId,
       }),
       [childTwoId]: createBlockRecord({
         id: childTwoId,
-        type: "paragraph",
+        type: "textBlock",
         parentId: parentAId,
       }),
       [parentBId]: createBlockRecord({
         id: parentBId,
-        type: "code",
+          type: "fixedWrapper",
         parentId: null,
       }),
       [childBId]: createBlockRecord({
         id: childBId,
-        type: "paragraph",
+        type: "textBlock",
         parentId: parentBId,
       }),
       [unrelatedId]: createBlockRecord({
         id: unrelatedId,
-        type: "paragraph",
+        type: "textBlock",
         parentId: null,
       }),
     },

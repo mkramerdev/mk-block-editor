@@ -1,4 +1,6 @@
 import type { CommittedSelectionSnapshot } from "@repo/editor-react/selection";
+import type { ResolvedNativeFocusTarget } from "../../../runtime/document/native-focus-coordinator.ts";
+import { editorBlockListRootSelector } from "../../dom-markers.ts";
 
 const clipboardEventOwner = new WeakMap<Event, object>();
 
@@ -17,8 +19,9 @@ export interface ResolveEditorClipboardEventOwnershipOptions {
   readonly isCommittedSelectionCurrent: (
     snapshot: CommittedSelectionSnapshot,
   ) => boolean;
-  readonly ownsNativeTarget: (target: EventTarget | null) => boolean;
-  readonly ownsActiveElement: (document: Document) => boolean;
+  readonly resolveNativeFocusTarget: (
+    target: EventTarget | null,
+  ) => ResolvedNativeFocusTarget;
 }
 
 export function resolveEditorClipboardEventOwnership(
@@ -29,19 +32,23 @@ export function resolveEditorClipboardEventOwnership(
     return { kind: "none" };
   const path = safeComposedPath(options.event);
   const target = eventTargetElement(options.event, path);
+  const targetList = target?.closest<HTMLElement>(editorBlockListRootSelector);
+  if (targetList && targetList !== options.list) return { kind: "none" };
+  const targetFocus = options.resolveNativeFocusTarget(target);
   if (
     isExcludedClipboardControl(
       target,
       path,
       options.list,
-      options.ownsNativeTarget,
+      targetFocus,
     )
   )
     return { kind: "none" };
-  const editorOwnsEvent =
-    path.includes(options.list) ||
-    path.some(options.ownsNativeTarget) ||
-    options.ownsActiveElement(options.list.ownerDocument);
+  const targetIdentifiesEditor = path.includes(options.list) || targetFocus !== null;
+  const activeFocus = targetIdentifiesEditor
+    ? null
+    : options.resolveNativeFocusTarget(options.list.ownerDocument.activeElement);
+  const editorOwnsEvent = targetIdentifiesEditor || activeFocus !== null;
   if (!editorOwnsEvent) return { kind: "none" };
 
   const captured = options.committedSelection;
@@ -66,7 +73,7 @@ function isExcludedClipboardControl(
   target: Element | null,
   path: readonly EventTarget[],
   list: HTMLElement,
-  ownsNativeTarget: (target: EventTarget | null) => boolean,
+  nativeFocus: ResolvedNativeFocusTarget,
 ): boolean {
   const elements = path.filter(
     (entry): entry is Element => entry instanceof Element,
@@ -84,7 +91,7 @@ function isExcludedClipboardControl(
   if (!control) return false;
   if (!list.contains(control)) return true;
   if (control.matches("input, textarea, select")) return true;
-  if (!ownsNativeTarget(control)) return true;
+  if (!nativeFocus) return true;
   return Boolean(
     control.closest(
       "[data-editor-ui='true']:not([data-editor-clipboard-delegate='true'])",

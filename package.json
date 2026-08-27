@@ -13,7 +13,8 @@
     "test:development-clean-start": "node --test scripts/development-clean-start.test.mjs",
     "db:reset:first-draft": "turbo run db:reset --filter=@repo/editor-first-draft",
     "db:seed:first-draft": "turbo run db:seed --filter=@repo/editor-first-draft",
-    "lint": "pnpm run format:check && turbo run lint",
+    "db:restore:first-draft": "turbo run db:restore-document --filter=@repo/editor-first-draft",
+    "lint": "turbo run lint",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check-types": "turbo run check-types"

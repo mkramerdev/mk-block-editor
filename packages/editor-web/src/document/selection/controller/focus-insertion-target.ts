@@ -6,8 +6,8 @@ export function hasEligibleFocusedTextCaret(
   editor: EditableEditorRuntimePort,
   selectionBlockId: BlockId,
 ): boolean {
-  return (
-    editor.ownsActiveElement(list.ownerDocument) &&
-    editor.ownsActiveTextTarget(selectionBlockId)
+  const resolved = editor.resolveNativeFocusTarget(
+    list.ownerDocument.activeElement,
   );
+  return resolved?.kind === "text" && resolved.blockId === selectionBlockId;
 }

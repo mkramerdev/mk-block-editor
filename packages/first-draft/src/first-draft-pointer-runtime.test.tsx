@@ -17,39 +17,132 @@ import {
 import { FirstDraftBlockHoverProvider } from "./block-controls/index.ts";
 import { createFirstDraftEditorDefinition } from "./first-draft-definition.tsx";
 import { createFirstDraftSnapshot } from "./first-draft-fixture.ts";
-import { createFirstDraftBootstrapFromSnapshot } from "./read-model/bootstrap.ts";
+import { createFirstDraftBootstrapFromSnapshot } from "./bootstrap/bootstrap.ts";
 import { FirstDraftSelectionMenu } from "./selection-menu/index.ts";
 import { initializeCompiledTestEditableEditor as initializeEditableEditor } from "./test-editor.ts";
 
 const allocations = vi.hoisted(() => ({
   yDocs: 0,
+  plannerEvents: [] as string[],
 }));
 
 vi.mock("@repo/editor-yjs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@repo/editor-yjs")>();
+  const planOwners = new WeakMap<object, string>();
   class InstrumentedDoc extends actual.Doc {
     constructor(options?: ConstructorParameters<typeof actual.Doc>[0]) {
       super(options);
       allocations.yDocs += 1;
     }
   }
-  return { ...actual, Doc: InstrumentedDoc, YDoc: InstrumentedDoc };
+  return {
+    ...actual,
+    Doc: InstrumentedDoc,
+    YDoc: InstrumentedDoc,
+    planCanonicalYjsContentMutation(
+      input: Parameters<typeof actual.planCanonicalYjsContentMutation>[0],
+    ) {
+      const blockId = String(input.operation.blockId);
+      allocations.plannerEvents.push(`plan:${blockId}`);
+      const plan = actual.planCanonicalYjsContentMutation(input);
+      if (plan) planOwners.set(plan, blockId);
+      return plan;
+    },
+    applyPlannedCanonicalYjsContentMutation(
+      plan: Parameters<
+        typeof actual.applyPlannedCanonicalYjsContentMutation
+      >[0],
+    ) {
+      allocations.plannerEvents.push(`apply:${planOwners.get(plan) ?? "unknown"}`);
+      return actual.applyPlannedCanonicalYjsContentMutation(plan);
+    },
+  };
 });
 
 const blockA = "fd-paragraph-intro" as BlockId;
 const blockB = "fd-paragraph-byline" as BlockId;
-const beforeList = "fd-paragraph-before-goals" as BlockId;
+const beforeList = "fd-paragraph-outro" as BlockId;
 const bulletList = "fd-bullet-list" as BlockId;
 const bulletItemA = "fd-bullet-1" as BlockId;
 const bulletTextA = "fd-bullet-1-text" as BlockId;
 const bulletItemB = "fd-bullet-2" as BlockId;
 const bulletTextB = "fd-bullet-2-text" as BlockId;
-const afterList = "fd-paragraph-after-goals" as BlockId;
+const afterList = "fd-paragraph-after-table" as BlockId;
 
 describe("First Draft real pointer activation allocation contract", () => {
   afterEach(() => {
+    allocations.plannerEvents = [];
     cleanup();
     vi.restoreAllMocks();
+  });
+
+  it("plans one real local transition once for command, undo, redo, and repeated history", () => {
+    const bootstrap = createFirstDraftBootstrapFromSnapshot({
+      documentId: "single-pass-history-document",
+      revision: 0,
+      snapshot: createPointerSnapshot(),
+    });
+    const changes = vi.fn();
+    const viewState = createFirstDraftViewStateStore();
+    const definition = createFirstDraftEditorDefinition(viewState);
+    const editor = initializeEditableEditor({
+      compiledDefinition: compileCanonicalEditorDefinition(definition),
+      snapshot: bootstrap.snapshot,
+      validatedSnapshot: bootstrap,
+      onChange: changes,
+      onChangeError: (error) => {
+        throw error;
+      },
+      createTransactionId: () => crypto.randomUUID(),
+    });
+
+    allocations.plannerEvents = [];
+    expect(editor.insertText({ blockId: blockA, offset: 0, text: "x" })).toBe(
+      true,
+    );
+    expectSinglePlannerBatch(blockA);
+    expect(changes).toHaveBeenCalledTimes(1);
+
+    allocations.plannerEvents = [];
+    expect(editor.undo()).toEqual({ status: "applied" });
+    expectSinglePlannerBatch(blockA);
+    expect(changes).toHaveBeenCalledTimes(2);
+
+    allocations.plannerEvents = [];
+    expect(editor.redo()).toEqual({ status: "applied" });
+    expectSinglePlannerBatch(blockA);
+    expect(changes).toHaveBeenCalledTimes(3);
+
+    allocations.plannerEvents = [];
+    expect(editor.undo()).toEqual({ status: "applied" });
+    expectSinglePlannerBatch(blockA);
+    allocations.plannerEvents = [];
+    expect(editor.redo()).toEqual({ status: "applied" });
+    expectSinglePlannerBatch(blockA);
+    expect(changes).toHaveBeenCalledTimes(5);
+    expect(editor.readBlockPlainText(blockA, "paragraph")).toContain("x");
+
+    allocations.plannerEvents = [];
+    const multi = editor.transaction(() => {
+      expect(
+        editor.insertText({ blockId: blockA, offset: 1, text: "a" }),
+      ).toBe(true);
+      expect(
+        editor.insertText({ blockId: blockB, offset: 1, text: "b" }),
+      ).toBe(true);
+    });
+    expect(multi.ok).toBe(true);
+    expectPlannerBatch([blockA, blockB]);
+    expect(changes).toHaveBeenCalledTimes(6);
+
+    allocations.plannerEvents = [];
+    expect(editor.undo()).toEqual({ status: "applied" });
+    expectPlannerBatch([blockB, blockA]);
+    allocations.plannerEvents = [];
+    expect(editor.redo()).toEqual({ status: "applied" });
+    expectPlannerBatch([blockA, blockB]);
+    expect(changes).toHaveBeenCalledTimes(8);
+    editor.dispose();
   });
 
   it("hydrates once at settlement and hands that same live context to editing", () => {
@@ -231,6 +324,183 @@ describe("First Draft real pointer activation allocation contract", () => {
     editor.dispose();
   });
 
+  it.each([
+    {
+      label: "forward",
+      anchorBlockId: blockA,
+      focusBlockId: blockB,
+      pointerId: 11,
+    },
+    {
+      label: "backward",
+      anchorBlockId: blockB,
+      focusBlockId: blockA,
+      pointerId: 12,
+    },
+  ])(
+    "keeps a $label cross-block pointer range after repeated projected-caret selectionchange events",
+    ({ anchorBlockId, focusBlockId, pointerId }) => {
+      const bootstrap = createFirstDraftBootstrapFromSnapshot({
+        documentId: `projected-caret-${pointerId}`,
+        revision: 0,
+        snapshot: createPointerSnapshot(),
+      });
+      const changes = vi.fn();
+      const viewState = createFirstDraftViewStateStore();
+      const editor = initializeEditableEditor({
+        compiledDefinition: compileCanonicalEditorDefinition(
+          createFirstDraftEditorDefinition(viewState),
+        ),
+        snapshot: bootstrap.snapshot,
+        validatedSnapshot: bootstrap,
+        onChange: changes,
+        onChangeError: (error) => {
+          throw error;
+        },
+        createTransactionId: () => crypto.randomUUID(),
+      });
+      const settlements = vi.fn();
+      editor.subscribeStandaloneSelectionSettlements(settlements);
+      const rendered = render(
+        <FirstDraftViewStateProvider store={viewState}>
+          <div data-editor-interaction-scope="true">
+            <FirstDraftBlockHoverProvider enabled>
+              <EditorDocument editor={editor} />
+            </FirstDraftBlockHoverProvider>
+          </div>
+        </FirstDraftViewStateProvider>,
+      );
+      const list = rendered.container.querySelector<HTMLElement>(
+        '[data-editor-block-list-root="true"]',
+      );
+      if (!list) throw new Error("Missing editor block list");
+      Object.defineProperties(list, {
+        setPointerCapture: { configurable: true, value: vi.fn() },
+        hasPointerCapture: { configurable: true, value: vi.fn(() => true) },
+        releasePointerCapture: { configurable: true, value: vi.fn() },
+      });
+      const focusTextRoot = blockElement(
+        rendered.container,
+        focusBlockId,
+      ).querySelector<HTMLElement>('[data-editor-text-root="true"]');
+      if (!focusTextRoot) throw new Error("Missing focus text root");
+      installTestRect(focusTextRoot);
+      const originalClientRects = Object.getOwnPropertyDescriptor(
+        Range.prototype,
+        "getClientRects",
+      );
+      Object.defineProperty(Range.prototype, "getClientRects", {
+        configurable: true,
+        value: vi.fn(() => [selectionRectangle(0, 10, 100, 20)]),
+      });
+
+      try {
+        dispatchPointerDown(rendered.container, anchorBlockId, pointerId, true);
+        dispatchPointerMoveToElement(focusTextRoot, pointerId, 12, 12);
+        expect(
+          rendered.container.querySelector("[data-editor-selection-paint]"),
+        ).not.toBeNull();
+
+        dispatchPointerUp(rendered.container, focusBlockId, pointerId);
+
+        const authoritative = editor.selectionController.getCanonicalSnapshot();
+        expect(authoritative).toMatchObject({
+          kind: "document",
+          snapshot: {
+            documentSelection: {
+              anchor: { blockId: anchorBlockId },
+              focus: { blockId: focusBlockId },
+            },
+          },
+        });
+        const settlement =
+          editor.selectionController.getPresentationSnapshot().settlement;
+        expect(settlement).not.toBeNull();
+        expect(editor.selectionController.localPaint.getSnapshot()).toMatchObject(
+          { kind: "range", sourceRevision: authoritative.revision },
+        );
+        expect(editor.selectionController.endpoint.getSnapshot().phase).toBe(
+          "committed",
+        );
+        expect(list.dataset.editorNativeCaretPointerPending).toBeUndefined();
+        const activeView =
+          rendered.container.querySelector<HTMLElement>(".ProseMirror");
+        if (!activeView) throw new Error("Missing active text projection");
+        expectNativeCaret(editor, activeView, focusBlockId);
+        expect(settlements).toHaveBeenCalledOnce();
+        expect(changes).not.toHaveBeenCalled();
+
+        for (let eventIndex = 0; eventIndex < 2; eventIndex += 1) {
+          act(() => document.dispatchEvent(new Event("selectionchange")));
+          expect(editor.selectionController.getCanonicalSnapshot()).toBe(
+            authoritative,
+          );
+          expect(
+            editor.selectionController.getCanonicalSnapshot().revision,
+          ).toBe(authoritative.revision);
+          expect(
+            editor.selectionController.getPresentationSnapshot().settlement,
+          ).toBe(settlement);
+          expect(
+            editor.selectionController.localPaint.getSnapshot(),
+          ).toMatchObject({
+            kind: "range",
+            sourceRevision: authoritative.revision,
+          });
+          expect(
+            rendered.container.querySelector("[data-editor-selection-paint]"),
+          ).not.toBeNull();
+          expectNativeCaret(editor, activeView, focusBlockId);
+          expect(settlements).toHaveBeenCalledOnce();
+          expect(changes).not.toHaveBeenCalled();
+        }
+        const canonicalFocus =
+          authoritative.kind === "document"
+            ? authoritative.snapshot.documentSelection.focus
+            : null;
+        const native = document.getSelection();
+        if (!canonicalFocus || !native?.focusNode) {
+          throw new Error("Missing projected canonical focus caret");
+        }
+        const runtimePort = editor as typeof editor & {
+          acknowledgeTextActivation(
+            blockId: BlockId,
+            root: HTMLElement,
+            canonicalOffset: number,
+            nativeNode: Node,
+            nativeOffset: number,
+          ): boolean;
+        };
+        expect(
+          runtimePort.acknowledgeTextActivation(
+            focusBlockId,
+            activeView,
+            canonicalFocus.textOffset,
+            native.focusNode,
+            native.focusOffset,
+          ),
+        ).toBe(true);
+        expect(list.dataset.editorNativeSelectionPaintMode).toBe(
+          "hidden-for-global-selection",
+        );
+        expect(activeView.isConnected).toBe(true);
+        expect(activeView.getAttribute("contenteditable")).toBe("true");
+      } finally {
+        if (originalClientRects) {
+          Object.defineProperty(
+            Range.prototype,
+            "getClientRects",
+            originalClientRects,
+          );
+        } else {
+          Reflect.deleteProperty(Range.prototype, "getClientRects");
+        }
+        rendered.unmount();
+        editor.dispose();
+      }
+    },
+  );
+
   it("drags continuously through list wrappers without whole-block paint or extra input owners", () => {
     const snapshot = createListPointerSnapshot();
     const bootstrap = createFirstDraftBootstrapFromSnapshot({
@@ -285,7 +555,9 @@ describe("First Draft real pointer activation allocation contract", () => {
       expectUniqueInputOwner(rendered.container, 0);
 
       dispatchPointerMoveTo(rendered.container, bulletItemA, pointerId, 10, 48);
-      expect(list.dataset.editorTextSelectionDragActive).toBe("true");
+      expect(list.dataset.editorNativeSelectionPaintMode).toBe(
+        "hidden-for-global-selection",
+      );
       expectNoListItemSurfacePaint(rendered.container);
       expectUniqueInputOwner(rendered.container, 0);
 
@@ -311,7 +583,9 @@ describe("First Draft real pointer activation allocation contract", () => {
         108,
       );
 
-      expect(list.dataset.editorTextSelectionDragActive).toBe("true");
+      expect(list.dataset.editorNativeSelectionPaintMode).toBe(
+        "hidden-for-global-selection",
+      );
       expectNoListItemSurfacePaint(rendered.container);
       expectUniqueInputOwner(rendered.container, 0);
 
@@ -484,20 +758,26 @@ describe("First Draft real pointer activation allocation contract", () => {
         key: "Delete",
       });
 
+      allocations.plannerEvents = [];
       act(() => activeView.dispatchEvent(deleteEvent));
 
       expect(deleteEvent.defaultPrevented).toBe(true);
+      expectCompletePlannerBatch();
       expect(editor.getBlock(bulletItemA)).toBeNull();
       expect(editor.getBlock(bulletTextA)).toBeNull();
       expect(editor.getChildBlockIds(bulletList)).toEqual([bulletItemB]);
       expect(changes).toHaveBeenCalledOnce();
+      allocations.plannerEvents = [];
       expect(editor.undo()).toEqual({ status: "applied" });
+      expectCompletePlannerBatch();
       expect(editor.getChildBlockIds(bulletList)).toEqual([
         bulletItemA,
         bulletItemB,
       ]);
       expect(editor.getBlock(bulletTextA)).not.toBeNull();
+      allocations.plannerEvents = [];
       expect(editor.redo()).toEqual({ status: "applied" });
+      expectCompletePlannerBatch();
       expect(editor.getChildBlockIds(bulletList)).toEqual([bulletItemB]);
     } finally {
       if (originalClientRects) {
@@ -779,12 +1059,38 @@ describe("First Draft real pointer activation allocation contract", () => {
     expect(changes).toHaveBeenCalledOnce();
     expect(runtime!.getLiveBlockContentCount()).toBe(1);
     expect(rendered.container.querySelector(".ProseMirror")).toBe(sharedView);
-    expect(sharedView.querySelector("strong")?.textContent).toBe("Prep");
+    expect(sharedView.querySelector("strong")?.textContent).toBe("Or t");
     rendered.unmount();
     expect(runtime!.getLiveBlockContentCount()).toBe(0);
     editor.dispose();
   });
 });
+
+function expectSinglePlannerBatch(blockId: BlockId): void {
+  expectPlannerBatch([blockId]);
+}
+
+function expectPlannerBatch(blockIds: readonly BlockId[]): void {
+  expect(allocations.plannerEvents).toEqual([
+    ...blockIds.map((blockId) => `plan:${blockId}`),
+    ...blockIds.map((blockId) => `apply:${blockId}`),
+  ]);
+}
+
+function expectCompletePlannerBatch(): void {
+  const plans = allocations.plannerEvents.filter((event) =>
+    event.startsWith("plan:"),
+  );
+  const applies = allocations.plannerEvents.filter((event) =>
+    event.startsWith("apply:"),
+  );
+  expect(applies).toEqual(
+    plans.map((event) => event.replace(/^plan:/u, "apply:")),
+  );
+  expect(
+    allocations.plannerEvents.findIndex((event) => event.startsWith("apply:")),
+  ).toBe(plans.length === 0 ? -1 : plans.length);
+}
 
 function captureTextPoint(
   editor: EditorImplementation,

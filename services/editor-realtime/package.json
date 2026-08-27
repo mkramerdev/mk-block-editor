@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev:prepare": "node ../../scripts/assert-runtime-resolution.mjs editor-realtime",
+    "dev:prepare": "pnpm run build:dependencies",
     "dev:consumer": "tsx src/index.ts",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "pnpm run clean && tsc -p tsconfig.build.json",
     "start": "node --enable-source-maps dist/index.js",
     "check-types": "tsc --noEmit",
     "typecheck": "pnpm run check-types",

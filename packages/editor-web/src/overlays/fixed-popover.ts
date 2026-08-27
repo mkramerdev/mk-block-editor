@@ -2,6 +2,7 @@ export interface FixedPopoverPosition {
   top: number;
   left: number;
   placement: "top" | "bottom";
+  availableHeight: number;
 }
 
 export interface FixedPopoverPlacementOptions {
@@ -9,6 +10,12 @@ export interface FixedPopoverPlacementOptions {
   height?: number;
   gap?: number;
   margin?: number;
+  viewport?: {
+    readonly left: number;
+    readonly top: number;
+    readonly width: number;
+    readonly height: number;
+  };
 }
 
 export function fixedPopoverPositionForAnchor(
@@ -21,24 +28,37 @@ export function fixedPopoverPositionForAnchor(
   const height = options.height ?? 240;
   const gap = options.gap ?? 6;
   const margin = options.margin ?? 8;
-  const viewportWidth = ownerWindow.innerWidth;
-  const viewportHeight = ownerWindow.innerHeight;
-  const spaceBelow = viewportHeight - rect.bottom - margin - gap;
-  const spaceAbove = rect.top - margin - gap;
-  const openUpward = spaceBelow < height && spaceAbove > spaceBelow;
-  const unclampedTop = openUpward ? rect.top - gap - height : rect.bottom + gap;
+  const viewport = options.viewport ?? {
+    left: 0,
+    top: 0,
+    width: ownerWindow.innerWidth,
+    height: ownerWindow.innerHeight,
+  };
+  const viewportRight = viewport.left + viewport.width;
+  const viewportBottom = viewport.top + viewport.height;
+  const spaceBelow = Math.max(0, viewportBottom - rect.bottom - margin - gap);
+  const spaceAbove = Math.max(0, rect.top - viewport.top - margin - gap);
+  // Fixed popovers choose the vertical side with the greatest usable space.
+  // Bottom is the deterministic tie-breaker. Menu height affects only the
+  // final coordinate, never side selection.
+  const placement = spaceAbove > spaceBelow ? "top" : "bottom";
+  const availableHeight = placement === "top" ? spaceAbove : spaceBelow;
+  const renderedHeight = Math.min(height, availableHeight);
+  const unclampedTop =
+    placement === "top" ? rect.top - gap - renderedHeight : rect.bottom + gap;
   return {
     top: clamp(
       unclampedTop,
-      margin,
-      Math.max(margin, viewportHeight - margin - height),
+      viewport.top + margin,
+      Math.max(viewport.top + margin, viewportBottom - margin - renderedHeight),
     ),
     left: clamp(
       rect.left,
-      margin,
-      Math.max(margin, viewportWidth - width - margin),
+      viewport.left + margin,
+      Math.max(viewport.left + margin, viewportRight - width - margin),
     ),
-    placement: openUpward ? "top" : "bottom",
+    placement,
+    availableHeight,
   };
 }
 

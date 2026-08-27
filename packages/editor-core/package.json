@@ -6,59 +6,59 @@
   "description": "Platform-agnostic editor core domains for explicit editor compositions. No DOM dependency. Shared by web and mobile.",
   "exports": {
     "./kernel": {
-      "types": "./src/api/kernel.ts",
+      "types": "./dist/api/kernel.d.ts",
       "import": "./dist/api/kernel.js"
     },
     "./document": {
-      "types": "./src/api/document.ts",
+      "types": "./dist/api/document.d.ts",
       "import": "./dist/api/document.js"
     },
     "./definitions": {
-      "types": "./src/api/definitions.ts",
+      "types": "./dist/api/definitions.d.ts",
       "import": "./dist/api/definitions.js"
     },
     "./selection": {
-      "types": "./src/api/selection.ts",
+      "types": "./dist/api/selection.d.ts",
       "import": "./dist/api/selection.js"
     },
     "./operations": {
-      "types": "./src/api/operations.ts",
+      "types": "./dist/api/operations.d.ts",
       "import": "./dist/api/operations.js"
     },
     "./editing": {
-      "types": "./src/api/editing.ts",
+      "types": "./dist/api/editing.d.ts",
       "import": "./dist/api/editing.js"
     },
     "./content": {
-      "types": "./src/api/content.ts",
+      "types": "./dist/api/content.d.ts",
       "import": "./dist/api/content.js"
     },
     "./content/rich-text": {
-      "types": "./src/api/content/rich-text.ts",
+      "types": "./dist/api/content/rich-text.d.ts",
       "import": "./dist/api/content/rich-text.js"
     },
     "./content/marks": {
-      "types": "./src/api/content/marks.ts",
+      "types": "./dist/api/content/marks.d.ts",
       "import": "./dist/api/content/marks.js"
     },
     "./content/inline-atoms": {
-      "types": "./src/api/content/inline-atoms.ts",
+      "types": "./dist/api/content/inline-atoms.d.ts",
       "import": "./dist/api/content/inline-atoms.js"
     },
     "./content/urls": {
-      "types": "./src/api/content/urls.ts",
+      "types": "./dist/api/content/urls.d.ts",
       "import": "./dist/api/content/urls.js"
     },
     "./metadata": {
-      "types": "./src/api/metadata.ts",
+      "types": "./dist/api/metadata.d.ts",
       "import": "./dist/api/metadata.js"
     },
     "./codecs": {
-      "types": "./src/api/codecs.ts",
+      "types": "./dist/api/codecs.d.ts",
       "import": "./dist/api/codecs.js"
     },
     "./testing": {
-      "types": "./src/api/testing.ts",
+      "types": "./dist/api/testing.d.ts",
       "import": "./dist/api/testing.js"
     }
   },

@@ -19,9 +19,9 @@ import type { EditableEditorDefinition } from "../definition/contracts.ts";
 
 describe("definition-aware snapshot ingress", () => {
   it("initializes from validated ownership after the source is mutated", () => {
-    const blockId = "snapshot-owned-paragraph" as BlockId;
+    const blockId = "snapshot-owned-textBlock" as BlockId;
     const fixture = createTestEditorSnapshot([
-      { id: blockId, type: "paragraph", text: "before" },
+      { id: blockId, type: "textBlock", text: "before" },
     ]);
     const content = cloneJsonValue(fixture.content[blockId]!);
     const rootBlockIds = [...fixture.rootBlockIds];
@@ -46,7 +46,7 @@ describe("definition-aware snapshot ingress", () => {
     });
 
     expect(editor.getRootBlockIds()).toStrictEqual([blockId]);
-    expect(editor.readBlockContent(blockId, "paragraph")).toMatchObject({
+    expect(editor.readBlockContent(blockId, "textBlock")).toMatchObject({
       content: [{ content: [{ text: "before" }] }],
     });
     editor.dispose();
@@ -57,8 +57,8 @@ describe("definition-aware snapshot ingress", () => {
       assertValidEditorSnapshotForStartupOrRecovery(
         createTestEditorSnapshot([
           {
-            id: "snapshot-valid-paragraph" as BlockId,
-            type: "paragraph",
+            id: "snapshot-valid-textBlock" as BlockId,
+            type: "textBlock",
             text: "valid",
           },
         ]),
@@ -82,7 +82,7 @@ describe("definition-aware snapshot ingress", () => {
     const canonical = createTestEditorSnapshot([
       {
         id: blockId,
-        type: "paragraph",
+        type: "textBlock",
         content: {
           type: "doc",
           content: [
@@ -108,7 +108,7 @@ describe("definition-aware snapshot ingress", () => {
           type: "doc",
           content: [
             {
-              type: "paragraph",
+              type: "textBlock",
               content: [
                 {
                   type: "mention",
@@ -132,8 +132,8 @@ describe("definition-aware snapshot ingress", () => {
     const parentId = "snapshot-leaf-parent" as BlockId;
     const childId = "snapshot-leaf-child" as BlockId;
     const flat = createTestEditorSnapshot([
-      { id: parentId, type: "paragraph", text: "parent" },
-      { id: childId, type: "paragraph", text: "child" },
+      { id: parentId, type: "textBlock", text: "parent" },
+      { id: childId, type: "textBlock", text: "child" },
     ]);
     const invalid = {
       ...flat,
@@ -150,15 +150,15 @@ describe("definition-aware snapshot ingress", () => {
         invalid,
         compileCanonicalEditorDefinition(testEditableEditorDefinition),
       ),
-    ).toThrow(/violate the direct paragraph content definition/u);
+    ).toThrow(/violate the direct textBlock content definition/u);
   });
 
   it("rejects a forbidden child type at the same public gate", () => {
     const parentId = "snapshot-wrapper-parent" as BlockId;
     const childId = "snapshot-wrapper-child" as BlockId;
     const flat = createTestEditorSnapshot([
-      { id: parentId, type: "quote" },
-      { id: childId, type: "heading", text: "heading" },
+      { id: parentId, type: "wrapperBlock" },
+      { id: childId, type: "alternateTextBlock", text: "alternateTextBlock" },
     ]);
     const invalid = {
       ...flat,
@@ -175,7 +175,7 @@ describe("definition-aware snapshot ingress", () => {
         invalid,
         compileCanonicalEditorDefinition(testEditableEditorDefinition),
       ),
-    ).toThrow(/violate the direct quote content definition/u);
+    ).toThrow(/violate the direct wrapperBlock content definition/u);
   });
 });
 
@@ -184,7 +184,7 @@ describe("recovered block version materialization", () => {
   const parentId = asBlockId("01890f07-1c00-7000-8000-000000000002");
   const previous: VersionedBlock = {
     id: blockId,
-    type: "paragraph",
+    type: "textBlock",
     parentId: null,
     tombstone: null,
     metadata: { alignment: "left", options: { a: 1, b: 2 } },
@@ -228,7 +228,7 @@ describe("recovered block version materialization", () => {
   });
 
   it.each([
-    ["type", { ...previous, type: "heading" }],
+    ["type", { ...previous, type: "alternateTextBlock" }],
     ["parent", { ...previous, parentId }],
     [
       "tombstone",

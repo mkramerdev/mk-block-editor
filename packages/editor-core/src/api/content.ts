@@ -15,7 +15,6 @@ export {
   isRichTextDocument,
   mergeAdjacentTextNodes,
   normalizeRichTextDocument,
-  rebaseLogicalContentOperationByExpectedContent,
   removeTextRangeFromRichTextDocument,
   retargetRichTextDocument,
   richInlineContentSize,
@@ -81,6 +80,7 @@ export type {
   EditorContentTextAnchorResolveResult,
   EditorExternalContentApplication,
   EditorLiveTextAnchorResolveResult,
+  EditorOperationAnchorCreateResult,
   EditorRawBlockContent,
 } from "../content/runtime/content-runtime.ts";
 export type {

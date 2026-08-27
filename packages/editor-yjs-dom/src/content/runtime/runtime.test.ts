@@ -28,9 +28,9 @@ import {
 } from "../../api/index.ts";
 
 const definitions = {
-  paragraph: { kind: "text", type: "paragraph", rootLayout: "normal" },
-  wrapper: { kind: "wrapper", type: "wrapper", rootLayout: "normal" },
-  divider: { kind: "atomic", type: "divider", rootLayout: "normal" },
+  textBlock: { kind: "text", type: "textBlock" },
+  wrapper: { kind: "wrapper", type: "wrapper" },
+  atomicBlock: { kind: "atomic", type: "atomicBlock" },
 } satisfies Readonly<Record<BlockType, BlockDefinition>>;
 
 const id = (suffix: number) =>
@@ -44,12 +44,12 @@ describe("independent encoded Yjs block content", () => {
     const canonical: EditorContentRuntime = runtime;
     const lease: BlockContentLease = runtime.acquireBlockContent(
       id(1),
-      "paragraph",
+      "textBlock",
       "active-editing",
     );
     const genericLease: EditorBlockContentLease = lease;
 
-    expect(canonical.readBlockPlainText(id(1), "paragraph")).toBe("contract");
+    expect(canonical.readBlockPlainText(id(1), "textBlock")).toBe("contract");
     expect(readYjsBlockContentPlainText(lease.context)).toBe("contract");
     expect(genericLease).toBe(lease);
     expect(runtime.getLiveBlockContentCount()).toBe(1);
@@ -64,7 +64,7 @@ describe("independent encoded Yjs block content", () => {
     const other = createYjsBlockContentRuntime(sourceFor({ [id(1)]: "other" }));
     const foreignLease: EditorBlockContentLease = owner.acquireBlockContent(
       id(1),
-      "paragraph",
+      "textBlock",
       "active-editing",
     );
 
@@ -95,7 +95,7 @@ describe("independent encoded Yjs block content", () => {
     );
     const runtime = createYjsBlockContentRuntime(source);
     expect(runtime.getLiveBlockContentCount()).toBe(0);
-    expect(runtime.readBlockProjection(id(1), "paragraph")).toBe(
+    expect(runtime.readBlockProjection(id(1), "textBlock")).toBe(
       source.contentById[id(1)],
     );
     expect(runtime.getLiveBlockContentCount()).toBe(0);
@@ -106,10 +106,10 @@ describe("independent encoded Yjs block content", () => {
     const runtime = createYjsBlockContentRuntime(
       sourceFor({ [id(1)]: "A", [id(2)]: "B" }),
     );
-    const a = runtime.acquireBlockContent(id(1), "paragraph", "active-editing");
+    const a = runtime.acquireBlockContent(id(1), "textBlock", "active-editing");
     expect(runtime.getLiveBlockContentCount()).toBe(1);
     expect(readYjsBlockContentPlainText(a.context)).toBe("A");
-    const b = runtime.acquireBlockContent(id(2), "paragraph", "active-editing");
+    const b = runtime.acquireBlockContent(id(2), "textBlock", "active-editing");
     expect(a.context.doc).not.toBe(b.context.doc);
     expect(runtime.getLiveBlockContentCount()).toBe(2);
     a.release();
@@ -127,7 +127,7 @@ describe("independent encoded Yjs block content", () => {
 
     const firstA = runtime.acquireBlockContent(
       id(1),
-      "paragraph",
+      "textBlock",
       "active-editing",
     );
     const firstAContext = firstA.context;
@@ -138,7 +138,7 @@ describe("independent encoded Yjs block content", () => {
 
     const blockB = runtime.acquireBlockContent(
       id(2),
-      "paragraph",
+      "textBlock",
       "active-editing",
     );
     expect(runtime.getLiveBlockContentCount()).toBe(1);
@@ -148,7 +148,7 @@ describe("independent encoded Yjs block content", () => {
 
     const secondA = runtime.acquireBlockContent(
       id(1),
-      "paragraph",
+      "textBlock",
       "active-editing",
     );
     expect(runtime.getLiveBlockContentCount()).toBe(1);
@@ -172,18 +172,18 @@ describe("independent encoded Yjs block content", () => {
     runtime.applyExternalContentUpdate({
       blockGraphVersion: 1,
       blockId: id(1),
-      blockType: "paragraph",
+      blockType: "textBlock",
       update,
       readProjection: next,
       revision: 8,
     });
     expect(runtime.getLiveBlockContentCount()).toBe(0);
-    expect(runtime.readBlockProjection(id(1), "paragraph")).toEqual(next);
+    expect(runtime.readBlockProjection(id(1), "textBlock")).toEqual(next);
     expect(runtime.readOpaqueBlockState(id(2))).toBe(untouched);
     expectCheckpointMatchesLiveDocument(runtime, id(1));
     const lease = runtime.acquireBlockContent(
       id(1),
-      "paragraph",
+      "textBlock",
       "active-editing",
     );
     expect(readYjsBlockContentPlainText(lease.context)).toBe("after");
@@ -204,11 +204,11 @@ describe("independent encoded Yjs block content", () => {
       },
     };
     const runtime = createYjsBlockContentRuntime(corrupt);
-    expect(runtime.readBlockProjection(id(2), "paragraph")).toEqual(
+    expect(runtime.readBlockProjection(id(2), "textBlock")).toEqual(
       richText("B"),
     );
     expect(() =>
-      runtime.acquireBlockContent(id(1), "paragraph", "active-editing"),
+      runtime.acquireBlockContent(id(1), "textBlock", "active-editing"),
     ).toThrow(/Cannot hydrate/u);
     expect(runtime.getLiveBlockContentCount()).toBe(0);
     runtime.destroy();
@@ -230,7 +230,7 @@ describe("independent encoded Yjs block content", () => {
     const accepted = {
       blockGraphVersion: 1,
       blockId: id(1),
-      blockType: "paragraph" as const,
+      blockType: "textBlock" as const,
       update,
       readProjection: next,
       revision: 2,
@@ -248,7 +248,7 @@ describe("independent encoded Yjs block content", () => {
     expect(
       runtime.tryResolveTextAnchorInLiveContext({
         blockId: id(1),
-        blockType: "paragraph",
+        blockType: "textBlock",
         codec: "yjs-relative-position",
         payload: { encoded: "AA==", assoc: 0 },
       }),
@@ -257,7 +257,7 @@ describe("independent encoded Yjs block content", () => {
 
     const lease = runtime.acquireBlockContent(
       id(1),
-      "paragraph",
+      "textBlock",
       "active-editing",
     );
     const doc = lease.context.doc;
@@ -283,7 +283,7 @@ describe("independent encoded Yjs block content", () => {
     const runtime = createYjsBlockContentRuntime(source);
     const lease = runtime.acquireBlockContent(
       id(1),
-      "paragraph",
+      "textBlock",
       "active-editing",
     );
     const doc = lease.context.doc;
@@ -291,7 +291,7 @@ describe("independent encoded Yjs block content", () => {
     runtime.applyExternalContentUpdate({
       blockGraphVersion: 1,
       blockId: id(1),
-      blockType: "paragraph",
+      blockType: "textBlock",
       update: updateFromCheckpoint(
         id(1),
         source.opaqueContentCheckpoints[id(1)]!,
@@ -310,7 +310,7 @@ describe("independent encoded Yjs block content", () => {
   it("keeps the incremental checkpoint state-equivalent after a local commit", () => {
     const source = sourceFor({ [id(1)]: "A" });
     const runtime = createYjsBlockContentRuntime(source);
-    const baseToken = runtime.readContentBaseToken(id(1), "paragraph", 1);
+    const baseToken = runtime.readContentBaseToken(id(1), "textBlock", 1);
     const validated = requireValidated(
       runtime.validateContentCommit({
         graphRevision: 1,
@@ -322,7 +322,7 @@ describe("independent encoded Yjs block content", () => {
         ],
       }),
     );
-    const applied = runtime.commitContent(validated);
+    const applied = runtime.commitContent(validated, "none");
     runtime.publishContentCommit(applied);
 
     const secondValidated = requireValidated(
@@ -330,18 +330,20 @@ describe("independent encoded Yjs block content", () => {
         graphRevision: 1,
         changes: [
           {
-            baseToken: runtime.readContentBaseToken(id(1), "paragraph", 1),
+            baseToken: runtime.readContentBaseToken(id(1), "textBlock", 1),
             operations: [insertOperation(id(1), 2, "C")],
           },
         ],
       }),
     );
-    runtime.publishContentCommit(runtime.commitContent(secondValidated));
+    runtime.publishContentCommit(
+      runtime.commitContent(secondValidated, "none"),
+    );
 
     expectCheckpointMatchesLiveDocument(runtime, id(1));
     const checkpoint = runtime.readOpaqueBlockState(id(1));
     if (!checkpoint) throw new Error("Expected maintained checkpoint");
-    const projection = runtime.readBlockProjection(id(1), "paragraph");
+    const projection = runtime.readBlockProjection(id(1), "textBlock");
     runtime.destroy();
 
     const reopened = createYjsBlockContentRuntime({
@@ -351,7 +353,7 @@ describe("independent encoded Yjs block content", () => {
     });
     const lease = reopened.acquireBlockContent(
       id(1),
-      "paragraph",
+      "textBlock",
       "active-editing",
     );
     expect(readYjsBlockContentPlainText(lease.context)).toBe("ABC");
@@ -366,13 +368,13 @@ describe("independent encoded Yjs block content", () => {
     const validated = requireValidated(
       runtime.validateContentCommit({
         graphRevision: 1,
-        introducedBlocks: { [introducedId]: "paragraph" },
+        introducedBlocks: { [introducedId]: "textBlock" },
         changes: [
           {
             baseToken: {
               graphRevision: 1,
               blockId: introducedId,
-              blockType: "paragraph",
+              blockType: "textBlock",
               contentRevision: 0,
             },
             operations: [insertOperation(introducedId, 0, "introduced")],
@@ -380,13 +382,99 @@ describe("independent encoded Yjs block content", () => {
         ],
       }),
     );
-    const applied = runtime.commitContent(validated);
+    const applied = runtime.commitContent(validated, "none");
     runtime.publishContentCommit(applied);
 
-    expect(runtime.readBlockProjection(introducedId, "paragraph")).toEqual(
+    expect(runtime.readBlockProjection(introducedId, "textBlock")).toEqual(
       richText("introduced"),
     );
     expectCheckpointMatchesLiveDocument(runtime, introducedId);
+    runtime.destroy();
+  });
+
+  it("serializes inverse operation anchors across context destruction and checkpoint rehydration", () => {
+    const runtime = createYjsBlockContentRuntime(
+      sourceFor({ [id(1)]: "abcd" }),
+    );
+    const validated = requireValidated(
+      runtime.validateContentCommit({
+        graphRevision: 1,
+        changes: [
+          {
+            baseToken: runtime.readContentBaseToken(id(1), "textBlock", 1),
+            operations: [insertOperation(id(1), 2, "X")],
+          },
+        ],
+      }),
+    );
+    const applied = runtime.commitContent(validated, "inverse");
+    runtime.publishContentCommit(applied);
+    if (applied.replayCapture.kind !== "inverse")
+      throw new Error("missing capture");
+    const step = applied.replayCapture.steps[0]!;
+    if (step.anchors.kind !== "range")
+      throw new Error("expected inverse range");
+    const transported = JSON.parse(JSON.stringify(step.anchors.end));
+    expect(transported).toEqual(step.anchors.end);
+    expect(transported).not.toHaveProperty("doc");
+
+    const checkpoint = runtime.readOpaqueBlockState(id(1));
+    if (!checkpoint) throw new Error("missing checkpoint");
+    runtime.destroy();
+    const reopenedSource = sourceFor({ [id(1)]: "abXcd" });
+    const reopened = createYjsBlockContentRuntime({
+      ...reopenedSource,
+      opaqueContentCheckpoints: { [id(1)]: checkpoint },
+    });
+    const lease = reopened.acquireBlockContent(id(1), "textBlock", "history");
+    expect(
+      reopened.resolveOperationAnchorInContext(lease, transported),
+    ).toEqual({
+      ok: true,
+      textOffset: 3,
+    });
+    lease.release();
+    reopened.destroy();
+  });
+
+  it("replays multi-block capture without retaining simultaneous temporary block documents", () => {
+    const runtime = createYjsBlockContentRuntime(
+      sourceFor({ [id(1)]: "A", [id(2)]: "B" }),
+    );
+    const validated = requireValidated(
+      runtime.validateContentCommit({
+        graphRevision: 1,
+        changes: [
+          {
+            baseToken: runtime.readContentBaseToken(id(1), "textBlock", 1),
+            operations: [insertOperation(id(1), 1, "1")],
+          },
+          {
+            baseToken: runtime.readContentBaseToken(id(2), "textBlock", 1),
+            operations: [insertOperation(id(2), 1, "2")],
+          },
+        ],
+      }),
+    );
+    expect(runtime.getLiveBlockContentCount()).toBe(0);
+
+    const applied = runtime.commitContent(validated, "inverse");
+    expect(runtime.getLiveBlockContentCount()).toBe(0);
+    expect(applied.replayCapture).toMatchObject({
+      kind: "inverse",
+      steps: [
+        { kind: "content", blockId: id(2) },
+        { kind: "content", blockId: id(1) },
+      ],
+    });
+    runtime.publishContentCommit(applied);
+    expect(runtime.getLiveBlockContentCount()).toBe(0);
+    expect(runtime.readBlockProjection(id(1), "textBlock")).toEqual(
+      richText("A1"),
+    );
+    expect(runtime.readBlockProjection(id(2), "textBlock")).toEqual(
+      richText("B2"),
+    );
     runtime.destroy();
   });
 });
@@ -402,7 +490,7 @@ function sourceFor(content: Readonly<Record<BlockId, string>>) {
     BlockId,
     string,
   ][]) {
-    blockTypesById[blockId] = "paragraph";
+    blockTypesById[blockId] = "textBlock";
     contentById[blockId] = richText(text);
     opaqueContentCheckpoints[blockId] = opaque(
       createYjsBlockContentCheckpoint(blockId, contentById[blockId]),
@@ -461,14 +549,14 @@ function decodeBase64(value: string): Uint8Array {
 }
 
 function richText(text: string): RichTextDocumentNodeJson {
-  return createBlockRichTextContentFromPlainText("paragraph", text);
+  return createBlockRichTextContentFromPlainText("textBlock", text);
 }
 
 function insertOperation(blockId: BlockId, offset: number, text: string) {
   return {
     kind: "insertInlineContent" as const,
     blockId,
-    blockType: "paragraph" as const,
+    blockType: "textBlock" as const,
     target: { kind: "text" as const },
     position: { blockId, offset },
     content: [{ type: "text" as const, text }],
@@ -498,7 +586,7 @@ function expectCheckpointMatchesLiveDocument(
   );
   const lease = runtime.acquireBlockContent(
     blockId,
-    "paragraph",
+    "textBlock",
     "active-editing",
   );
   expect(Array.from(encodeStateVector(checkpointDoc))).toEqual(

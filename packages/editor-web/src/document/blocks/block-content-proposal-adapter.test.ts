@@ -9,7 +9,7 @@ import {
 } from "@repo/editor-dom/block-editor";
 import { TextSelection, type EditorView } from "@repo/editor-dom/prosemirror";
 import type { EditorSemanticChange } from "../../runtime/document/contracts.ts";
-import type { EditorRuntimePort } from "../../runtime/document/render-port.ts";
+import type { EditableEditorRuntimePort } from "../../runtime/document/render-port.ts";
 import { createTestEditorSnapshot } from "../../tests/editor-snapshot-fixtures.ts";
 import { testEditableEditorDefinition } from "../../tests/test-editor-definition.ts";
 import { initializeTestEditableEditor } from "../../tests/test-editor-initializers.ts";
@@ -25,11 +25,11 @@ import {
 
 const blockId = asBlockId("01890f07-1c00-7000-8000-000000000901");
 const liveViews: EditorView[] = [];
-const liveEditors: EditorRuntimePort[] = [];
+const liveEditors: EditableEditorRuntimePort[] = [];
 const liveContentLeases: Array<{ release(): void }> = [];
 
 function expectCollapsedCanonicalOffset(
-  editor: EditorRuntimePort,
+  editor: EditableEditorRuntimePort,
   offset: number,
 ): void {
   expect(editor.selectionController.canonical.getSnapshot()).toMatchObject({
@@ -131,7 +131,7 @@ describe("ActiveProseMirrorProposalAdapter", () => {
       ([proposal]) =>
         !proposal.proposedState.doc.eq(proposal.previousState.doc),
     )?.[0].proposedState;
-    expect(editor.readBlockPlainText(blockId, "paragraph")).toBe("aXbc");
+    expect(editor.readBlockPlainText(blockId, "textBlock")).toBe("aXbc");
     expect(changes).toHaveLength(1);
     expect(changes[0]).toMatchObject({
       selectionBefore: { kind: "none" },
@@ -179,7 +179,7 @@ describe("ActiveProseMirrorProposalAdapter", () => {
     view.dispatch(view.state.tr.insertText("b", 2));
     view.dispatch(view.state.tr.insertText("c", 3));
 
-    expect(editor.readBlockPlainText(blockId, "paragraph")).toBe("abc");
+    expect(editor.readBlockPlainText(blockId, "textBlock")).toBe("abc");
     expect(focusText).not.toHaveBeenCalled();
     expect(nativeFocus).not.toHaveBeenCalled();
     expectCollapsedCanonicalOffset(editor, 3);
@@ -214,7 +214,7 @@ describe("ActiveProseMirrorProposalAdapter", () => {
     view.dom.dispatchEvent(event);
 
     expect(event.defaultPrevented).toBe(true);
-    expect(editor.readBlockPlainText(blockId, "paragraph")).toBe("ab");
+    expect(editor.readBlockPlainText(blockId, "textBlock")).toBe("ab");
     expect(acceptProposal).toHaveBeenCalledWith(
       expect.objectContaining({
         selectionAfter: expect.objectContaining({
@@ -283,7 +283,7 @@ describe("ActiveProseMirrorProposalAdapter", () => {
     view.focus();
     const before = editor.contentRuntime.readContentBaseToken(
       blockId,
-      "paragraph",
+      "textBlock",
       editor.getSelectionGraphRevision(),
     );
     const contentPublication = vi.fn();
@@ -309,7 +309,7 @@ describe("ActiveProseMirrorProposalAdapter", () => {
     expect(
       editor.contentRuntime.readContentBaseToken(
         blockId,
-        "paragraph",
+        "textBlock",
         editor.getSelectionGraphRevision(),
       ).contentRevision,
     ).toBe(before.contentRevision);
@@ -410,7 +410,7 @@ describe("ActiveProseMirrorProposalAdapter", () => {
     editor.contentRuntime.applyExternalContentUpdate({
       blockGraphVersion: editor.getSelectionGraphRevision(),
       blockId,
-      blockType: "paragraph",
+      blockType: "textBlock",
       update: createTestContentOperationUpdate(editor.contentRuntime),
       readProjection: documentWithText("remote"),
       revision: 1,
@@ -421,7 +421,7 @@ describe("ActiveProseMirrorProposalAdapter", () => {
 
     expect(disposition.kind).toBe("rejected");
     expect(view.state.doc.textContent).toBe("remote");
-    expect(editor.readBlockPlainText(blockId, "paragraph")).toBe("remote");
+    expect(editor.readBlockPlainText(blockId, "textBlock")).toBe("remote");
     expect(editor.canUndo).toBe(false);
     expect(editor.selectionController.canonical.getSnapshot()).toBe(
       authoritativeSelection,
@@ -463,7 +463,7 @@ describe("ActiveProseMirrorProposalAdapter", () => {
     view.dispatch(view.state.tr.insertText("@", 1));
     view.dispatch(view.state.tr.insertText("@", 1));
 
-    expect(editor.readBlockPlainText(blockId, "paragraph")).toBe("@");
+    expect(editor.readBlockPlainText(blockId, "textBlock")).toBe("@");
     expect(editor.getTypingTriggerSession()).toBeNull();
     expect(accept.mock.calls.map(([, context]) => context.provenance)).toEqual([
       { kind: "typing", text: "@", inputType: "text" },
@@ -473,7 +473,7 @@ describe("ActiveProseMirrorProposalAdapter", () => {
 
   it.each([
     ["graph revision", { graphRevision: 99 }],
-    ["block type", { blockType: "heading" as const }],
+    ["block type", { blockType: "alternateTextBlock" as const }],
   ])("rejects a stale %s base before content application", (_label, patch) => {
     const { editor, view, adapter } = createMountedEditor("abc");
     const previousState = view.state;
@@ -492,7 +492,7 @@ describe("ActiveProseMirrorProposalAdapter", () => {
     );
 
     expect(disposition.kind).toBe("rejected");
-    expect(editor.readBlockPlainText(blockId, "paragraph")).toBe("abc");
+    expect(editor.readBlockPlainText(blockId, "textBlock")).toBe("abc");
     expect(editor.canUndo).toBe(false);
   });
 
@@ -504,7 +504,7 @@ describe("ActiveProseMirrorProposalAdapter", () => {
     editor.contentRuntime.applyExternalContentUpdate({
       blockGraphVersion: editor.getSelectionGraphRevision(),
       blockId,
-      blockType: "paragraph",
+      blockType: "textBlock",
       update: createTestContentOperationUpdate(editor.contentRuntime),
       readProjection: documentWithText("external"),
       revision: 1,
@@ -539,7 +539,7 @@ describe("ActiveProseMirrorProposalAdapter", () => {
     editor.contentRuntime.applyExternalContentUpdate({
       blockGraphVersion: editor.getSelectionGraphRevision(),
       blockId,
-      blockType: "paragraph",
+      blockType: "textBlock",
       update: createTestContentOperationUpdate(editor.contentRuntime),
       readProjection: documentWithText("Xabcdef"),
       revision: 1,
@@ -558,7 +558,7 @@ describe("ActiveProseMirrorProposalAdapter", () => {
   it("keeps ProseMirror collapsed when undo and redo reproject finalized content", () => {
     const { editor, view } = createMountedEditor("abcdef");
     view.dispatch(view.state.tr.insertText("!", 7));
-    expect(editor.readBlockPlainText(blockId, "paragraph")).toBe("abcdef!");
+    expect(editor.readBlockPlainText(blockId, "textBlock")).toBe("abcdef!");
     commitCanonicalTextSelection(editor, 1, 5);
 
     expect(editor.undo()).toEqual({ status: "applied" });
@@ -592,7 +592,7 @@ describe("ActiveProseMirrorProposalAdapter", () => {
     expect(frozen).not.toBeNull();
     const base = editor.contentRuntime.readContentBaseToken(
       blockId,
-      "paragraph",
+      "textBlock",
       editor.getSelectionGraphRevision(),
     );
     const session = editor.selectionController.beginCompositionSession({
@@ -608,7 +608,7 @@ describe("ActiveProseMirrorProposalAdapter", () => {
     adapter.projectFinalizedContent(view);
 
     expect(view.state.doc.textContent).toBe("Xc");
-    expect(editor.readBlockPlainText(blockId, "paragraph")).toBe("abc");
+    expect(editor.readBlockPlainText(blockId, "textBlock")).toBe("abc");
     expect(editor.canUndo).toBe(false);
     expect(accept).not.toHaveBeenCalled();
     expect(
@@ -627,7 +627,7 @@ function createMountedEditor(
   definition: EditableEditorDefinition = testEditableEditorDefinition,
   onChange?: (transaction: unknown) => void,
 ): {
-  readonly editor: EditorRuntimePort;
+  readonly editor: EditableEditorRuntimePort;
   readonly view: EditorView;
   readonly adapter: ActiveProseMirrorProposalAdapter;
   readonly captureProvenance: (
@@ -637,34 +637,34 @@ function createMountedEditor(
   const editor = initializeTestEditableEditor({
     definition,
     snapshot: createTestEditorSnapshot([
-      { id: blockId, type: "paragraph", text },
+      { id: blockId, type: "textBlock", text },
     ]),
     onChange,
-  }) as EditorRuntimePort;
+  }) as EditableEditorRuntimePort;
   liveEditors.push(editor);
   liveContentLeases.push(
     editor.contentRuntime.acquireBlockContent(
       blockId,
-      "paragraph",
+      "textBlock",
       "active-editing",
     ),
   );
   const content = editor.contentRuntime.readBlockProjection(
     blockId,
-    "paragraph",
+    "textBlock",
   );
   if (!content) throw new Error("The mounted test block has no content.");
   const state = createBlockLocalProseMirrorState({
     doc: content,
     blockId,
-    blockType: "paragraph",
+    blockType: "textBlock",
     schema: editor.contentResources.proseMirrorSchema,
   });
   let pendingProvenance: EditorLocalMutationProvenance | null = null;
   const triggerEnabled = (definition.typingTriggers?.length ?? 0) > 0;
   const adapter = new ActiveProseMirrorProposalAdapter({
     blockId,
-    blockType: "paragraph",
+    blockType: "textBlock",
     editor,
     contentRuntime: editor.contentRuntime,
     consumeLocalMutationProvenance: triggerEnabled
@@ -680,7 +680,7 @@ function createMountedEditor(
   const view = createBlockLocalProseMirrorView({
     mount,
     blockId,
-    blockType: "paragraph",
+    blockType: "textBlock",
     state,
     schema: editor.contentResources.proseMirrorSchema,
     proposalAdapter: adapter,
@@ -701,13 +701,13 @@ function createMountedEditor(
 }
 
 function commitCanonicalTextSelection(
-  editor: EditorRuntimePort,
+  editor: EditableEditorRuntimePort,
   anchorOffset: number,
   focusOffset: number,
 ): void {
   const lease = editor.contentRuntime.acquireBlockContent(
     blockId,
-    "paragraph",
+    "textBlock",
     "canonical-transaction",
   );
   const point = (offset: number) => {
@@ -715,7 +715,7 @@ function commitCanonicalTextSelection(
       contentRuntime: editor.contentRuntime,
       contentLease: lease,
       blockId,
-      blockType: "paragraph",
+      blockType: "textBlock",
       textOffset: offset,
     });
     if (!anchor.ok) throw new Error(anchor.message);

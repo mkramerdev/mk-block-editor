@@ -13,6 +13,7 @@ export function createEditorKeybindingPlugin(
         if (event.defaultPrevented || isBlockEditorComposing(view.state)) {
           return false;
         }
+        if (isNeutralStructuralBoundary(event)) return false;
         const platform = readEditorKeybindingPlatform(
           view.dom.ownerDocument.defaultView,
         );
@@ -26,4 +27,15 @@ export function createEditorKeybindingPlugin(
       },
     },
   });
+}
+
+function isNeutralStructuralBoundary(event: KeyboardEvent): boolean {
+  if (event.altKey || event.ctrlKey || event.metaKey) return false;
+  if (event.key === "Tab") return true;
+  return (
+    !event.shiftKey &&
+    (event.key === "Enter" ||
+      event.key === "Backspace" ||
+      event.key === "Delete")
+  );
 }

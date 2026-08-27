@@ -14,7 +14,7 @@ export function compileEditorTypingTriggers(
 ): CompiledEditorTypingTriggers {
   if (!Array.isArray(definitions)) {
     throw new Error(
-      "EditorDefinition.typingTriggers must be an array of typing trigger definitions.",
+      "EditableEditorDefinition.typingTriggers must be an array of typing trigger definitions.",
     );
   }
   const byId = new Map<string, EditorTypingTriggerDefinition>();

@@ -62,8 +62,6 @@ import type {
 import type { ReactNode } from "react";
 import type {
   EditableEditorDefinition,
-  EditorDefinition,
-  ReadEditorDefinition,
 } from "../definition/contracts.ts";
 import type { EditorDocumentGeometryReader } from "../../document/geometry/editor-document-geometry.ts";
 
@@ -88,13 +86,31 @@ export interface EditorLayoutConfig {
   readonly sideRightWidth: string;
 }
 
-export interface EditorDocumentProps<TEditor extends Editor = Editor> {
+export interface EditorDocumentProps<
+  TEditor extends EditableEditor = EditableEditor,
+> {
   readonly editor: TEditor;
+  /** Keeps the canonical renderer tree mounted while client editing effects are disabled. */
+  readonly interactionEnabled?: boolean;
   readonly layout?: EditorLayoutConfig;
+  readonly childOrderProjection?: EditorChildOrderProjection;
+  /** Ordinary opaque product-owned content rendered before the root sequence. */
+  readonly children?: ReactNode;
+  /** Ordinary opaque product-owned content rendered after the block list. */
+  readonly trailingContent?: ReactNode;
   readonly renderDocumentLayers?: EditorDocumentLayerRenderer<TEditor>;
   readonly onSelectionDragStart?: EditorSelectionDragCallback;
   readonly onSelectionDragUpdate?: EditorSelectionDragCallback;
   readonly onSelectionDragEnd?: EditorSelectionDragCallback;
+}
+
+/** A presentation-only ordering projection for canonical direct children. */
+export interface EditorChildOrderProjection {
+  subscribe(parentId: BlockId, listener: () => void): () => void;
+  getProjectedChildIds(
+    parentId: BlockId,
+    canonicalChildIds: readonly BlockId[],
+  ): readonly BlockId[];
 }
 
 export interface EditorSelectionDragSnapshot {
@@ -111,9 +127,9 @@ export type EditorSelectionDragCallback = (
   snapshot: EditorSelectionDragSnapshot,
 ) => void;
 
-export type EditorDocumentLayerRenderer<TEditor extends Editor = Editor> = (
-  context: EditorDocumentLayerRenderContext<TEditor>,
-) => ReactNode;
+export type EditorDocumentLayerRenderer<
+  TEditor extends EditableEditor = EditableEditor,
+> = (context: EditorDocumentLayerRenderContext<TEditor>) => ReactNode;
 
 export type EditorDocumentLayerKeydownResult = "handled" | "unhandled";
 
@@ -140,7 +156,7 @@ export interface EditorDocumentLayerInteractionPort {
 }
 
 export interface EditorDocumentLayerRenderContext<
-  TEditor extends Editor = Editor,
+  TEditor extends EditableEditor = EditableEditor,
 > {
   readonly editor: TEditor;
   readonly selection: EditorCanonicalSelectionReader;
@@ -266,8 +282,8 @@ export interface EditorTypingTriggerFragmentReplacement extends EditorTypingTrig
   readonly selectionOffset?: number;
 }
 
-export interface EditorReadRuntime {
-  readonly definition: EditorDefinition;
+export interface EditorDocumentRuntime {
+  readonly definition: EditableEditorDefinition;
   readonly selection: EditorCanonicalSelectionReader;
   readonly selectionPaint: EditorLocalSelectionPaintReader;
   readonly geometry: EditorDocumentGeometryReader;
@@ -296,12 +312,7 @@ export interface EditorReadRuntime {
   dispose(): void;
 }
 
-export interface ReadEditor extends EditorReadRuntime {
-  readonly definition: ReadEditorDefinition;
-  readonly editable: false;
-}
-
-export interface EditableEditor extends EditorReadRuntime {
+export interface EditableEditor extends EditorDocumentRuntime {
   readonly definition: EditableEditorDefinition;
   readonly editable: true;
   readonly additionalSelections: EditorAdditionalSelectionReader;
@@ -409,8 +420,6 @@ export interface EditorTextFocusOptions {
   readonly preventScroll?: boolean;
   readonly affinity?: EditorSelectionTextAffinity | null;
 }
-
-export type Editor = ReadEditor | EditableEditor;
 
 export interface EditorDiagnostics {
   readonly blockGraphVersion: number;

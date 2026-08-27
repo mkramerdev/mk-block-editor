@@ -2,7 +2,6 @@ import type { BlockType } from "@repo/editor-core/document";
 import type { CanonicalBlockFragment } from "@repo/editor-core/editing";
 import type { BlockDefinition } from "@repo/editor-core/definitions";
 import type { Schema } from "../../prosemirror/index.ts";
-import type { BlockLocalDocumentMappingOptions } from "../../schema/block-local/document-mapping.ts";
 import type { SemanticHtmlProseMirrorOptions } from "../serialize/prosemirror-html.ts";
 import type { EditorClipboardImportLimits } from "../limits.ts";
 import type { InlineMetadataFieldDefinition } from "@repo/editor-core/content/inline-atoms";
@@ -10,7 +9,6 @@ import type { InlineMetadataFieldDefinition } from "@repo/editor-core/content/in
 export interface EditorHtmlCodecOptions extends SemanticHtmlProseMirrorOptions {
   blockDefinitions: Readonly<Record<BlockType, BlockDefinition>>;
   schema?: Schema;
-  documentMapping?: BlockLocalDocumentMappingOptions;
   isBlockType?: (value: unknown) => value is BlockType;
   htmlImportHandlers?: readonly EditorHtmlImportHandler[];
   htmlExportHandlers?: readonly EditorHtmlExportHandler[];

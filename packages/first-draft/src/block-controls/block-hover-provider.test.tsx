@@ -36,6 +36,9 @@ describe("FirstDraftBlockHoverProvider", () => {
     expect(
       boundaries[0]?.classList.contains("first-draft-example__document-scroll"),
     ).toBe(false);
+    expect(
+      boundaries[0]?.hasAttribute("data-first-draft-active-drag-group"),
+    ).toBe(false);
 
     fireEvent.pointerMove(screen.getByTestId("nested-content"));
     expect(fixture.store().getHoveredBlockId()).toBe(blockB);

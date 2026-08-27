@@ -1,5 +1,4 @@
 import { createElement } from "react";
-import type { BlockDefinition } from "@repo/editor-core/definitions";
 import type { BlockType } from "@repo/editor-core/document";
 import {
   boldMarkDefinition,
@@ -11,37 +10,11 @@ import {
 } from "@repo/editor-core/content/marks";
 import {
   type BlockRendererProps,
-  ReadTextBlockPrimitive,
 } from "../document/blocks/block-renderer.tsx";
 import { EditableTextBlockPrimitive } from "../document/blocks/editable-text-block-primitive.tsx";
 import { conventionalHistoryCommands } from "../api/keybindings.ts";
-import type {
-  EditableEditorDefinition,
-  ReadEditorDefinition,
-} from "../runtime/definition/contracts.ts";
-import type {
-  EditableEditor,
-  ReadEditor,
-} from "../runtime/document/contracts.ts";
-
-function testReadRenderer({
-  block,
-  editor,
-  children,
-}: BlockRendererProps<ReadEditor>) {
-  if (editor.definition.blocks[block.type]?.kind !== "text") {
-    return createElement(
-      "div",
-      { "data-testid": `test-${block.type}-renderer` },
-      children,
-    );
-  }
-  return createElement(ReadTextBlockPrimitive, {
-    block,
-    editor,
-    placeholder: testPlaceholderForBlock(block.type),
-  });
-}
+import type { EditableEditorDefinition } from "../runtime/definition/contracts.ts";
+import type { EditableEditor } from "../runtime/document/contracts.ts";
 
 function testEditableRenderer({
   block,
@@ -58,42 +31,38 @@ function testEditableRenderer({
   return createElement(EditableTextBlockPrimitive, {
     block,
     editor,
-    placeholder: testPlaceholderForBlock(block.type),
+    placeholder: { text: "Type here…", visibility: "active" },
   });
 }
 
-function testPlaceholderForBlock(blockType: BlockType) {
-  return blockType === "heading"
-    ? ({ text: "Heading", visibility: "always" } as const)
-    : ({ text: "Type here…", visibility: "active" } as const);
-}
+type TestBlockSemantics = Omit<
+  EditableEditorDefinition["blocks"][BlockType],
+  "renderer"
+>;
 
-const testBlockSemantics: Readonly<Record<BlockType, BlockDefinition>> = {
-  paragraph: {
+const testBlockSemantics: Readonly<Record<BlockType, TestBlockSemantics>> = {
+  textBlock: {
     kind: "text",
     rootLayout: "normal",
-    type: "paragraph",
-    split: { default: "paragraph" },
+    type: "textBlock",
   },
-  heading: {
+  alternateTextBlock: {
     kind: "text",
     rootLayout: "normal",
-    type: "heading",
-    data: { level: 1 },
-    split: { default: "paragraph" },
+    type: "alternateTextBlock",
   },
-  quote: {
+  wrapperBlock: {
     kind: "wrapper",
     rootLayout: "normal",
-    type: "quote",
-    content: { required: ["paragraph"] },
+    type: "wrapperBlock",
+    content: { required: ["textBlock"] },
     contentBoundary: false,
   },
-  code: {
+  fixedWrapper: {
     kind: "wrapper",
     rootLayout: "normal",
-    type: "code",
-    content: { required: ["paragraph"] },
+    type: "fixedWrapper",
+    content: { required: ["textBlock"] },
     contentBoundary: false,
   },
   childText: {
@@ -101,10 +70,10 @@ const testBlockSemantics: Readonly<Record<BlockType, BlockDefinition>> = {
     rootLayout: "normal",
     type: "childText",
   },
-  checkedChildText: {
+  alternateChildTextBlock: {
     kind: "text",
     rootLayout: "normal",
-    type: "checkedChildText",
+    type: "alternateChildTextBlock",
   },
   itemWrapper: {
     kind: "wrapper",
@@ -113,159 +82,172 @@ const testBlockSemantics: Readonly<Record<BlockType, BlockDefinition>> = {
     content: { required: ["childText"] },
     contentBoundary: false,
   },
-  numberedItemWrapper: {
+  alternateItemWrapper: {
     kind: "wrapper",
     rootLayout: "normal",
-    type: "numberedItemWrapper",
+    type: "alternateItemWrapper",
     content: { required: ["childText"] },
     contentBoundary: false,
   },
-  checkedItemWrapper: {
+  statefulItemWrapper: {
     kind: "wrapper",
     rootLayout: "normal",
-    type: "checkedItemWrapper",
-    content: { required: ["checkedChildText"] },
+    type: "statefulItemWrapper",
+    content: { required: ["alternateChildTextBlock"] },
     contentBoundary: false,
   },
-  divider: {
+  atomicBlock: {
     kind: "atomic",
     rootLayout: "normal",
-    type: "divider",
+    type: "atomicBlock",
   },
-  image: {
+  alternateAtomicBlock: {
     kind: "atomic",
     rootLayout: "normal",
-    type: "image",
+    type: "alternateAtomicBlock",
   },
-  video: {
+  secondAtomicBlock: {
     kind: "atomic",
     rootLayout: "normal",
-    type: "video",
+    type: "secondAtomicBlock",
   },
-  audio: {
+  thirdAtomicBlock: {
     kind: "atomic",
     rootLayout: "normal",
-    type: "audio",
+    type: "thirdAtomicBlock",
   },
-  file: {
+  fourthAtomicBlock: {
     kind: "atomic",
     rootLayout: "normal",
-    type: "file",
+    type: "fourthAtomicBlock",
   },
-  embed: {
+  fifthAtomicBlock: {
     kind: "atomic",
     rootLayout: "normal",
-    type: "embed",
+    type: "fifthAtomicBlock",
   },
-  callout: {
+  containerWrapper: {
     kind: "wrapper",
     rootLayout: "normal",
-    type: "callout",
+    type: "containerWrapper",
     content: { required: ["block"], additional: "block" },
     contentBoundary: false,
-    defaultContent: "paragraph",
+    defaultContent: "textBlock",
   },
-  placeholder: {
-    kind: "atomic",
-    rootLayout: "normal",
-    type: "placeholder",
-  },
-  toggleHeading: {
+  emptyContainerWrapper: {
     kind: "wrapper",
     rootLayout: "normal",
-    type: "toggleHeading",
-    content: { required: ["heading", "toggleHeadingBody"] },
+    type: "emptyContainerWrapper",
+    content: { required: [], additional: "block" },
     contentBoundary: false,
   },
-  toggleHeadingBody: {
+  textBlockOnlyContainer: {
     kind: "wrapper",
     rootLayout: "normal",
-    type: "toggleHeadingBody",
-    content: { required: ["block"], additional: "block" },
-    contentBoundary: false,
-    defaultContent: "placeholder",
-  },
-  toggleListItem: {
-    kind: "wrapper",
-    rootLayout: "normal",
-    type: "toggleListItem",
-    content: { required: ["paragraph", "toggleListItemBody"] },
+    type: "textBlockOnlyContainer",
+    content: { required: [], additional: "textBlock" },
     contentBoundary: false,
   },
-  toggleListItemBody: {
-    kind: "wrapper",
-    rootLayout: "normal",
-    type: "toggleListItemBody",
-    content: { required: ["block"], additional: "block" },
-    contentBoundary: false,
-    defaultContent: "placeholder",
-  },
-  columns: {
-    kind: "wrapper",
-    rootLayout: "normal",
-    type: "columns",
-    content: { required: ["column"], additional: "column" },
-    contentBoundary: false,
-    defaultContent: "column",
-  },
-  column: {
-    kind: "wrapper",
-    rootLayout: "normal",
-    type: "column",
-    content: { required: ["block"], additional: "block" },
-    contentBoundary: true,
-    defaultContent: "paragraph",
-  },
-  tabs: {
-    kind: "wrapper",
-    rootLayout: "normal",
-    type: "tabs",
-    content: { required: ["tabPane"], additional: "tabPane" },
-    contentBoundary: false,
-    defaultContent: "tabPane",
-  },
-  tabPane: {
-    kind: "wrapper",
-    rootLayout: "normal",
-    type: "tabPane",
-    content: { required: ["block"], additional: "block" },
-    contentBoundary: false,
-    defaultContent: "placeholder",
-  },
-  collection: {
-    kind: "wrapper",
-    rootLayout: "full",
-    type: "collection",
-    content: { required: ["collectionGroup"], additional: "collectionGroup" },
-    contentBoundary: true,
-    defaultContent: "collectionGroup",
-  },
-  collectionGroup: {
-    kind: "wrapper",
-    rootLayout: "full",
-    type: "collectionGroup",
-    content: { required: ["collectionText"], additional: "collectionText" },
-    contentBoundary: true,
-    defaultContent: "collectionText",
-  },
-  collectionText: {
+  parentRestrictedTextBlock: {
     kind: "text",
     rootLayout: "normal",
-    type: "collectionText",
+    type: "parentRestrictedTextBlock",
+    parents: { allowed: ["containerWrapper"] },
   },
-  database: {
+  defaultAtomicBlock: {
+    kind: "atomic",
+    rootLayout: "normal",
+    type: "defaultAtomicBlock",
+  },
+  expandableTitleWrapper: {
+    kind: "wrapper",
+    rootLayout: "normal",
+    type: "expandableTitleWrapper",
+    content: { required: ["alternateTextBlock", "titleChildWrapper"] },
+    contentBoundary: false,
+  },
+  titleChildWrapper: {
+    kind: "wrapper",
+    rootLayout: "normal",
+    type: "titleChildWrapper",
+    content: { required: ["block"], additional: "block" },
+    contentBoundary: false,
+    defaultContent: "defaultAtomicBlock",
+  },
+  expandableItemWrapper: {
+    kind: "wrapper",
+    rootLayout: "normal",
+    type: "expandableItemWrapper",
+    content: { required: ["textBlock", "itemChildWrapper"] },
+    contentBoundary: false,
+  },
+  itemChildWrapper: {
+    kind: "wrapper",
+    rootLayout: "normal",
+    type: "itemChildWrapper",
+    content: { required: ["block"], additional: "block" },
+    contentBoundary: false,
+    defaultContent: "defaultAtomicBlock",
+  },
+  parallelWrapper: {
+    kind: "wrapper",
+    rootLayout: "normal",
+    type: "parallelWrapper",
+    content: { required: ["laneWrapper"], additional: "laneWrapper" },
+    contentBoundary: false,
+    defaultContent: "laneWrapper",
+  },
+  laneWrapper: {
+    kind: "wrapper",
+    rootLayout: "normal",
+    type: "laneWrapper",
+    content: { required: ["block"], additional: "block" },
+    contentBoundary: true,
+    defaultContent: "textBlock",
+  },
+  switchWrapper: {
+    kind: "wrapper",
+    rootLayout: "normal",
+    type: "switchWrapper",
+    content: { required: ["branchWrapper"], additional: "branchWrapper" },
+    contentBoundary: false,
+    defaultContent: "branchWrapper",
+  },
+  branchWrapper: {
+    kind: "wrapper",
+    rootLayout: "normal",
+    type: "branchWrapper",
+    content: { required: ["block"], additional: "block" },
+    contentBoundary: false,
+    defaultContent: "defaultAtomicBlock",
+  },
+  rootWrapper: {
+    kind: "wrapper",
+    rootLayout: "full",
+    type: "rootWrapper",
+    content: { required: ["groupWrapper"], additional: "groupWrapper" },
+    contentBoundary: true,
+    defaultContent: "groupWrapper",
+  },
+  groupWrapper: {
+    kind: "wrapper",
+    rootLayout: "full",
+    type: "groupWrapper",
+    content: { required: ["nestedTextBlock"], additional: "nestedTextBlock" },
+    contentBoundary: true,
+    defaultContent: "nestedTextBlock",
+  },
+  nestedTextBlock: {
+    kind: "text",
+    rootLayout: "normal",
+    type: "nestedTextBlock",
+  },
+  fullAtomicBlock: {
     kind: "atomic",
     rootLayout: "full",
-    type: "database",
+    type: "fullAtomicBlock",
   },
 };
-
-const testReadBlockDefinitions = Object.fromEntries(
-  Object.entries(testBlockSemantics).map(([type, definition]) => [
-    type,
-    { ...definition, renderer: testReadRenderer },
-  ]),
-) as ReadEditorDefinition["blocks"];
 
 const testEditableBlockDefinitions = Object.fromEntries(
   Object.entries(testBlockSemantics).map(([type, definition]) => [
@@ -283,16 +265,9 @@ const testInlineMarks = [
   strikethroughMarkDefinition,
 ] as const;
 
-export const testReadEditorDefinition: ReadEditorDefinition = {
-  blocks: testReadBlockDefinitions,
-  defaultRoot: "paragraph",
-  inlineAtoms: [],
-  inlineMarks: testInlineMarks,
-};
-
 export const testEditableEditorDefinition: EditableEditorDefinition = {
   blocks: testEditableBlockDefinitions,
-  defaultRoot: "paragraph",
+  defaultRoot: "textBlock",
   commands: conventionalHistoryCommands,
   inlineAtoms: [],
   inlineMarks: testInlineMarks,

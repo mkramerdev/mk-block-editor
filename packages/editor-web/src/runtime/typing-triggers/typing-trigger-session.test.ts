@@ -12,7 +12,7 @@ import type {
   EditorChangeCallback,
   EditorSemanticChange,
 } from "../document/contracts.ts";
-import type { EditorRuntimePort } from "../document/render-port.ts";
+import type { EditableEditorRuntimePort } from "../document/render-port.ts";
 import { createTestEditorSnapshot } from "../../tests/editor-snapshot-fixtures.ts";
 import { testEditableEditorDefinition } from "../../tests/test-editor-definition.ts";
 import { initializeTestEditableEditor } from "../../tests/test-editor-initializers.ts";
@@ -53,7 +53,7 @@ describe("typing trigger sessions", () => {
       snapshot: createTestEditorSnapshot([
         {
           id: hardBreakId,
-          type: "paragraph",
+          type: "textBlock",
           content: {
             type: "doc",
             content: [
@@ -65,7 +65,7 @@ describe("typing trigger sessions", () => {
           },
         },
       ]),
-    }) as EditorRuntimePort;
+    }) as EditableEditorRuntimePort;
     settleCaret(hardBreakEditor, hardBreakId, 2);
     expect(typeAtCommittedSelection(hardBreakEditor, "/")).toBe(true);
     expect(hardBreakEditor.getTypingTriggerSession()).toMatchObject({
@@ -113,7 +113,7 @@ describe("typing trigger sessions", () => {
       triggerId: "mention",
       trigger: "@",
       blockId,
-      blockType: "paragraph",
+      blockType: "textBlock",
       range: { from: 0, to: 3 },
       query: "ab",
       revision: 1,
@@ -226,7 +226,7 @@ describe("typing trigger sessions", () => {
         : null,
     ).toBe(4);
     expect(editor.getTypingTriggerSession()).toBeNull();
-    expect(editor.readBlockContent(blockId, "paragraph")).toMatchObject({
+    expect(editor.readBlockContent(blockId, "textBlock")).toMatchObject({
       content: [{ content: [{ type: "text", text: "Ada " }] }],
     });
     expect(changes).toHaveBeenCalledTimes(1);
@@ -240,12 +240,12 @@ describe("typing trigger sessions", () => {
     expect(changes).toHaveBeenCalledTimes(1);
 
     expect(editor.undo()).toEqual({ status: "applied" });
-    expect(editor.readBlockContent(blockId, "paragraph")).toMatchObject({
+    expect(editor.readBlockContent(blockId, "textBlock")).toMatchObject({
       content: [{ content: [{ type: "text", text: "@ada" }] }],
     });
     expect(editor.getTypingTriggerSession()).toBeNull();
     expect(editor.redo()).toEqual({ status: "applied" });
-    expect(editor.readBlockContent(blockId, "paragraph")).toMatchObject({
+    expect(editor.readBlockContent(blockId, "textBlock")).toMatchObject({
       content: [{ content: [{ type: "text", text: "Ada " }] }],
     });
     expect(editor.getTypingTriggerSession()).toBeNull();
@@ -292,7 +292,7 @@ describe("typing trigger sessions", () => {
         ],
       }),
     ).toBe(true);
-    expect(editor.readBlockContent(blockId, "paragraph")).toMatchObject({
+    expect(editor.readBlockContent(blockId, "textBlock")).toMatchObject({
       content: [
         {
           content: [
@@ -347,7 +347,7 @@ describe("typing trigger sessions", () => {
     expect(typeAtCommittedSelection(editor, "@")).toBe(true);
     expect(isAllowed).toHaveBeenCalledOnce();
     expect(editor.getTypingTriggerSession()).toBeNull();
-    expect(editor.readBlockContent(blockId, "paragraph")).toMatchObject({
+    expect(editor.readBlockContent(blockId, "textBlock")).toMatchObject({
       content: [{ content: [{ type: "text", text: "@" }] }],
     });
     expect(changes).toHaveBeenCalledOnce();
@@ -369,7 +369,7 @@ describe("typing trigger sessions", () => {
     expect(typeAtCommittedSelection(editor, "/")).toBe(true);
     const session = editor.getTypingTriggerSession()!;
     const materialized = materializeCanonicalBlockCreation({
-      type: "paragraph",
+      type: "textBlock",
       initialText: "result",
       blockDefinitions: editor.definition.blocks,
     });
@@ -408,10 +408,10 @@ describe("typing trigger sessions", () => {
     const blockId = "typing-trigger-wrapper-fragment" as BlockId;
     const editor = createEditor(blockId, "", [{ id: "slash", trigger: "/" }]);
     settleCaret(editor, blockId, 0);
-    expect(typeAtCommittedSelection(editor, "/quote")).toBe(true);
+    expect(typeAtCommittedSelection(editor, "/wrapper")).toBe(true);
     const session = editor.getTypingTriggerSession()!;
     const materialized = materializeCanonicalBlockCreation({
-      type: "quote",
+      type: "wrapperBlock",
       blockDefinitions: editor.definition.blocks,
     });
 
@@ -424,7 +424,7 @@ describe("typing trigger sessions", () => {
       }),
     ).toBe(true);
     expect(materialized.selectionBlockId).not.toBeNull();
-    expect(editor.getBlock(materialized.rootBlockId)?.type).toBe("quote");
+    expect(editor.getBlock(materialized.rootBlockId)?.type).toBe("wrapperBlock");
     editor.dispose();
   });
 
@@ -437,8 +437,8 @@ describe("typing trigger sessions", () => {
         kind: "wrapper" as const,
         type: "mixedWrapper",
         rootLayout: "normal" as const,
-        renderer: testEditableEditorDefinition.blocks.callout!.renderer,
-        content: { required: ["divider", "paragraph"] },
+        renderer: testEditableEditorDefinition.blocks.containerWrapper!.renderer,
+        content: { required: ["atomicBlock", "textBlock"] },
         contentBoundary: false,
       },
     };
@@ -458,7 +458,7 @@ describe("typing trigger sessions", () => {
     });
     const atomicId = materialized.selectionBlockId!;
     const laterTextId = materialized.fragment.blocks.find(
-      ({ type }) => type === "paragraph",
+      ({ type }) => type === "textBlock",
     )!.id;
     const beforeRevision = editor.getSelectionGraphRevision();
     changes.mockClear();
@@ -483,7 +483,7 @@ describe("typing trigger sessions", () => {
 
     expect(editor.undo()).toEqual({ status: "applied" });
     expect(editor.getRootBlockIds()).toEqual([blockId]);
-    expect(editor.readBlockPlainText(blockId, "paragraph")).toBe(
+    expect(editor.readBlockPlainText(blockId, "textBlock")).toBe(
       "prefix /mixed",
     );
     editor.dispose();
@@ -504,7 +504,7 @@ describe("typing trigger sessions", () => {
     const session = editor.getTypingTriggerSession()!;
     const fragment = createTwoTextFragment(editor);
     const textRecords = fragment.blocks.filter(
-      ({ type }) => type === "paragraph" || type === "heading",
+      ({ type }) => type === "textBlock" || type === "alternateTextBlock",
     );
     const laterTextId = textRecords[1]!.id;
     changes.mockClear();
@@ -543,7 +543,7 @@ describe("typing trigger sessions", () => {
     expect(typeAtCommittedSelection(editor, "/")).toBe(true);
     const session = editor.getTypingTriggerSession()!;
     const materialized = materializeCanonicalBlockCreation({
-      type: "paragraph",
+      type: "textBlock",
       blockDefinitions: editor.definition.blocks,
     });
     const beforeRevision = editor.getSelectionGraphRevision();
@@ -560,7 +560,7 @@ describe("typing trigger sessions", () => {
     expect(editor.getTypingTriggerSession()).toEqual(session);
     expect(editor.getSelectionGraphRevision()).toBe(beforeRevision);
     expect(editor.getRootBlockIds()).toEqual([blockId]);
-    expect(editor.readBlockPlainText(blockId, "paragraph")).toBe("/");
+    expect(editor.readBlockPlainText(blockId, "textBlock")).toBe("/");
     expect(changes).not.toHaveBeenCalled();
     editor.dispose();
   });
@@ -579,7 +579,7 @@ describe("typing trigger sessions", () => {
     expect(typeAtCommittedSelection(editor, "/")).toBe(true);
     const session = editor.getTypingTriggerSession()!;
     const materialized = materializeCanonicalBlockCreation({
-      type: "paragraph",
+      type: "textBlock",
       blockDefinitions: editor.definition.blocks,
     });
     const beforeRevision = editor.getSelectionGraphRevision();
@@ -597,7 +597,7 @@ describe("typing trigger sessions", () => {
     expect(editor.getTypingTriggerSession()).toEqual(session);
     expect(editor.getSelectionGraphRevision()).toBe(beforeRevision);
     expect(editor.getRootBlockIds()).toEqual([blockId]);
-    expect(editor.readBlockPlainText(blockId, "paragraph")).toBe("/");
+    expect(editor.readBlockPlainText(blockId, "textBlock")).toBe("/");
     expect(changes).not.toHaveBeenCalled();
     editor.dispose();
   });
@@ -616,7 +616,7 @@ describe("typing trigger sessions", () => {
     expect(typeAtCommittedSelection(editor, "/head")).toBe(true);
     const session = editor.getTypingTriggerSession()!;
     const materialized = materializeCanonicalBlockCreation({
-      type: "heading",
+      type: "alternateTextBlock",
       metadata: { level: 3 },
       blockDefinitions: editor.definition.blocks,
     });
@@ -630,8 +630,8 @@ describe("typing trigger sessions", () => {
         selectionBlockId: materialized.selectionBlockId!,
       }),
     ).toBe(true);
-    expect(editor.getBlock(blockId)?.type).toBe("paragraph");
-    expect(editor.readBlockPlainText(blockId, "paragraph")).toBe(
+    expect(editor.getBlock(blockId)?.type).toBe("textBlock");
+    expect(editor.readBlockPlainText(blockId, "textBlock")).toBe(
       "prefix  suffix",
     );
     expect(editor.getRootBlockIds()).toEqual([
@@ -639,13 +639,13 @@ describe("typing trigger sessions", () => {
       materialized.fragment.rootBlockIds[0],
     ]);
     expect(editor.getBlock(materialized.fragment.rootBlockIds[0]!)?.type).toBe(
-      "heading",
+      "alternateTextBlock",
     );
     expect(changes).toHaveBeenCalledOnce();
 
     expect(editor.undo()).toEqual({ status: "applied" });
     expect(editor.getRootBlockIds()).toEqual([blockId]);
-    expect(editor.readBlockPlainText(blockId, "paragraph")).toBe(
+    expect(editor.readBlockPlainText(blockId, "textBlock")).toBe(
       "prefix /head suffix",
     );
     editor.dispose();
@@ -658,25 +658,25 @@ function createEditor(
   typingTriggers: NonNullable<EditableEditorDefinition["typingTriggers"]>,
   extra: Partial<EditableEditorDefinition> = {},
   onChange?: EditorChangeCallback,
-): EditorRuntimePort {
+): EditableEditorRuntimePort {
   return initializeTestEditableEditor({
     definition: { ...testEditableEditorDefinition, ...extra, typingTriggers },
     snapshot: createTestEditorSnapshot([
-      { id: blockId, type: "paragraph", text },
+      { id: blockId, type: "textBlock", text },
     ]),
     onChange,
-  }) as EditorRuntimePort;
+  }) as EditableEditorRuntimePort;
 }
 
 function settleCaret(
-  editor: EditorRuntimePort,
+  editor: EditableEditorRuntimePort,
   blockId: BlockId,
   offset: number,
 ): void {
   const anchor = createWebSelectionTextAnchorAtOffset({
     contentRuntime: editor.contentRuntime,
     blockId,
-    blockType: "paragraph",
+    blockType: "textBlock",
     textOffset: offset,
   });
   if (!anchor.ok) throw new Error("Could not create text anchor");
@@ -703,7 +703,7 @@ function settleCaret(
 }
 
 function typeAtCommittedSelection(
-  editor: EditorRuntimePort,
+  editor: EditableEditorRuntimePort,
   text: string,
 ): boolean {
   const canonical = editor.selectionController.canonical.getSnapshot();
@@ -752,7 +752,7 @@ function typeAtCommittedSelection(
   ).ok;
 }
 
-function readRootPlainTexts(editor: EditorRuntimePort): readonly string[] {
+function readRootPlainTexts(editor: EditableEditorRuntimePort): readonly string[] {
   return editor.getRootBlockIds().flatMap((rootId) => {
     const block = editor.getBlock(rootId);
     return !block || block.tombstone
@@ -762,27 +762,27 @@ function readRootPlainTexts(editor: EditorRuntimePort): readonly string[] {
 }
 
 function createTwoTextFragment(
-  editor: EditorRuntimePort,
+  editor: EditableEditorRuntimePort,
 ): CanonicalBlockFragment {
   const wrapperId = "two-text-wrapper" as BlockId;
   const firstId = "two-text-first" as BlockId;
   const secondId = "two-text-second" as BlockId;
   return createCanonicalBlockFragment({
     blocks: [
-      { id: wrapperId, type: "callout", parentId: null },
+      { id: wrapperId, type: "containerWrapper", parentId: null },
       {
         id: firstId,
-        type: "paragraph",
+        type: "textBlock",
         parentId: wrapperId,
-        content: createBlockRichTextContentFromPlainText("paragraph", ""),
+        content: createBlockRichTextContentFromPlainText("textBlock", ""),
         plainText: "",
       },
       {
         id: secondId,
-        type: "heading",
+        type: "alternateTextBlock",
         parentId: wrapperId,
         metadata: { level: 2 },
-        content: createBlockRichTextContentFromPlainText("heading", ""),
+        content: createBlockRichTextContentFromPlainText("alternateTextBlock", ""),
         plainText: "",
       },
     ],

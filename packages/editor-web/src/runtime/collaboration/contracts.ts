@@ -62,8 +62,7 @@ export type RemoteTransactionSelectionResult =
   | { readonly status: "stale"; readonly subject: CollaborationSubjectKey }
   | { readonly status: "duplicate"; readonly subject: CollaborationSubjectKey }
   | { readonly status: "ignored-invalid-envelope" }
-  | { readonly status: "ignored-no-author" }
-  | { readonly status: "ignored-read-mode" };
+  | { readonly status: "ignored-no-author" };
 
 export type RemoteTransactionResult =
   | {

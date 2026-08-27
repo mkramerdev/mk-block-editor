@@ -8,8 +8,8 @@ import {
   type SelectionController,
 } from "@repo/editor-react/selection";
 import type { EditorContentRuntime } from "@repo/editor-core/content";
-import type { EditorDefinition } from "../../../runtime/definition/contracts.ts";
-import type { AnyEditorRuntimePort } from "../../../runtime/document/render-port.ts";
+import type { EditableEditorDefinition } from "../../../runtime/definition/contracts.ts";
+import type { EditableEditorRuntimePort } from "../../../runtime/document/render-port.ts";
 import type { EditorBlockDomRegistryReader } from "../../blocks/block-dom-registry.ts";
 import { resolveWebSelectionTextAnchorPoint } from "../anchors/text-anchor.ts";
 import type {
@@ -22,10 +22,10 @@ import { useCanonicalCopyEvents } from "./use-canonical-copy-events.ts";
 import { useNativeSelectionSynchronization } from "./native-selection-synchronization.ts";
 
 export interface UseGlobalSelectionOptions {
-  readonly definition: EditorDefinition;
+  readonly definition: EditableEditorDefinition;
   readonly listElement: HTMLDivElement | null;
   readonly blockDom: EditorBlockDomRegistryReader;
-  readonly editor: AnyEditorRuntimePort;
+  readonly editor: EditableEditorRuntimePort;
   readonly contentRuntime: EditorContentRuntime;
   readonly selectionController: SelectionController;
 }
@@ -143,7 +143,7 @@ function useCaptureStructuralSelection(
         textAnchorResolver,
       });
       if (!resolved.ok) return null;
-      const range = resolveStructuralEditRange({
+      const genericRange = resolveStructuralEditRange({
         snapshot: resolved.snapshot,
         graph: options.editor,
         graphRevision,
@@ -151,6 +151,15 @@ function useCaptureStructuralSelection(
         readBlockContent: (blockId, blockType) =>
           options.contentRuntime.readBlockProjection(blockId, blockType),
       });
+      const range = genericRange
+        ? (options.definition.selectionFragment?.resolveStructuralEditRange?.({
+            snapshot: resolved.snapshot,
+            range: genericRange,
+            graph: options.editor,
+            readBlockContent: (blockId, blockType) =>
+              options.contentRuntime.readBlockProjection(blockId, blockType),
+          }) ?? genericRange)
+        : null;
       if (!range) return null;
       return {
         captured,
@@ -166,6 +175,7 @@ function useCaptureStructuralSelection(
     [
       options.contentRuntime,
       options.definition.blocks,
+      options.definition.selectionFragment,
       options.editor,
       options.selectionController,
       textAnchorResolver,

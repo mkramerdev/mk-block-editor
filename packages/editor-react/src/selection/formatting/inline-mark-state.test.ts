@@ -17,7 +17,7 @@ describe("current selection inline mark state", () => {
       graphRevision: 4,
       inlineMarks: primitiveInlineMarkDefinitions,
       blockDefinitions: {
-        paragraph: { kind: "text", type: "paragraph", rootLayout: "normal" },
+        textBlock: { kind: "text", type: "textBlock" },
       },
       readCanonicalTextProjection: () => null,
     });
@@ -42,10 +42,9 @@ describe("current selection inline mark state", () => {
         graphRevision: 4,
         inlineMarks: primitiveInlineMarkDefinitions,
         blockDefinitions: {
-          paragraph: {
+          textBlock: {
             kind: "text",
-            type: "paragraph",
-            rootLayout: "normal",
+            type: "textBlock",
           },
         },
         readCanonicalTextProjection: () => {
@@ -69,7 +68,7 @@ describe("current selection inline mark state", () => {
     const graph = selectionGraph(blockIds);
     const readCanonicalTextProjection = vi.fn((blockId: BlockId) =>
       createBlockRichTextContentFromPlainText(
-        "paragraph",
+        "textBlock",
         blockId === selected[0] ? "first" : "second",
       ),
     );
@@ -81,7 +80,7 @@ describe("current selection inline mark state", () => {
       graphRevision: 4,
       inlineMarks: primitiveInlineMarkDefinitions,
       blockDefinitions: {
-        paragraph: { kind: "text", type: "paragraph", rootLayout: "normal" },
+        textBlock: { kind: "text", type: "textBlock" },
       },
       readCanonicalTextProjection,
     });
@@ -106,7 +105,7 @@ function selectionGraph(
       blockIds.includes(blockId)
         ? {
             id: blockId,
-            type: "paragraph",
+            type: "textBlock",
             parentId: null,
             tombstone: null,
             metadataVersion: "1",
@@ -179,7 +178,7 @@ function committedSelection(
 function point(blockId: string, textOffset: number) {
   return {
     blockId: asBlockId(blockId),
-    blockType: "paragraph",
+    blockType: "textBlock",
     blockCategory: "text",
     textOffset,
     textAnchor: {
@@ -196,12 +195,12 @@ function range(blockId: string, startOffset: number, endOffset: number) {
   const id = asBlockId(blockId);
   return {
     blockId: id,
-    blockType: "paragraph",
+    blockType: "textBlock",
     category: "text",
     coverage: "partial",
     coverageResult: {
       blockId: id,
-      blockType: "paragraph",
+      blockType: "textBlock",
       modelId: "content",
       coverage: "partial",
       selected: "partial",

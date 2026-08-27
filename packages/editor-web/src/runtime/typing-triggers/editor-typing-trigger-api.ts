@@ -23,12 +23,12 @@ import type {
   EditorTypingTriggerFragmentReplacement,
   EditorTypingTriggerInlineReplacement,
 } from "../document/contracts.ts";
-import type { EditorRuntimePort } from "../document/render-port.ts";
+import type { EditableEditorRuntimePort } from "../document/render-port.ts";
 import type { EditorTypingTriggerSessionController } from "./session-controller.ts";
 import { resolveCanonicalCreationSelection } from "../../block-operations/canonical-creation-selection.ts";
 
 export function createEditorTypingTriggerApi(
-  editor: EditorRuntimePort,
+  editor: EditableEditorRuntimePort,
   controller: EditorTypingTriggerSessionController | null,
 ): Pick<
   EditableEditor,
@@ -63,7 +63,7 @@ export function createEditorTypingTriggerApi(
 }
 
 function replaceInlineContent(
-  editor: EditorRuntimePort,
+  editor: EditableEditorRuntimePort,
   controller: EditorTypingTriggerSessionController,
   replacement: EditorTypingTriggerInlineReplacement,
   _options: EditorContentMutationOptions | undefined,
@@ -151,7 +151,7 @@ function replaceInlineContent(
 }
 
 function replaceCanonicalFragment(
-  editor: EditorRuntimePort,
+  editor: EditableEditorRuntimePort,
   controller: EditorTypingTriggerSessionController,
   replacement: EditorTypingTriggerFragmentReplacement,
   _options: EditorContentMutationOptions | undefined,
@@ -231,7 +231,7 @@ function replaceCanonicalFragment(
 }
 
 function captureInlineContent(
-  editor: EditorRuntimePort,
+  editor: EditableEditorRuntimePort,
   input: readonly RichTextInlineNodeJson[],
 ): readonly RichTextInlineNodeJson[] | null {
   let captured: readonly RichTextInlineNodeJson[];

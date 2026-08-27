@@ -35,4 +35,20 @@ describe("First Draft view state provider", () => {
         .current[0],
     ).toBe(true);
   });
+
+  it("removes stale tab and toggle references when block identities disappear", () => {
+    const tabs = "tabs" as BlockId;
+    const pane = "pane" as BlockId;
+    const toggle = "toggle" as BlockId;
+    const store = createFirstDraftViewStateStore({
+      selectedTabs: { [tabs]: pane },
+      collapsedBlockIds: [toggle],
+    });
+
+    store.deleteBlockState(pane);
+    store.deleteBlockState(toggle);
+
+    expect(store.getSnapshot().selectedTabs).toEqual({});
+    expect(store.isBlockCollapsed(toggle)).toBe(false);
+  });
 });

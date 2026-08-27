@@ -8,8 +8,8 @@ import {
   BlockRenderer,
   type BlockRendererProps,
 } from "../document/blocks/block-renderer.tsx";
-import type { EditorRuntimePort } from "../runtime/document/render-port.ts";
-import type { Editor } from "../runtime/document/contracts.ts";
+import type { EditableEditorRuntimePort } from "../runtime/document/render-port.ts";
+import type { EditableEditor } from "../runtime/document/contracts.ts";
 import type { EditorWithBlockOperations } from "../block-operations/editor-extension.ts";
 import { testEditableEditorDefinition } from "./test-editor-definition.ts";
 
@@ -21,7 +21,9 @@ describe("BlockRenderer", () => {
     expectTypeOf<
       BlockRendererProps<EditorWithBlockOperations>["editor"]
     >().toHaveProperty("insertBlock");
-    expectTypeOf<BlockRendererProps<Editor>["editor"]>().not.toHaveProperty(
+    expectTypeOf<
+      BlockRendererProps<EditableEditor>["editor"]
+    >().not.toHaveProperty(
       "insertBlock",
     );
     expectTypeOf<
@@ -67,7 +69,7 @@ describe("BlockRenderer", () => {
     };
     const renderPort = {
       definition,
-    } as EditorRuntimePort;
+    } as EditableEditorRuntimePort;
     const block = createVersionedBlockRecord({
       id: blockId,
       type: blockType,
@@ -113,7 +115,7 @@ describe("BlockRenderer", () => {
     });
     const renderPort = {
       definition: testEditableEditorDefinition,
-    } as EditorRuntimePort;
+    } as EditableEditorRuntimePort;
     const selectionController = createSelectionController();
 
     expect(() =>

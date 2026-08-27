@@ -5,34 +5,25 @@ import type { VersionedBlock } from "@repo/editor-core/document";
 import { wholeSelection } from "@repo/editor-core/selection";
 import { commitCanonicalBlockCreation } from "./canonical-block-insertion.ts";
 
-const renderer = () => null;
 const definitions: Readonly<Record<string, BlockDefinition>> = {
-  paragraph: {
+  textBlock: {
     kind: "text",
-    type: "paragraph",
-    renderer,
-    rootLayout: "normal",
+    type: "textBlock",
   },
-  divider: {
+  atomicBlock: {
     kind: "atomic",
-    type: "divider",
-    renderer,
-    rootLayout: "normal",
+    type: "atomicBlock",
   },
   boundary: {
     kind: "wrapper",
     type: "boundary",
-    renderer,
-    rootLayout: "full",
-    content: { required: ["paragraph"], additional: "paragraph" },
+    content: { required: ["textBlock"], additional: "textBlock" },
     contentBoundary: true,
-    defaultContent: "paragraph",
+    defaultContent: "textBlock",
   },
   selectableWrapper: {
     kind: "wrapper",
     type: "selectableWrapper",
-    renderer,
-    rootLayout: "normal",
     selection: wholeSelection(),
     content: { required: [] },
     contentBoundary: false,
@@ -40,8 +31,6 @@ const definitions: Readonly<Record<string, BlockDefinition>> = {
   passiveWrapper: {
     kind: "wrapper",
     type: "passiveWrapper",
-    renderer,
-    rootLayout: "normal",
     content: { required: [] },
     contentBoundary: false,
   },
@@ -49,7 +38,7 @@ const definitions: Readonly<Record<string, BlockDefinition>> = {
 const sourceId = asBlockId("01890f07-1c00-7000-8000-000000000001");
 const source: VersionedBlock = {
   id: sourceId,
-  type: "paragraph",
+  type: "textBlock",
   parentId: null,
   tombstone: null,
   metadataVersion: "1",
@@ -99,7 +88,7 @@ describe("application-created canonical insertion", () => {
       graphRevision: 1,
       blockDefinitions: definitions,
       targetBlockId: sourceId,
-      blockType: "divider",
+      blockType: "atomicBlock",
       placement: "after",
       selection: "created",
     });
@@ -116,7 +105,7 @@ describe("application-created canonical insertion", () => {
       end: { kind: "block" },
     });
     expect(fragment.blocks[0]).toMatchObject({
-      type: "divider",
+      type: "atomicBlock",
       parentId: null,
     });
     expect(fragment.blocks[0].id).not.toBe(sourceId);
@@ -129,7 +118,7 @@ describe("application-created canonical insertion", () => {
       graphRevision: 1,
       blockDefinitions: definitions,
       targetBlockId: sourceId,
-      blockType: "divider",
+      blockType: "atomicBlock",
       placement: "replace",
       selection: "created",
     });
@@ -153,7 +142,7 @@ describe("application-created canonical insertion", () => {
       graphRevision: 1,
       blockDefinitions: definitions,
       targetBlockId: sourceId,
-      blockType: "paragraph",
+      blockType: "textBlock",
       placement: "after",
       selection: "created",
     });
@@ -163,7 +152,7 @@ describe("application-created canonical insertion", () => {
       { parentId: null, childIndex: 1 },
       expect.objectContaining({
         blocks: expect.arrayContaining([
-          expect.objectContaining({ type: "paragraph", parentId: null }),
+          expect.objectContaining({ type: "textBlock", parentId: null }),
         ]),
       }),
     );

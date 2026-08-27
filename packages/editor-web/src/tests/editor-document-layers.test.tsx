@@ -6,12 +6,12 @@ import type { BlockId } from "@repo/editor-core/kernel";
 import { EditorDocument } from "../runtime/document/editor-document-component.tsx";
 import { useTestEditor as useEditor } from "./test-editor-initializers.ts";
 import type { EditorDocumentLayerRenderContext } from "../runtime/document/contracts.ts";
-import type { EditableEditor, Editor } from "../runtime/document/contracts.ts";
+import type { EditableEditor } from "../runtime/document/contracts.ts";
 import { createTestEditorSnapshot } from "./editor-snapshot-fixtures.ts";
 import { testEditableEditorDefinition } from "./test-editor-definition.ts";
 import { resolveEditorRuntimePort } from "../runtime/document/runtime-port-registry.ts";
 
-const blockId = "document-layer-paragraph" as BlockId;
+const blockId = "document-layer-textBlock" as BlockId;
 
 function LayerProbe({
   context,
@@ -33,12 +33,12 @@ function MountedEditor({
 }: {
   readonly name: string;
   readonly onContext: (context: EditorDocumentLayerRenderContext) => void;
-  readonly onEditor?: (editor: Editor) => void;
+  readonly onEditor?: (editor: EditableEditor) => void;
 }) {
   const editor = useEditor({
     definition: testEditableEditorDefinition,
     snapshot: createTestEditorSnapshot([
-      { id: blockId, type: "paragraph", text: name },
+      { id: blockId, type: "textBlock", text: name },
     ]),
   });
   onEditor(editor);
@@ -91,7 +91,7 @@ function StrictKeyboardEditor({
   const editor = useEditor({
     definition: testEditableEditorDefinition,
     snapshot: createTestEditorSnapshot([
-      { id: blockId, type: "paragraph", text: name },
+      { id: blockId, type: "textBlock", text: name },
     ]),
   }) as EditableEditor;
   onEditor(editor);
@@ -131,7 +131,7 @@ describe("direct editor document layers", () => {
       | undefined;
     expect(context?.editor.geometry).toBeDefined();
     expect(context?.editor).toBe(onEditor.mock.calls[0]?.[0]);
-    expect(context?.editor.getBlock(blockId)?.type).toBe("paragraph");
+    expect(context?.editor.getBlock(blockId)?.type).toBe("textBlock");
     expect(Object.keys(context ?? {}).sort()).toStrictEqual([
       "editor",
       "interactions",
@@ -240,7 +240,7 @@ describe("direct editor document layers", () => {
     const runtime = resolveEditorRuntimePort(firstEditor);
     const ordinaryOrCanonicalRouting = vi.spyOn(
       runtime,
-      "ownsNativeFocusTarget",
+      "resolveNativeFocusTarget",
     );
     const selectionBefore = runtime.selectionController.getCanonicalSnapshot();
     const activeElementBefore = document.activeElement;

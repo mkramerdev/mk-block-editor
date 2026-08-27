@@ -8,12 +8,12 @@ import {
   type CommittedSelectionSnapshot,
 } from "@repo/editor-react/selection";
 import type { EditorContentBaseToken } from "@repo/editor-core/operations";
-import type { EditorRuntimePort } from "../../../runtime/document/render-port.ts";
+import type { EditableEditorRuntimePort } from "../../../runtime/document/render-port.ts";
 import { materializeCanonicalTextInput } from "./text-input-materialization.ts";
 import { canonicalTextLength } from "../hit-testing/canonical-text-offset.ts";
 
 export interface ApplyTextInsertionToCommittedSelectionInput {
-  readonly editor: EditorRuntimePort;
+  readonly editor: EditableEditorRuntimePort;
   readonly selection: CommittedSelectionSnapshot;
   readonly text: string;
   readonly expectedSelectionRevision: number;
@@ -154,7 +154,7 @@ export function applyTextInsertionToCommittedSelection(
 }
 
 function contentBasesAreCurrent(
-  editor: EditorRuntimePort,
+  editor: EditableEditorRuntimePort,
   expected: readonly EditorContentBaseToken[],
   graphRevision: number,
 ): boolean {

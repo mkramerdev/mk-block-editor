@@ -75,7 +75,7 @@ describe("document-owned inline atom portals", () => {
       editorView = createBlockLocalProseMirrorView({
         mount,
         blockId: inlineAtomBlockId,
-        blockType: "paragraph",
+        blockType: "textBlock",
         doc: {
           type: "doc",
           content: [
@@ -215,7 +215,7 @@ function acceptingAdapter(): ProseMirrorProposalAdapter {
     readContentBaseToken: () => ({
       graphRevision: 1,
       blockId: inlineAtomBlockId,
-      blockType: "paragraph" as const,
+      blockType: "textBlock" as const,
       contentRevision: 1,
     }),
     evaluateProposal: (proposal: ProseMirrorStateProposal) => ({

@@ -5,13 +5,17 @@
   "type": "module",
   "description": "Canonical Yjs content runtime and stable relative-position anchors.",
   "main": "./dist/api/index.js",
-  "types": "./src/api/index.ts",
+  "types": "./dist/api/index.d.ts",
   "exports": {
     ".": {
-      "types": "./src/api/index.ts",
+      "types": "./dist/api/index.d.ts",
       "import": "./dist/api/index.js"
     }
   },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "pnpm run clean && tsc -p tsconfig.build.json",
     "dev:compiler": "tsc -p tsconfig.build.json --watch",

@@ -13,10 +13,9 @@ import {
 const blockId = asBlockId("01890f07-1c00-7000-8000-000000000201");
 const otherBlockId = asBlockId("01890f07-1c00-7000-8000-000000000202");
 const blockDefinitions: Readonly<Record<string, BlockDefinition>> = {
-  paragraph: {
-    type: "paragraph",
+  textBlock: {
+    type: "textBlock",
     kind: "text",
-    rootLayout: "normal",
     selection: contentSelection(),
   },
 };
@@ -41,7 +40,7 @@ describe("canonical content commit preparation", () => {
     };
 
     const prepared = prepareLogicalContentOperations({
-      blockType: "paragraph",
+      blockType: "textBlock",
       content,
       operations: [insert(blockId, 5, "!")],
       options,
@@ -59,7 +58,7 @@ describe("canonical content commit preparation", () => {
   it("derives one inverse for a valid insert", () => {
     const operation = insert(blockId, 1, "B");
     const prepared = prepareLogicalContentOperations({
-      blockType: "paragraph",
+      blockType: "textBlock",
       content: richText("A"),
       operations: [operation],
       options,
@@ -76,7 +75,7 @@ describe("canonical content commit preparation", () => {
 
   it("orders multi-operation inverses for undo", () => {
     const prepared = prepareLogicalContentOperations({
-      blockType: "paragraph",
+      blockType: "textBlock",
       content: richText(""),
       operations: [insert(blockId, 0, "X"), insert(blockId, 1, "Y")],
       options,
@@ -90,7 +89,7 @@ describe("canonical content commit preparation", () => {
     let restored = prepared.content;
     for (const inverse of prepared.inverseOperations) {
       const next = applyLogicalContentOperationToRichTextDocument(
-        "paragraph",
+        "textBlock",
         restored,
         inverse,
         options,
@@ -105,7 +104,7 @@ describe("canonical content commit preparation", () => {
     const operation: EditorLogicalContentOperation = {
       kind: "deleteInlineRange",
       blockId,
-      blockType: "paragraph",
+      blockType: "textBlock",
       target: { kind: "text" },
       range: {
         from: { blockId, offset: 0 },
@@ -115,7 +114,7 @@ describe("canonical content commit preparation", () => {
 
     expect(
       prepareLogicalContentOperations({
-        blockType: "paragraph",
+        blockType: "textBlock",
         content: richText("A"),
         operations: [operation],
         options,
@@ -126,42 +125,40 @@ describe("canonical content commit preparation", () => {
     });
   });
 
-  it("records and inverts the effective rebased operation", () => {
-    const requested: EditorLogicalContentOperation = {
-      kind: "deleteInlineRange",
-      blockId,
-      blockType: "paragraph",
-      target: { kind: "text" },
-      range: {
-        from: { blockId, offset: 0 },
-        to: { blockId, offset: 2 },
-      },
-      deletedContent: [{ type: "text", text: "bc" }],
-    };
-    const prepared = prepareLogicalContentOperations({
-      blockType: "paragraph",
-      content: richText("abcabc"),
-      operations: [requested],
-      origin: "undo",
-      options,
-    });
-    if (!prepared.ok) throw new Error(prepared.message);
+  it.each(["undo", "redo"] as const)(
+    "rejects mismatched expected content for %s without relocating it",
+    (origin) => {
+      const requested: EditorLogicalContentOperation = {
+        kind: "deleteInlineRange",
+        blockId,
+        blockType: "textBlock",
+        target: { kind: "text" },
+        range: {
+          from: { blockId, offset: 0 },
+          to: { blockId, offset: 2 },
+        },
+        deletedContent: [{ type: "text", text: "bc" }],
+      };
+      const prepared = prepareLogicalContentOperations({
+        blockType: "textBlock",
+        content: richText("abcabc"),
+        operations: [requested],
+        origin,
+        options,
+      });
 
-    expect(prepared.operations[0]).toMatchObject({
-      range: { from: { offset: 1 }, to: { offset: 3 } },
-    });
-    expect(prepared.inverseOperations[0]).toMatchObject({
-      kind: "insertInlineContent",
-      position: { offset: 1 },
-    });
-    expect(prepared.content).toStrictEqual(richText("aabc"));
-  });
+      expect(prepared).toEqual({
+        ok: false,
+        message: "Logical content operation is inapplicable",
+      });
+    },
+  );
 
   it("rejects duplicate, incoherent, and syntactically invalid changes", () => {
     const baseToken = {
       graphRevision: 1,
       blockId,
-      blockType: "paragraph",
+      blockType: "textBlock",
       contentRevision: 0,
     } as const;
     const operation = insert(blockId, 0, "X");
@@ -209,7 +206,7 @@ function insert(block: typeof blockId, offset: number, text: string) {
   return {
     kind: "insertInlineContent" as const,
     blockId: block,
-    blockType: "paragraph" as const,
+    blockType: "textBlock" as const,
     target: { kind: "text" as const },
     position: { blockId: block, offset },
     content: [{ type: "text" as const, text }],
@@ -217,5 +214,5 @@ function insert(block: typeof blockId, offset: number, text: string) {
 }
 
 function richText(value: string) {
-  return createBlockRichTextContentFromPlainText("paragraph", value);
+  return createBlockRichTextContentFromPlainText("textBlock", value);
 }

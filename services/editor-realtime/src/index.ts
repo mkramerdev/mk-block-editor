@@ -38,5 +38,8 @@ process.once("SIGTERM", () => {
 
 export { loadEditorRealtimeConfig } from "./config.ts";
 export { startEditorRealtimeServer } from "./server.ts";
-export type { EditorRealtimeConfig } from "./config.ts";
+export type {
+  EditorRealtimeConfig,
+  EditorRealtimeLimits,
+} from "./config.ts";
 export type { EditorRealtimeServer } from "./server.ts";

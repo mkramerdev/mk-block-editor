@@ -7,14 +7,17 @@ import {
   createSelectionController,
   readEditorBlockSelectionTarget,
   type EditorSelectionGraphReader,
+  type EditorSelectionTextAnchorResolver,
   type SelectionController,
 } from "@repo/editor-react/selection";
 import { describe, expect, it, vi } from "vitest";
 import type { EditorWebContentRuntime } from "../../../runtime/content/content-runtime.ts";
-import type { EditorRuntimePort } from "../../../runtime/document/render-port.ts";
+import type { EditableEditorRuntimePort } from "../../../runtime/document/render-port.ts";
 import type { EditorBlockDomRegistryReader } from "../../blocks/block-dom-registry.ts";
 import * as pointerHitTesting from "../hit-testing/dom-selection-hit-testing.ts";
 import { useGlobalSelectionGestures } from "./global-selection-gestures.ts";
+import { useNativeSelectionSynchronization } from "./native-selection-synchronization.ts";
+import { createEditorTextGestureArbitration } from "./text-gesture-arbitration.tsx";
 
 describe("global selection gesture ownership", () => {
   it("settles Control+A once at the canonical rich-content end across blocks", () => {
@@ -27,7 +30,7 @@ describe("global selection gesture ownership", () => {
           type: "doc" as const,
           content: [
             {
-              type: "paragraph" as const,
+              type: "textBlock" as const,
               content: [{ type: "text", text: "ASCII" }],
             },
           ],
@@ -39,7 +42,7 @@ describe("global selection gesture ownership", () => {
           type: "doc" as const,
           content: [
             {
-              type: "paragraph" as const,
+              type: "textBlock" as const,
               content: [
                 { type: "hard_break" as const },
                 {
@@ -62,7 +65,7 @@ describe("global selection gesture ownership", () => {
         contents.has(blockId)
           ? {
               id: blockId,
-              type: "paragraph",
+              type: "textBlock",
               parentId: null,
               tombstone: null,
               metadataVersion: "1",
@@ -84,16 +87,16 @@ describe("global selection gesture ownership", () => {
       ...documentInputRuntimeStub(),
       ...graph,
       editable: true,
-      definition: { blocks: { paragraph: { kind: "text" } } },
+      definition: { blocks: { textBlock: { kind: "text" } } },
       getSelectionGraphRevision: () => 9,
       requestTextPresentation: requestPresentation,
       blurEditor: vi.fn(),
-    } as unknown as EditorRuntimePort;
+    } as unknown as EditableEditorRuntimePort;
     const contentRuntime = {
       readBlockProjection: (blockId: BlockId) => contents.get(blockId) ?? null,
       acquireBlockContent: (
         blockId: BlockId,
-        blockType: "paragraph",
+        blockType: "textBlock",
         reason: "canonical-transaction",
       ) => ({
         blockId,
@@ -127,6 +130,7 @@ describe("global selection gesture ownership", () => {
         selectionController: controller,
         captureStructuralSelection: vi.fn(() => null),
         documentLayerKeyboard: unhandledDocumentLayerKeyboard,
+        textGestureArbitration: createEditorTextGestureArbitration(),
         onTransientPointerPaintChange: vi.fn(),
       }),
     );
@@ -196,7 +200,10 @@ describe("global selection gesture ownership", () => {
 
     expect(down.defaultPrevented).toBe(true);
     expect(fixture.setPointerCapture).not.toHaveBeenCalled();
-    expect(fixture.list.dataset.editorTextSelectionDragActive).toBeUndefined();
+    expect(
+      fixture.options.selectionController.getPresentationSnapshot()
+        .nativeSelectionPaintMode,
+    ).toBe("hidden-for-global-selection");
     expect(fixture.extendSelection).not.toHaveBeenCalled();
     expect(fixture.commitSelectionPoint).not.toHaveBeenCalled();
     expect(fixture.options.selectionController.getCanonicalSnapshot()).toEqual({
@@ -242,7 +249,10 @@ describe("global selection gesture ownership", () => {
       fixture.requestPresentation.mock.invocationCallOrder[0],
     ).toBeLessThan(fixture.releaseSettlementLease.mock.invocationCallOrder[0]!);
     expect(fixture.releasePointerCapture).not.toHaveBeenCalled();
-    expect(fixture.list.dataset.editorTextSelectionDragActive).toBeUndefined();
+    expect(
+      fixture.options.selectionController.getPresentationSnapshot()
+        .nativeSelectionPaintMode,
+    ).toBe("visible");
 
     const click = new MouseEvent("click", {
       bubbles: true,
@@ -450,14 +460,47 @@ describe("global selection gesture ownership", () => {
     dragFixture.dispose();
   });
 
-  it("installs the drag marker before capture and derives private drag paint", () => {
+  it("owns native presentation from accepted pointer-down through range settlement", () => {
     const fixture = pointerGestureFixture();
+    fixture.text.setAttribute("contenteditable", "true");
+    fixture.text.focus();
+    fixture.text.removeAttribute("contenteditable");
+    const nativeText = fixture.text.firstChild;
+    if (!(nativeText instanceof Text)) throw new Error("Missing fixture text");
+    installCollapsedNativeSelection(nativeText, 0);
+    fixture.options.selectionController.commitSelectionPoint(
+      fixture.point,
+      fixture.options.editor,
+      1,
+      { publication: { kind: "silent" }, cause: "focus" },
+    );
     const order: string[] = [];
     fixture.setPointerCapture.mockImplementation(() => {
-      expect(fixture.list.dataset.editorTextSelectionDragActive).toBe("true");
+      expect(
+        fixture.options.selectionController.getPresentationSnapshot()
+          .nativeSelectionPaintMode,
+      ).toBe("hidden-for-global-selection");
       order.push("capture");
     });
-    const hook = renderHook(() => useGlobalSelectionGestures(fixture.options));
+    const modes: string[] = [];
+    fixture.options.selectionController.presentation.subscribe(() => {
+      modes.push(
+        fixture.options.selectionController.getPresentationSnapshot()
+          .nativeSelectionPaintMode,
+      );
+    });
+    const hook = renderHook(() => {
+      useNativeSelectionSynchronization({
+        listElement: fixture.list,
+        editor: fixture.options.editor,
+        contentRuntime: fixture.options.contentRuntime,
+        selectionController: fixture.options.selectionController,
+        presentation:
+          fixture.options.selectionController.getPresentationSnapshot(),
+        textAnchorResolver: passthroughTextAnchorResolver,
+      });
+      useGlobalSelectionGestures(fixture.options);
+    });
 
     act(() =>
       fixture.text.dispatchEvent(
@@ -468,7 +511,16 @@ describe("global selection gesture ownership", () => {
         }),
       ),
     );
-    fixture.resolvePointerHit.mockReturnValueOnce({
+    expect(document.activeElement).toBe(fixture.text);
+    expect(document.getSelection()?.isCollapsed).toBe(true);
+    expect(nativePresentationMode(fixture.list)).toBe(
+      "hidden-for-global-selection",
+    );
+    expect(modes).toEqual(["hidden-for-global-selection"]);
+    expect(fixture.transientPaintChanged).not.toHaveBeenCalledWith(
+      expect.objectContaining({ primitives: expect.any(Array) }),
+    );
+    fixture.resolvePointerHit.mockReturnValue({
       shell: fixture.shell,
       target: fixture.target,
       textOffset: 1,
@@ -485,12 +537,26 @@ describe("global selection gesture ownership", () => {
     );
 
     expect(order).toEqual(["capture"]);
+    expect(document.activeElement).toBe(fixture.text);
+    expect(document.getSelection()?.isCollapsed).toBe(true);
+    expect(
+      fixture.options.selectionController.getPresentationSnapshot()
+        .nativeSelectionPaintMode,
+    ).toBe("hidden-for-global-selection");
+    expect(modes).toEqual(["hidden-for-global-selection"]);
     expect(fixture.transientPaintChanged).toHaveBeenLastCalledWith(
       expect.objectContaining({ primitives: expect.any(Array) }),
     );
-    expect(fixture.options.selectionController.getCanonicalSnapshot()).toEqual({
-      kind: "none",
-      revision: 0,
+    expect(
+      fixture.options.selectionController.getCanonicalSnapshot(),
+    ).toMatchObject({
+      kind: "document",
+      snapshot: {
+        documentSelection: {
+          anchor: { textOffset: 0 },
+          focus: { textOffset: 0 },
+        },
+      },
     });
     expect(
       fixture.options.selectionController.localPaint.getSnapshot(),
@@ -511,6 +577,17 @@ describe("global selection gesture ownership", () => {
 
     expect(fixture.requestPresentation).toHaveBeenCalledOnce();
     expect(fixture.transientPaintChanged).toHaveBeenLastCalledWith(null);
+    expect(
+      fixture.options.selectionController.getPresentationSnapshot()
+        .nativeSelectionPaintMode,
+    ).toBe("hidden-for-global-selection");
+    expect(
+      fixture.options.selectionController.localPaint.getSnapshot(),
+    ).toMatchObject({ kind: "range" });
+    expect(modes).toEqual([
+      "hidden-for-global-selection",
+      "hidden-for-global-selection",
+    ]);
     hook.unmount();
     fixture.dispose();
   });
@@ -638,7 +715,10 @@ describe("global selection gesture ownership", () => {
     expect(move.defaultPrevented).toBe(true);
     expect(fixture.setPointerCapture).not.toHaveBeenCalled();
     expect(fixture.extendSelection).not.toHaveBeenCalled();
-    expect(fixture.list.dataset.editorTextSelectionDragActive).toBeUndefined();
+    expect(
+      fixture.options.selectionController.getPresentationSnapshot()
+        .nativeSelectionPaintMode,
+    ).toBe("hidden-for-global-selection");
     hook.unmount();
     fixture.dispose();
   });
@@ -733,8 +813,19 @@ describe("global selection gesture ownership", () => {
 
   it("does not publish a drag lifecycle for a click", () => {
     const fixture = pointerGestureFixture();
+    const claimPresentation = vi.spyOn(
+      fixture.options.selectionController,
+      "claimTextPointerGesturePresentation",
+    );
     const onSelectionDragStart = vi.fn();
     const onSelectionDragEnd = vi.fn();
+    const modes: string[] = [];
+    fixture.options.selectionController.presentation.subscribe(() => {
+      modes.push(
+        fixture.options.selectionController.getPresentationSnapshot()
+          .nativeSelectionPaintMode,
+      );
+    });
     const hook = renderHook(() =>
       useGlobalSelectionGestures({
         ...fixture.options,
@@ -762,6 +853,17 @@ describe("global selection gesture ownership", () => {
 
     expect(onSelectionDragStart).not.toHaveBeenCalled();
     expect(onSelectionDragEnd).not.toHaveBeenCalled();
+    expect(claimPresentation).toHaveBeenCalledOnce();
+    expect(
+      fixture.options.selectionController.getPresentationSnapshot()
+        .nativeSelectionPaintMode,
+    ).toBe("visible");
+    expect(modes).toEqual([
+      "hidden-for-global-selection",
+      "hidden-for-global-selection",
+      "visible",
+    ]);
+    expect(fixture.transientPaintChanged).toHaveBeenLastCalledWith(null);
     hook.unmount();
     fixture.dispose();
   });
@@ -794,7 +896,7 @@ describe("global selection gesture ownership", () => {
     scrollContainer.remove();
   });
 
-  it.each(["pointercancel", "lostpointercapture", "unmount", "non-editable"])(
+  it.each(["pointercancel", "lostpointercapture", "unmount"])(
     "ends a started selection drag once on %s",
     (terminal) => {
       const fixture = pointerGestureFixture();
@@ -818,9 +920,6 @@ describe("global selection gesture ownership", () => {
           fixture.list.dispatchEvent(
             pointerEvent("lostpointercapture", { pointerId: 213 }),
           );
-        } else if (terminal === "non-editable") {
-          (fixture.options.editor as { editable: boolean }).editable = false;
-          hook.rerender();
         } else {
           hook.unmount();
         }
@@ -856,6 +955,69 @@ describe("global selection gesture ownership", () => {
     fixture.dispose();
   });
 
+  it("releases a registered nested-text session when activation rejects", () => {
+    const fixture = pointerGestureFixture();
+    const releasePresentation = vi.fn();
+    const claimPresentation =
+      fixture.options.selectionController.claimTextPointerGesturePresentation;
+    vi.spyOn(
+      fixture.options.selectionController,
+      "claimTextPointerGesturePresentation",
+    ).mockImplementation(() => {
+      const claim = claimPresentation();
+      return {
+        release: () => {
+          releasePresentation();
+          claim.release();
+        },
+      };
+    });
+    fixture.shell.dataset.editorBlockInternalSelectionHost = "true";
+    const cancel = vi.fn();
+    const unregister = fixture.options.textGestureArbitration.register(
+      fixture.shell,
+      {
+        begin: () => ({
+          shouldTransfer: () => false,
+          transfer: () => null,
+          cancel,
+        }),
+      },
+    );
+    fixture.focusText.mockReturnValueOnce({
+      status: "rejected",
+      reason: "native-focus-failed",
+    });
+    const hook = renderHook(() => useGlobalSelectionGestures(fixture.options));
+    const down = pointerEvent("pointerdown", {
+      pointerId: 211,
+      clientX: 10,
+      clientY: 10,
+    });
+
+    act(() => fixture.text.dispatchEvent(down));
+
+    expect(down.defaultPrevented).toBe(true);
+    expect(fixture.focusText).toHaveBeenCalledWith("text", {
+      offset: 0,
+      affinity: null,
+      preventScroll: true,
+    });
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(
+      fixture.list.dataset.editorNativeCaretPointerPending,
+    ).toBeUndefined();
+    expect(nativePresentationMode(fixture.list)).toBe("visible");
+    expect(releasePresentation).toHaveBeenCalledOnce();
+    expect(fixture.options.selectionController.getCanonicalSnapshot()).toEqual({
+      kind: "none",
+      revision: 0,
+    });
+    unregister();
+    hook.unmount();
+    fixture.dispose();
+  });
+
   it.each([
     "pointercancel",
     "Escape",
@@ -867,6 +1029,28 @@ describe("global selection gesture ownership", () => {
     "unmount",
   ])("leaves canonical selection and focus unchanged after %s", (terminal) => {
     const fixture = pointerGestureFixture();
+    const releasePresentation = vi.fn();
+    const claimPresentation =
+      fixture.options.selectionController.claimTextPointerGesturePresentation;
+    vi.spyOn(
+      fixture.options.selectionController,
+      "claimTextPointerGesturePresentation",
+    ).mockImplementation(() => {
+      const claim = claimPresentation();
+      return {
+        release: () => {
+          releasePresentation();
+          claim.release();
+        },
+      };
+    });
+    const modes: string[] = [];
+    fixture.options.selectionController.presentation.subscribe(() => {
+      modes.push(
+        fixture.options.selectionController.getPresentationSnapshot()
+          .nativeSelectionPaintMode,
+      );
+    });
     const publications = vi.fn();
     fixture.options.selectionController.subscribeStandaloneSettlements(
       publications,
@@ -940,16 +1124,29 @@ describe("global selection gesture ownership", () => {
     expect(fixture.nativeFocus).not.toHaveBeenCalled();
     expect(fixture.acquireBlockContent).not.toHaveBeenCalled();
     expect(fixture.extendSelection).not.toHaveBeenCalled();
+    expect(releasePresentation).toHaveBeenCalledOnce();
+    expect(modes).toEqual(["hidden-for-global-selection", "visible"]);
     if (terminal !== "unmount") hook.unmount();
     fixture.dispose();
   });
 
-  it.each(["pointerup", "pointercancel", "Escape", "unmount"])(
-    "releases capture before removing the drag marker on %s",
+  it.each([
+    "pointerup",
+    "pointercancel",
+    "lostpointercapture",
+    "Escape",
+    "window blur",
+    "graph invalidation",
+    "unmount",
+  ])(
+    "releases capture before handing transient presentation back on %s",
     (terminal) => {
       const fixture = pointerGestureFixture();
       fixture.releasePointerCapture.mockImplementation(() => {
-        expect(fixture.list.dataset.editorTextSelectionDragActive).toBe("true");
+        expect(
+          fixture.options.selectionController.getPresentationSnapshot()
+            .nativeSelectionPaintMode,
+        ).toBe("hidden-for-global-selection");
       });
       const hook = renderHook(() =>
         useGlobalSelectionGestures(fixture.options),
@@ -963,6 +1160,29 @@ describe("global selection gesture ownership", () => {
               bubbles: true,
               cancelable: true,
               key: "Escape",
+            }),
+          );
+        } else if (terminal === "window blur") {
+          window.dispatchEvent(new Event("blur"));
+        } else if (terminal === "graph invalidation") {
+          (
+            fixture.options.editor as unknown as {
+              getSelectionGraphRevision: () => number;
+            }
+          ).getSelectionGraphRevision = () => 2;
+          document.dispatchEvent(
+            pointerEvent("pointerup", {
+              pointerId: 12,
+              clientX: 20,
+              clientY: 10,
+            }),
+          );
+        } else if (terminal === "lostpointercapture") {
+          fixture.list.dispatchEvent(
+            pointerEvent("lostpointercapture", {
+              pointerId: 12,
+              clientX: 20,
+              clientY: 10,
             }),
           );
         } else if (terminal === "unmount") {
@@ -980,8 +1200,11 @@ describe("global selection gesture ownership", () => {
 
       expect(fixture.releasePointerCapture).toHaveBeenCalledOnce();
       expect(
-        fixture.list.dataset.editorTextSelectionDragActive,
-      ).toBeUndefined();
+        fixture.options.selectionController.getPresentationSnapshot()
+          .nativeSelectionPaintMode,
+      ).toBe("visible");
+      expect(nativePresentationMode(fixture.list)).toBe("visible");
+      expect(fixture.list.dataset.editorSelectionPaintVisible).toBeUndefined();
       expect(fixture.transientPaintChanged).toHaveBeenLastCalledWith(null);
       if (terminal !== "pointerup")
         expect(fixture.extendSelection).not.toHaveBeenCalled();
@@ -992,6 +1215,21 @@ describe("global selection gesture ownership", () => {
 
   it("cancels the pending gesture when explicit capture fails", () => {
     const fixture = pointerGestureFixture();
+    const releasePresentation = vi.fn();
+    const claimPresentation =
+      fixture.options.selectionController.claimTextPointerGesturePresentation;
+    vi.spyOn(
+      fixture.options.selectionController,
+      "claimTextPointerGesturePresentation",
+    ).mockImplementation(() => {
+      const claim = claimPresentation();
+      return {
+        release: () => {
+          releasePresentation();
+          claim.release();
+        },
+      };
+    });
     fixture.setPointerCapture.mockImplementation(() => {
       throw new DOMException("Pointer is no longer active");
     });
@@ -1001,7 +1239,13 @@ describe("global selection gesture ownership", () => {
 
     expect(fixture.extendSelection).not.toHaveBeenCalled();
     expect(fixture.releasePointerCapture).not.toHaveBeenCalled();
-    expect(fixture.list.dataset.editorTextSelectionDragActive).toBeUndefined();
+    expect(
+      fixture.options.selectionController.getPresentationSnapshot()
+        .nativeSelectionPaintMode,
+    ).toBe("visible");
+    expect(nativePresentationMode(fixture.list)).toBe("visible");
+    expect(fixture.list.dataset.editorSelectionPaintVisible).toBeUndefined();
+    expect(releasePresentation).toHaveBeenCalledOnce();
     hook.unmount();
     fixture.dispose();
   });
@@ -1042,7 +1286,10 @@ describe("global selection gesture ownership", () => {
     expect(fixture.transientPaintChanged).toHaveBeenLastCalledWith(
       expect.objectContaining({ primitives: expect.any(Array) }),
     );
-    expect(fixture.list.dataset.editorTextSelectionDragActive).toBe("true");
+    expect(
+      fixture.options.selectionController.getPresentationSnapshot()
+        .nativeSelectionPaintMode,
+    ).toBe("hidden-for-global-selection");
     hook.unmount();
     fixture.dispose();
   });
@@ -1097,9 +1344,7 @@ describe("global selection gesture ownership", () => {
       expect(fixture.setPointerCapture).not.toHaveBeenCalled();
       expect(fixture.extendSelection).not.toHaveBeenCalled();
       expect(fixture.requestPresentation).not.toHaveBeenCalled();
-      expect(
-        fixture.list.dataset.editorTextSelectionDragActive,
-      ).toBeUndefined();
+      expect(nativePresentationMode(fixture.list)).toBe("visible");
       expect(
         fixture.options.selectionController.getCanonicalSnapshot(),
       ).toEqual(expect.objectContaining({ kind: "none" }));
@@ -1293,6 +1538,164 @@ describe("global selection gesture ownership", () => {
     fixture.dispose();
   });
 
+  it("rejects a native caret relocated into the editor after an external pointerdown", () => {
+    const fixture = pointerGestureFixture();
+    const outside = document.createElement("button");
+    document.body.append(outside);
+    const hook = renderHook(() => {
+      useNativeSelectionSynchronization({
+        listElement: fixture.list,
+        editor: fixture.options.editor,
+        contentRuntime: fixture.options.contentRuntime,
+        selectionController: fixture.options.selectionController,
+        presentation:
+          fixture.options.selectionController.getPresentationSnapshot(),
+        textAnchorResolver: passthroughTextAnchorResolver,
+      });
+      useGlobalSelectionGestures(fixture.options);
+    });
+
+    act(() => {
+      fixture.text.dispatchEvent(
+        pointerEvent("pointerdown", {
+          pointerId: 70,
+          clientX: 10,
+          clientY: 10,
+        }),
+      );
+      document.dispatchEvent(
+        pointerEvent("pointerup", {
+          pointerId: 70,
+          clientX: 10,
+          clientY: 10,
+        }),
+      );
+    });
+    const textNode = fixture.text.firstChild;
+    if (!(textNode instanceof Text)) throw new Error("Missing fixture text");
+    installCollapsedNativeSelection(textNode, 0);
+    const publications = vi.fn();
+    fixture.options.selectionController.subscribeStandaloneSettlements(
+      publications,
+    );
+
+    const outsideDown = pointerEvent("pointerdown", {
+      pointerId: 71,
+      clientX: 900,
+      clientY: 500,
+    });
+    act(() => outside.dispatchEvent(outsideDown));
+
+    expect(outsideDown.defaultPrevented).toBe(false);
+    expect(
+      fixture.options.selectionController.getCanonicalSnapshot(),
+    ).toMatchObject({ kind: "none" });
+    expect(publications).toHaveBeenCalledOnce();
+    expect(publications).toHaveBeenLastCalledWith({ kind: "none" });
+
+    act(() => {
+      installCollapsedNativeSelection(textNode, 4);
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+
+    expect(
+      fixture.options.selectionController.getCanonicalSnapshot(),
+    ).toMatchObject({ kind: "none" });
+    expect(publications).toHaveBeenCalledOnce();
+
+    const secondOutsideDown = pointerEvent("pointerdown", {
+      pointerId: 73,
+      clientX: 20,
+      clientY: 700,
+    });
+    act(() => {
+      outside.dispatchEvent(secondOutsideDown);
+      installCollapsedNativeSelection(textNode, 8);
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+
+    expect(secondOutsideDown.defaultPrevented).toBe(false);
+    expect(
+      fixture.options.selectionController.getCanonicalSnapshot(),
+    ).toMatchObject({ kind: "none" });
+    expect(publications).toHaveBeenCalledOnce();
+
+    act(() => {
+      fixture.text.dispatchEvent(
+        pointerEvent("pointerdown", {
+          pointerId: 72,
+          clientX: 10,
+          clientY: 10,
+        }),
+      );
+      document.dispatchEvent(
+        pointerEvent("pointerup", {
+          pointerId: 72,
+          clientX: 10,
+          clientY: 10,
+        }),
+      );
+    });
+
+    expect(
+      fixture.options.selectionController.getCanonicalSnapshot(),
+    ).toMatchObject({
+      kind: "document",
+      snapshot: {
+        documentSelection: { focus: { blockId: "text", textOffset: 0 } },
+      },
+    });
+    expect(publications).toHaveBeenCalledTimes(2);
+    expect(publications.mock.calls[1]?.[0]).toMatchObject({
+      kind: "selection",
+    });
+
+    act(() =>
+      outside.dispatchEvent(
+        pointerEvent("pointerdown", {
+          pointerId: 74,
+          clientX: 900,
+          clientY: 100,
+        }),
+      ),
+    );
+    expect(publications).toHaveBeenCalledTimes(3);
+    expect(publications).toHaveBeenLastCalledWith({ kind: "none" });
+
+    fixture.list.tabIndex = 0;
+    fixture.list.focus();
+    act(() => {
+      fixture.text.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          cancelable: true,
+          key: "Shift",
+        }),
+      );
+      installCollapsedNativeSelection(textNode, 6);
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+
+    expect(document.activeElement).toBe(fixture.list);
+    expect(
+      fixture.options.selectionController.getCanonicalSnapshot(),
+    ).toMatchObject({
+      kind: "document",
+      snapshot: {
+        documentSelection: { focus: { blockId: "text", textOffset: 6 } },
+      },
+    });
+    expect(publications).toHaveBeenCalledTimes(4);
+    expect(publications).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kind: "selection" }),
+    );
+
+    hook.unmount();
+    document.getSelection()?.removeAllRanges();
+    outside.remove();
+    fixture.dispose();
+  });
+
   it("keeps gesture ownership when React replaces the target during pointer-down", () => {
     const fixture = gestureFixture({ composition: null });
     const target = document.createElement("span");
@@ -1457,7 +1860,7 @@ describe("global selection gesture ownership", () => {
         roots.includes(blockId)
           ? {
               id: blockId,
-              type: "paragraph",
+              type: "textBlock",
               parentId: null,
               tombstone: null,
               metadataVersion: "1",
@@ -1519,13 +1922,13 @@ describe("global selection gesture ownership", () => {
         mapTextToVisualRow,
         readTextVisualRowBoundary: vi.fn(),
       },
-    } as unknown as EditorRuntimePort;
+    } as unknown as EditableEditorRuntimePort;
     const contentRuntime = {
       readBlockProjection: (blockId: BlockId) => ({
         type: "doc" as const,
         content: [
           {
-            type: "paragraph" as const,
+            type: "textBlock" as const,
             content: [
               {
                 type: "text" as const,
@@ -1537,7 +1940,7 @@ describe("global selection gesture ownership", () => {
       }),
       acquireBlockContent: (
         blockId: BlockId,
-        blockType: "paragraph",
+        blockType: "textBlock",
         reason: "canonical-transaction",
       ) => ({
         blockId,
@@ -1572,6 +1975,7 @@ describe("global selection gesture ownership", () => {
         selectionController: controller,
         captureStructuralSelection: vi.fn(() => null),
         documentLayerKeyboard: unhandledDocumentLayerKeyboard,
+        textGestureArbitration: createEditorTextGestureArbitration(),
         onTransientPointerPaintChange: vi.fn(),
       }),
     );
@@ -1662,10 +2066,12 @@ function pointerGestureFixture(affinity: "backward" | "forward" | null = null) {
   list.dataset.editorBlockListRoot = "true";
   const shell = document.createElement("div");
   shell.className = "editor-web-block";
+  shell.dataset.editorBlockShell = "true";
   shell.dataset.editorBlockId = "text";
   const text = document.createElement("div");
   text.className = "editor-web-text";
   text.dataset.editorTextRoot = "true";
+  text.textContent = "hello world";
   shell.append(text);
   list.append(shell);
   document.body.append(list);
@@ -1675,7 +2081,7 @@ function pointerGestureFixture(affinity: "backward" | "forward" | null = null) {
       blockId === ("text" as BlockId)
         ? {
             id: "text" as BlockId,
-            type: "paragraph",
+            type: "textBlock",
             parentId: null,
             tombstone: null,
             metadataVersion: "1",
@@ -1726,11 +2132,20 @@ function pointerGestureFixture(affinity: "backward" | "forward" | null = null) {
     },
   });
   const requestPresentation = vi.fn(() => true);
+  const focusText = vi.fn(
+    () =>
+      ({ status: "focused" }) as
+        | { readonly status: "focused" }
+        | {
+            readonly status: "rejected";
+            readonly reason: "native-focus-failed";
+          },
+  );
   const releaseSettlementLease = vi.fn();
   const acquireBlockContent = vi.fn(
     (
       blockId: BlockId,
-      blockType: "paragraph",
+      blockType: "textBlock",
       reason: "canonical-transaction",
     ) => ({ blockId, blockType, reason, release: releaseSettlementLease }),
   );
@@ -1750,12 +2165,13 @@ function pointerGestureFixture(affinity: "backward" | "forward" | null = null) {
     ...documentInputRuntimeStub(),
     ...graph,
     editable: true,
-    definition: { blocks: { paragraph: { kind: "text" } } },
+    definition: { blocks: { textBlock: { kind: "text" } } },
     getSelectionGraphRevision: () => 1,
     requestTextPresentation: requestPresentation,
+    focusText,
     blurEditor: vi.fn(),
     selectionController: controller,
-  } as unknown as EditorRuntimePort;
+  } as unknown as EditableEditorRuntimePort;
 
   return {
     list,
@@ -1765,6 +2181,7 @@ function pointerGestureFixture(affinity: "backward" | "forward" | null = null) {
     commitSelectionPoint,
     extendSelection,
     requestPresentation,
+    focusText,
     acquireBlockContent,
     createTextAnchorInContext,
     releaseSettlementLease,
@@ -1782,6 +2199,7 @@ function pointerGestureFixture(affinity: "backward" | "forward" | null = null) {
       selectionController: controller,
       captureStructuralSelection: vi.fn(() => null),
       documentLayerKeyboard: unhandledDocumentLayerKeyboard,
+      textGestureArbitration: createEditorTextGestureArbitration(),
       onTransientPointerPaintChange: transientPaintChanged,
     },
     dispose: () => {
@@ -1790,6 +2208,32 @@ function pointerGestureFixture(affinity: "backward" | "forward" | null = null) {
     },
   };
 }
+
+function installCollapsedNativeSelection(text: Text, offset: number): void {
+  const selection = document.getSelection();
+  const range = document.createRange();
+  range.setStart(text, offset);
+  range.collapse(true);
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+}
+
+function nativePresentationMode(list: HTMLElement) {
+  return list.dataset.editorNativeSelectionPaintMode ?? "visible";
+}
+
+const passthroughTextAnchorResolver: EditorSelectionTextAnchorResolver = {
+  resolveTextAnchor: (point) =>
+    point.textAnchor
+      ? {
+          ok: true,
+          blockId: point.blockId,
+          textAnchor: point.textAnchor,
+          textOffset: point.textOffset,
+          affinity: point.affinity,
+        }
+      : { ok: false, reason: "invalid", blockId: point.blockId },
+};
 
 function beginFixtureDrag(
   fixture: ReturnType<typeof pointerGestureFixture>,
@@ -1861,7 +2305,7 @@ function gestureFixture({
     editable: true,
     blurEditor,
     selectionController,
-  } as unknown as EditorRuntimePort;
+  } as unknown as EditableEditorRuntimePort;
 
   return {
     cancel,
@@ -1875,6 +2319,7 @@ function gestureFixture({
       selectionController,
       captureStructuralSelection,
       documentLayerKeyboard: unhandledDocumentLayerKeyboard,
+      textGestureArbitration: createEditorTextGestureArbitration(),
       onTransientPointerPaintChange: transientPaintChanged,
     },
     captureStructuralSelection,
@@ -1884,9 +2329,16 @@ function gestureFixture({
 
 function documentInputRuntimeStub() {
   return {
-    ownsNativeFocusTarget: () => true,
-    ownsActiveElement: () => true,
-    ownsActiveTextTarget: () => true,
+    resolveNativeFocusTarget: (target: EventTarget | null) =>
+      ({
+        kind: "text" as const,
+        blockId: (target instanceof HTMLElement
+          ? (target.closest<HTMLElement>("[data-editor-block-id]")?.dataset
+              .editorBlockId ?? "test-block")
+          : "test-block") as BlockId,
+        registeredTarget:
+          target instanceof HTMLElement ? target : document.body,
+      }),
     requestTextPresentation: vi.fn(),
     blurEditor: vi.fn(),
     commands: new Map(),

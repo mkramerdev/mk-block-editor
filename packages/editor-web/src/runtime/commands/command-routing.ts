@@ -4,13 +4,13 @@ import type {
   EditorCommandDefinition,
   EditorCommandExecutionResult,
   EditorCommandId,
-  EditorDefinition,
+  EditableEditorDefinition,
   EditorDocumentCommandDefinition,
   EditorDocumentCommandExecutionContext,
 } from "../definition/contracts.ts";
 
 export interface EditorDocumentCommandRuntimeContext {
-  readonly definition: EditorDefinition;
+  readonly definition: EditableEditorDefinition;
   readonly store: EditorExternalStore;
   readonly editor: EditableEditor;
 }

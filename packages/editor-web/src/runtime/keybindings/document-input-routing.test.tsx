@@ -113,11 +113,32 @@ describe("exact document command ownership", () => {
     const view = render(<RoutingHarness editor={editor} />);
     const editable = view.getByTestId("editable");
     editable.focus();
+    const resolveNativeFocusTarget = vi.spyOn(
+      editor.runtime,
+      "resolveNativeFocusTarget",
+    );
     const event = beforeInput("historyUndo");
     editable.dispatchEvent(event);
 
     expect(event.defaultPrevented).toBe(true);
     expect(editor.undo).toHaveBeenCalledOnce();
+    expect(resolveNativeFocusTarget).toHaveBeenCalledOnce();
+  });
+
+  it("bypasses native focus resolution for ordinary beforeinput", () => {
+    const editor = historyEditor();
+    const view = render(<RoutingHarness editor={editor} />);
+    const editable = view.getByTestId("editable");
+    editable.focus();
+    const resolveNativeFocusTarget = vi.spyOn(
+      editor.runtime,
+      "resolveNativeFocusTarget",
+    );
+    editable.dispatchEvent(beforeInput("insertText"));
+
+    expect(resolveNativeFocusTarget).not.toHaveBeenCalled();
+    expect(editor.undo).not.toHaveBeenCalled();
+    expect(editor.redo).not.toHaveBeenCalled();
   });
 });
 
@@ -155,13 +176,29 @@ function RoutingHarness({
       list.ownerDocument,
       {
         list,
+        revokeNativeSelectionOwnership: () => undefined,
         releaseInteraction: () => undefined,
         pointerdown: () => undefined,
         pointermove: () => undefined,
         pointerup: () => undefined,
         pointercancel: () => undefined,
-        beforeinput: input.beforeinput,
-        keydown: input.keydown,
+        beforeinput: (event) => {
+          if (
+            event.inputType !== "historyUndo" &&
+            event.inputType !== "historyRedo"
+          ) {
+            return;
+          }
+          input.beforeinput(
+            event,
+            editor.runtime.resolveNativeFocusTarget(event.target),
+          );
+        },
+        keydown: (event) =>
+          input.keydown(
+            event,
+            editor.runtime.resolveNativeFocusTarget(event.target),
+          ),
         keyup: () => undefined,
         scroll: () => undefined,
       },
@@ -194,7 +231,7 @@ function historyEditor(): TestEditor {
       commands: historyCommands,
       keybindings: historyKeybindings,
     },
-    snapshot: createTestEditorSnapshot([{ id: blockId, type: "divider" }]),
+    snapshot: createTestEditorSnapshot([{ id: blockId, type: "atomicBlock" }]),
   });
   const runtime = resolveEditorRuntimePort(editor);
   const undo = vi.fn(runtime.undo.bind(runtime));

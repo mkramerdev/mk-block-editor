@@ -5,18 +5,17 @@ operation, metadata, codec, and editing model used by editor implementations.
 
 ## Block definitions
 
-A product owns one `BlockDefinition` object for each block type it makes
-available. All definition fields live directly on that interface. The `kind`
-field selects runtime behavior:
+A product owns one `BlockDefinition` object for each opaque block type it makes
+available. The `kind` field selects the only canonical categories understood by
+the kernel:
 
-- `"text"` definitions may declare a `split` map.
-- `"atomic"` definitions may declare a text `replaceWith` target.
-- `"wrapper"` definitions declare `content`, `contentBoundary`, optional
-  `defaultContent`, and optional `underflow` behavior.
+- `"text"` stores one neutral block-local rich-text document.
+- `"atomic"` is selected and moved only as a whole block.
+- `"wrapper"` may declare generic child and parent constraints, content
+  boundaries, and default-child creation.
 
-The interface keeps `renderer: unknown` so this package has no React, DOM,
-ProseMirror, Yjs, or other platform dependency. A web runtime verifies that the
-renderer is callable before invoking it through its web renderer contract.
+Rendering and root layout are web-presentation concerns and are not part of the
+core definition.
 
 Definitions are runtime configuration. Persisted blocks contain their `type`
 string; definition objects are neither persisted nor reconstructed from
@@ -28,29 +27,21 @@ Share plain semantic fragments, then create complete platform definitions by
 attaching each runtime's renderer directly to its block definition:
 
 ```ts
-const paragraphSemantics: Omit<BlockDefinition, "renderer"> = {
+const textSemantics: BlockDefinition = {
   kind: "text",
   type: "noteText",
-  rootLayout: "normal",
-  split: { default: "noteText" },
 };
 
-const noticeSemantics: Omit<BlockDefinition, "renderer"> = {
+const noticeSemantics: BlockDefinition = {
   kind: "wrapper",
   type: "notice",
-  rootLayout: "normal",
   content: { required: ["noteText"] },
   contentBoundary: false,
 };
 
 export const productEditableBlockDefinitions = {
-  noteText: { ...paragraphSemantics, renderer: EditableNoteText },
-  notice: { ...noticeSemantics, renderer: EditableNotice },
-};
-
-export const productReadBlockDefinitions = {
-  noteText: { ...paragraphSemantics, renderer: ReadNoteText },
-  notice: { ...noticeSemantics, renderer: ReadNotice },
+  noteText: { ...textSemantics, rootLayout: "normal", renderer: EditableNoteText },
+  notice: { ...noticeSemantics, rootLayout: "normal", renderer: EditableNotice },
 };
 ```
 
@@ -64,10 +55,7 @@ When renderers are attached, use the web definition types rather than the
 platform-neutral `BlockDefinition` type:
 
 ```ts
-import type {
-  EditableEditorDefinition,
-  ReadEditorDefinition,
-} from "@repo/editor-web/document-runtime";
+import type { EditableEditorDefinition } from "@repo/editor-web/document-runtime";
 
 export const productEditableEditorDefinition = {
   blocks: productEditableBlockDefinitions,
@@ -77,13 +65,6 @@ export const productEditableEditorDefinition = {
   commands: productCommands,
   keybindings: productKeybindings,
 } satisfies EditableEditorDefinition;
-
-export const productReadEditorDefinition = {
-  blocks: productReadBlockDefinitions,
-  defaultRoot: "noteText",
-  inlineMarks: productInlineMarks,
-  inlineAtoms: productInlineAtoms,
-} satisfies ReadEditorDefinition;
 ```
 
 Generic boundaries accept
@@ -98,23 +79,24 @@ surrounding operation.
 `assertValidBlockDefinitions` checks the complete keyed object without copying,
 normalizing, or returning replacements. Validation includes:
 
-- collection key/type agreement, valid kinds and layouts, supported fields,
-  data, selection, metadata, and callbacks;
-- text split targets and behavior;
-- atomic replacement targets and text behavior;
-- wrapper child policy, boundary, default-child, and underflow rules;
+- collection key/type agreement and the three generic block kinds;
+- data, selection, metadata defaults, and metadata validation callbacks;
+- wrapper child and parent constraints, content boundaries, and default-child
+  construction;
 - referenced child types and terminating minimum construction.
 
-These cross-definition relationships intentionally remain runtime semantic
-validation.
+Concrete editing, conversion, replacement, list, compound-wrapper, and
+underflow policies are product concerns and are not part of a core definition.
 
 ## Structural editing
 
 `planBlockTreeCreation` recursively creates a minimum-valid subtree from the
-provided definition objects. Structural queries, Enter, Backspace, insertion,
-movement, deletion, metadata application, and document validation receive the
-same objects through structural parameters. They check `definition.kind`
-directly and explicitly verify optional fields required by the active kind.
+provided definition objects. The core editing API exposes generic transaction
+primitives for inserting, moving, removing, splitting, joining, replacing
+content or metadata, and setting selection. Products plan structural keyboard
+behavior through the registered command boundary and execute one validated
+generic transaction; the kernel does not choose product behavior from an
+opaque block type.
 
 ## Canonical detached content
 
@@ -154,7 +136,8 @@ Clipboard wire versions belong to the web boundary, not this model.
 - `document`: canonical block records and ordering queries.
 - `selection`: app-controlled block and text selection semantics.
 - `operations`: persisted logical operation validation.
-- `editing`: direct structural planners and transaction application.
+- `editing`: generic graph queries, creation planning, transaction primitives,
+  application, and validation.
 - `content`: rich-text, mark, inline-atom, and URL contracts.
 - `metadata`: generic block-record metadata behavior.
 - `codecs`: snapshots and external payload validation.

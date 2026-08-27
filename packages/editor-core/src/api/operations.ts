@@ -47,7 +47,19 @@ export type {
   PreparedLogicalContentTransition,
   PreparedLogicalContentOperations,
   PrepareLogicalContentOperationsOptions,
+  EditorContentReplayCapturePolicy,
 } from "../operations/runtime/content-commit.ts";
+export { operationAnchorRequirement } from "../operations/runtime/operation-replay.ts";
+export type {
+  EditorAnchorFreeOperationReplayStep,
+  EditorContentOperationReplayStep,
+  EditorOperationAnchor,
+  EditorOperationAnchorRequirement,
+  EditorOperationBlockStartDependency,
+  EditorOperationStepOutputDependency,
+  EditorOperationReplayBoundary,
+  EditorOperationReplayPlan,
+} from "../operations/runtime/operation-replay.ts";
 export { applyBlockGraphOperation } from "../operations/transactions/block-graph-application.ts";
 export type { BlockGraphReplayContext } from "../operations/transactions/block-graph-application.ts";
 export {

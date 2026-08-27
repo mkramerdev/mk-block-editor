@@ -41,6 +41,20 @@ export interface CanonicalBlockFragment {
   readonly end: CanonicalFragmentBoundary;
 }
 
+const canonicalBlockFragmentCandidate: unique symbol = Symbol(
+  "canonical-block-fragment-candidate",
+);
+
+/** Fresh outgoing fragment data that has not crossed a validation boundary. */
+export interface CanonicalBlockFragmentCandidate {
+  readonly kind: "canonical-block-fragment-candidate";
+  readonly blocks: readonly CanonicalBlockRecord[];
+  readonly rootBlockIds: readonly BlockId[];
+  readonly start: CanonicalFragmentBoundary;
+  readonly end: CanonicalFragmentBoundary;
+  readonly [canonicalBlockFragmentCandidate]: true;
+}
+
 export interface CreateCanonicalBlockRecordOptions {
   readonly id?: BlockId;
   readonly type: BlockType;
@@ -60,6 +74,11 @@ export interface CreateCanonicalBlockFragmentOptions extends CanonicalFragmentVa
   readonly start: CanonicalFragmentBoundary;
   readonly end: CanonicalFragmentBoundary;
 }
+
+export type CreateCanonicalBlockFragmentCandidateOptions = Omit<
+  CreateCanonicalBlockFragmentOptions,
+  keyof CanonicalFragmentValidationOptions
+>;
 
 export interface DuplicateCanonicalBlockSubtreesOptions extends CanonicalFragmentValidationOptions {
   readonly blocks: Readonly<Record<BlockId, Block>>;
@@ -135,6 +154,20 @@ export function createCanonicalBlockFragment(
   };
   assertValidCanonicalBlockFragment(fragment, options);
   return fragment;
+}
+
+/** Creates fresh outgoing data without asserting that it is a valid fragment. */
+export function createCanonicalBlockFragmentCandidate(
+  options: CreateCanonicalBlockFragmentCandidateOptions,
+): CanonicalBlockFragmentCandidate {
+  return {
+    kind: "canonical-block-fragment-candidate",
+    blocks: [...options.blocks],
+    rootBlockIds: [...options.rootBlockIds],
+    start: { ...options.start },
+    end: { ...options.end },
+    [canonicalBlockFragmentCandidate]: true,
+  };
 }
 
 /**

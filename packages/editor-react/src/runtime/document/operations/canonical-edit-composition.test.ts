@@ -17,25 +17,18 @@ import { resolveCanonicalEditComposition } from "./canonical-edit-composition.ts
 import { executeCanonicalBlockFragmentInsertion } from "./canonical-insertion.ts";
 import { executeStructuralEditComposition } from "./structural-composition.ts";
 
-const renderer = () => null;
 const definitions: Readonly<Record<string, BlockDefinition>> = {
-  paragraph: {
+  textBlock: {
     kind: "text",
-    type: "paragraph",
-    renderer,
-    rootLayout: "normal",
+    type: "textBlock",
   },
-  divider: {
+  atomicBlock: {
     kind: "atomic",
-    type: "divider",
-    renderer,
-    rootLayout: "normal",
+    type: "atomicBlock",
   },
   collection: {
     kind: "wrapper",
     type: "collection",
-    renderer,
-    rootLayout: "full",
     contentBoundary: true,
     content: { required: ["collectionGroup"], additional: "collectionGroup" },
     defaultContent: "collectionGroup",
@@ -43,8 +36,6 @@ const definitions: Readonly<Record<string, BlockDefinition>> = {
   collectionGroup: {
     kind: "wrapper",
     type: "collectionGroup",
-    renderer,
-    rootLayout: "full",
     contentBoundary: true,
     content: { required: ["collectionText"], additional: "collectionText" },
     defaultContent: "collectionText",
@@ -52,8 +43,6 @@ const definitions: Readonly<Record<string, BlockDefinition>> = {
   collectionText: {
     kind: "text",
     type: "collectionText",
-    renderer,
-    rootLayout: "normal",
   },
 };
 
@@ -169,7 +158,7 @@ describe("canonical structural edit composition", () => {
     expect(result?.joins).toBeUndefined();
     expect(result?.insertions?.[0]?.fragment.rootBlockIds).toHaveLength(2);
     expect(result?.insertions?.[0]?.fragment.blocks.at(-1)).toMatchObject({
-      type: "paragraph",
+      type: "textBlock",
       parentId: null,
       plainText: "R",
     });
@@ -198,7 +187,7 @@ describe("canonical structural edit composition", () => {
         {
           kind: "block",
           blockId: graph.block.id,
-          blockType: "paragraph",
+          blockType: "textBlock",
           parentId: null,
         },
       ],
@@ -222,7 +211,7 @@ describe("canonical structural edit composition", () => {
         {
           kind: "text",
           blockId: graph.block.id,
-          blockType: "paragraph",
+          blockType: "textBlock",
           parentId: null,
           from: 0,
           to: 0,
@@ -242,7 +231,7 @@ describe("canonical structural edit composition", () => {
       {
         kind: "block",
         blockId: graph.block.id,
-        blockType: "paragraph",
+        blockType: "textBlock",
         parentId: null,
       },
     ]);
@@ -280,7 +269,7 @@ describe("canonical structural edit composition", () => {
         expect.objectContaining({ type: "collectionText", plainText: "I" }),
         expect.objectContaining({
           id: suffixId,
-          type: "paragraph",
+          type: "textBlock",
           parentId: null,
           plainText: "R",
         }),
@@ -298,7 +287,7 @@ describe("canonical structural edit composition", () => {
         {
           kind: "text",
           blockId: graph.block.id,
-          blockType: "paragraph",
+          blockType: "textBlock",
           parentId: null,
           from: 1,
           to: 2,
@@ -605,9 +594,9 @@ describe("canonical structural edit composition", () => {
 });
 
 function graphWithText(text: string) {
-  const content = createBlockRichTextContentFromPlainText("paragraph", text);
+  const content = createBlockRichTextContentFromPlainText("textBlock", text);
   const record = createCanonicalBlockRecord({
-    type: "paragraph",
+    type: "textBlock",
     parentId: null,
     content,
     plainText: text,
@@ -692,11 +681,11 @@ function graphWithCollectionText(text: string) {
 
 function graphWithTexts(texts: readonly string[]) {
   const contents = texts.map((text) =>
-    createBlockRichTextContentFromPlainText("paragraph", text),
+    createBlockRichTextContentFromPlainText("textBlock", text),
   );
   const blocks: VersionedBlock[] = texts.map((text, index) => ({
     ...createCanonicalBlockRecord({
-      type: "paragraph",
+      type: "textBlock",
       parentId: null,
       content: contents[index],
       plainText: text,
@@ -723,9 +712,9 @@ function textFragment(
   text: string,
   boundary: "text" | "block",
 ): CanonicalBlockFragment {
-  const content = createBlockRichTextContentFromPlainText("paragraph", text);
+  const content = createBlockRichTextContentFromPlainText("textBlock", text);
   const record = createCanonicalBlockRecord({
-    type: "paragraph",
+    type: "textBlock",
     parentId: null,
     content,
     plainText: extractPlainTextFromRichTextDocument(content),
@@ -744,21 +733,21 @@ function twoTextBlockFragment(
   secondValue: string | RichTextDocumentNodeJson,
 ): CanonicalBlockFragment {
   const firstContent = createBlockRichTextContentFromPlainText(
-    "paragraph",
+    "textBlock",
     firstText,
   );
   const secondContent =
     typeof secondValue === "string"
-      ? createBlockRichTextContentFromPlainText("paragraph", secondValue)
+      ? createBlockRichTextContentFromPlainText("textBlock", secondValue)
       : secondValue;
   const first = createCanonicalBlockRecord({
-    type: "paragraph",
+    type: "textBlock",
     parentId: null,
     content: firstContent,
     plainText: extractPlainTextFromRichTextDocument(firstContent),
   });
   const second = createCanonicalBlockRecord({
-    type: "paragraph",
+    type: "textBlock",
     parentId: null,
     content: secondContent,
     plainText: extractPlainTextFromRichTextDocument(secondContent),
@@ -774,7 +763,7 @@ function twoTextBlockFragment(
 
 function atomicFragment(): CanonicalBlockFragment {
   const record = createCanonicalBlockRecord({
-    type: "divider",
+    type: "atomicBlock",
     parentId: null,
   });
   return createCanonicalBlockFragment({

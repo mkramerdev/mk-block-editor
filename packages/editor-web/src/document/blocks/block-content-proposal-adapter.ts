@@ -21,17 +21,15 @@ import {
   type EditorState,
   type EditorView,
 } from "@repo/editor-dom/prosemirror";
-import type { BlockLocalDocumentMappingOptions } from "@repo/editor-dom/schema";
 import { blockTextCoordinateCodec } from "@repo/editor-dom/caret";
 import type { EditorContentRuntime } from "@repo/editor-core/content";
-import type { EditorRuntimePort } from "../../runtime/document/render-port.ts";
+import type { EditableEditorRuntimePort } from "../../runtime/document/render-port.ts";
 
 export interface CreateActiveProseMirrorProposalAdapterOptions {
   readonly blockId: BlockId;
   readonly blockType: BlockType;
-  readonly editor: EditorRuntimePort;
+  readonly editor: EditableEditorRuntimePort;
   readonly contentRuntime: EditorContentRuntime;
-  readonly documentMapping?: BlockLocalDocumentMappingOptions;
   readonly consumeLocalMutationProvenance:
     | (() => EditorLocalMutationProvenance | null)
     | null;
@@ -335,7 +333,7 @@ export class ActiveProseMirrorProposalAdapter implements ProseMirrorProposalAdap
       ReturnType<EditorContentRuntime["readBlockProjection"]>
     >,
   ): EditorState {
-    const { blockId, blockType, documentMapping } = this.options;
+    const { blockId, blockType } = this.options;
     const state = createBlockLocalProseMirrorState({
       blockId,
       blockType,
@@ -343,7 +341,6 @@ export class ActiveProseMirrorProposalAdapter implements ProseMirrorProposalAdap
         content,
         blockType,
         view.state.schema,
-        documentMapping,
       ),
       schema: view.state.schema,
       plugins: view.state.plugins,

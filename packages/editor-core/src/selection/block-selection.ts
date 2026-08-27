@@ -66,6 +66,7 @@ export interface BlockSelectionWrapperFragmentDescriptor {
    */
   readonly inclusion?:
     | "complete-content"
+    | "selected-children"
     | "multiple-selected-children"
     | "never";
   /** Limit completeness checks to product-visible direct children. */

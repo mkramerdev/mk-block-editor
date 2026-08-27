@@ -1,367 +1,156 @@
-import { Children, useLayoutEffect, useState } from "react";
-import { act, render, within } from "@testing-library/react";
+import { useState } from "react";
+import { act, render } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { describe, expect, it, vi, type Mock } from "vitest";
 import { moveBlocks, removeBlocks } from "@repo/editor-core/editing";
-import { type BlockType } from "@repo/editor-core/document";
 import type { BlockId } from "@repo/editor-core/kernel";
 import { createBlockRecord } from "@repo/editor-core/metadata";
 import type { EditorImplementation } from "@repo/editor-react/editor";
 import type { BlockRendererProps } from "../api/block-renderer.ts";
 import type { EditableEditorDefinition } from "../runtime/definition/contracts.ts";
 import { EditorDocument } from "../runtime/document/editor-document-component.tsx";
-import { useTestEditor as useEditor } from "./test-editor-initializers.ts";
+import type { EditorChildOrderProjection } from "../runtime/document/contracts.ts";
+import { useTestEditor } from "./test-editor-initializers.ts";
 import { createTestEditorSnapshot } from "./editor-snapshot-fixtures.ts";
 import { testEditableEditorDefinition } from "./test-editor-definition.ts";
 
-const firstWrapperId = "ordinary-children-first-wrapper" as BlockId;
-const firstChildId = "ordinary-children-first" as BlockId;
-const secondChildId = "ordinary-children-second" as BlockId;
-const secondWrapperId = "ordinary-children-second-wrapper" as BlockId;
-const thirdChildId = "ordinary-children-third" as BlockId;
-const fourthChildId = "ordinary-children-fourth" as BlockId;
+const outerId = "neutral-outer" as BlockId;
+const nestedId = "neutral-nested" as BlockId;
+const childIds = ["neutral-a", "neutral-b", "neutral-c", "neutral-d"] as BlockId[];
+const [aId, bId, cId, dId] = childIds as [BlockId, BlockId, BlockId, BlockId];
+let instance = 0;
+const leafRuns = new Map<BlockId, Mock<() => void>>();
+const wrapperRuns = new Map<BlockId, Mock<() => void>>();
 
-let nextLeafInstance = 0;
-const leafRenderers = new Map<BlockId, Mock<() => void>>();
-
-function LeafRenderer({ block, children }: BlockRendererProps) {
-  const renderSpy = leafRenderers.get(block.id) ?? vi.fn();
-  leafRenderers.set(block.id, renderSpy);
-  renderSpy();
-  const [instance] = useState(() => `${block.id}:${++nextLeafInstance}`);
-  return (
-    <div
-      data-testid={`leaf-${block.id}`}
-      data-instance={instance}
-      data-child-count={Children.count(children)}
-      data-has-children={String(children !== undefined)}
-    />
-  );
+function run(map: Map<BlockId, Mock<() => void>>, id: BlockId) {
+  const spy = map.get(id) ?? vi.fn();
+  map.set(id, spy);
+  spy();
 }
 
-function SplitWrapperRenderer({ block, children }: BlockRendererProps) {
-  const elements = Children.toArray(children);
-  return (
-    <section data-testid={`wrapper-${block.id}`}>
-      {elements[0] ?? null}
-      <span data-testid="product-ui-between-children" />
-      <div hidden data-testid="hidden-wrapper-children">
-        {elements.slice(1)}
-      </div>
-    </section>
-  );
+function Leaf({ block, children }: BlockRendererProps) {
+  run(leafRuns, block.id);
+  const [identity] = useState(() => ++instance);
+  return <div data-testid={`leaf-${block.id}`} data-instance={identity} data-children={String(children !== undefined)} />;
 }
 
-function AllChildrenWrapperRenderer({ block, children }: BlockRendererProps) {
+function Wrapper({ block, children }: BlockRendererProps) {
+  run(wrapperRuns, block.id);
   return <section data-testid={`wrapper-${block.id}`}>{children}</section>;
 }
 
 const definition: EditableEditorDefinition = {
   ...testEditableEditorDefinition,
   blocks: {
-    ...testEditableEditorDefinition.blocks,
-    quote: {
-      ...testEditableEditorDefinition.blocks.quote!,
-      renderer: SplitWrapperRenderer,
-      content: { required: ["block"], additional: "block" },
-      defaultContent: "divider",
-    },
-    code: {
-      ...testEditableEditorDefinition.blocks.code!,
-      renderer: AllChildrenWrapperRenderer,
-      content: { required: ["block"], additional: "block" },
-      defaultContent: "video",
-    },
-    divider: {
-      ...testEditableEditorDefinition.blocks.divider!,
-      renderer: LeafRenderer,
-    },
-    image: {
-      ...testEditableEditorDefinition.blocks.image!,
-      renderer: LeafRenderer,
-    },
-    video: {
-      ...testEditableEditorDefinition.blocks.video!,
-      renderer: LeafRenderer,
-    },
-    audio: {
-      ...testEditableEditorDefinition.blocks.audio!,
-      renderer: LeafRenderer,
-    },
+    textBlock: { kind: "text", type: "textBlock", rootLayout: "normal", renderer: Leaf },
+    wrapperBlock: { kind: "wrapper", type: "wrapperBlock", rootLayout: "normal", contentBoundary: false, content: { required: [], additional: "block" }, renderer: Wrapper },
+    nestedWrapper: { kind: "wrapper", type: "nestedWrapper", rootLayout: "normal", contentBoundary: false, content: { required: [], additional: "block" }, renderer: Wrapper },
+    atomicBlock: { kind: "atomic", type: "atomicBlock", rootLayout: "normal", renderer: Leaf },
+    alternateAtomicBlock: { kind: "atomic", type: "alternateAtomicBlock", rootLayout: "normal", renderer: Leaf },
   },
+  defaultRoot: "textBlock",
 };
 
-const blockSpecs = [
-  {
-    id: firstWrapperId,
-    type: "quote" as BlockType,
-    parentId: null,
-  },
-  {
-    id: firstChildId,
-    type: "divider" as BlockType,
-    parentId: firstWrapperId,
-  },
-  {
-    id: secondChildId,
-    type: "image" as BlockType,
-    parentId: firstWrapperId,
-  },
-  {
-    id: secondWrapperId,
-    type: "code" as BlockType,
-    parentId: null,
-  },
-  {
-    id: thirdChildId,
-    type: "video" as BlockType,
-    parentId: secondWrapperId,
-  },
-  {
-    id: fourthChildId,
-    type: "audio" as BlockType,
-    parentId: secondWrapperId,
-  },
+const records = [
+  { id: outerId, type: "wrapperBlock", parentId: null },
+  { id: aId, type: "atomicBlock", parentId: outerId },
+  { id: bId, type: "alternateAtomicBlock", parentId: outerId },
+  { id: nestedId, type: "nestedWrapper", parentId: outerId },
+  { id: cId, type: "atomicBlock", parentId: nestedId },
+  { id: dId, type: "alternateAtomicBlock", parentId: nestedId },
 ] as const;
 
-function createTraversalSnapshot() {
-  const snapshot = createTestEditorSnapshot(
-    blockSpecs.map(({ id, type }) => ({ id, type })),
-  );
+function snapshot() {
   return {
-    ...snapshot,
-    blocks: Object.fromEntries(
-      blockSpecs.map((block) => [
-        block.id,
-        createBlockRecord({
-          id: block.id,
-          type: block.type,
-          parentId: block.parentId,
-        }),
-      ]),
-    ),
-    rootBlockIds: [firstWrapperId, secondWrapperId],
-    childIdsByParentId: {
-      [firstWrapperId]: [firstChildId, secondChildId],
-      [secondWrapperId]: [thirdChildId, fourthChildId],
-    },
+    ...createTestEditorSnapshot(records.map(({ id, type }) => ({ id, type }))),
+    blocks: Object.fromEntries(records.map((block) => [block.id, createBlockRecord(block)])),
+    rootBlockIds: [outerId],
+    childIdsByParentId: { [outerId]: [aId, bId, nestedId], [nestedId]: [cId, dId] },
   };
 }
 
-function TestDocument({
-  captureEditor,
-}: {
-  readonly captureEditor: (editor: EditorImplementation) => void;
-}) {
-  const editor = useEditor({
-    definition,
-    snapshot: createTraversalSnapshot(),
-  });
-  captureEditor(editor as EditorImplementation);
-  return <EditorDocument editor={editor} />;
+function Document({ capture, projection, children }: { readonly capture: (editor: EditorImplementation) => void; readonly projection?: EditorChildOrderProjection; readonly children?: React.ReactNode }) {
+  const editor = useTestEditor({ definition, snapshot: snapshot() });
+  capture(editor as EditorImplementation);
+  return <EditorDocument editor={editor} childOrderProjection={projection}>{children}</EditorDocument>;
 }
 
-describe("recursive block traversal", () => {
-  it("composes ordered ordinary children and preserves identity across moves", () => {
-    nextLeafInstance = 0;
-    let editor: EditorImplementation | null = null;
-    const view = render(
-      <TestDocument captureEditor={(value) => (editor = value)} />,
-    );
-    const capturedEditor = requireEditor(editor);
-
-    const roots = view.container.querySelector(".editor-web-block-list");
-    expect(roots).not.toBeNull();
-    expect(
-      Array.from(roots!.children)
-        .filter(
-          (element) =>
-            element instanceof HTMLElement &&
-            element.dataset.editorBlockShell === "true",
-        )
-        .map((element) => (element as HTMLElement).dataset.editorBlockId),
-    ).toEqual([firstWrapperId, secondWrapperId]);
-
-    const firstWrapper = view.getByTestId(`wrapper-${firstWrapperId}`);
-    const secondWrapper = view.getByTestId(`wrapper-${secondWrapperId}`);
-    expect(
-      within(firstWrapper).getByTestId(`leaf-${firstChildId}`),
-    ).toBeTruthy();
-    expect(
-      within(firstWrapper).getByTestId(`leaf-${secondChildId}`),
-    ).toBeTruthy();
-    expect(
-      within(secondWrapper).getByTestId(`leaf-${thirdChildId}`),
-    ).toBeTruthy();
-    expect(
-      within(secondWrapper).getByTestId(`leaf-${fourthChildId}`),
-    ).toBeTruthy();
-    expect(view.getByTestId("product-ui-between-children")).toBeTruthy();
-    expect(view.getByTestId("hidden-wrapper-children")).toHaveAttribute(
-      "hidden",
-    );
-    for (const leaf of [
-      firstChildId,
-      secondChildId,
-      thirdChildId,
-      fourthChildId,
-    ]) {
-      expect(view.getByTestId(`leaf-${leaf}`)).toHaveAttribute(
-        "data-child-count",
-        "0",
-      );
-      expect(view.getByTestId(`leaf-${leaf}`)).toHaveAttribute(
-        "data-has-children",
-        "false",
-      );
-    }
-
-    const thirdInstance = view
-      .getByTestId(`leaf-${thirdChildId}`)
-      .getAttribute("data-instance");
-    act(() => {
-      const result = capturedEditor.executeStructuralTransaction({
-        origin: "block-list-children/reorder",
-        operations: [
-          moveBlocks({
-            blockIds: [thirdChildId],
-            sourcePlacement: {
-              parentId: secondWrapperId,
-              childIndex: 0,
-            },
-            destinationPlacement: {
-              parentId: secondWrapperId,
-              childIndex: 1,
-            },
-          }),
-        ],
-      });
-      if (!result.ok) throw new Error(JSON.stringify(result));
-    });
-    expect(
-      view.getByTestId(`leaf-${thirdChildId}`).getAttribute("data-instance"),
-    ).toBe(thirdInstance);
-    act(() => {
-      const result = editor!.executeStructuralTransaction({
-        origin: "block-list-children/reparent",
-        operations: [
-          moveBlocks({
-            blockIds: [firstChildId],
-            sourcePlacement: {
-              parentId: firstWrapperId,
-              childIndex: 0,
-            },
-            destinationPlacement: {
-              parentId: secondWrapperId,
-              childIndex: 2,
-            },
-          }),
-        ],
-      });
-      if (!result.ok) throw new Error(JSON.stringify(result));
-    });
-
-    expect(
-      within(firstWrapper).queryByTestId(`leaf-${firstChildId}`),
-    ).toBeNull();
-    expect(
-      within(secondWrapper).getAllByTestId(`leaf-${firstChildId}`),
-    ).toHaveLength(1);
-    expect(capturedEditor.getRootBlockIds()).toEqual([
-      firstWrapperId,
-      secondWrapperId,
-    ]);
-    expect(capturedEditor.getChildBlockIds(firstWrapperId)).toEqual([
-      secondChildId,
-    ]);
-    expect(capturedEditor.getChildBlockIds(secondWrapperId)).toEqual([
-      fourthChildId,
-      thirdChildId,
-      firstChildId,
-    ]);
-    expect(
-      [
-        ...capturedEditor.getRootBlockIds(),
-        ...capturedEditor.getChildBlockIds(firstWrapperId),
-        ...capturedEditor.getChildBlockIds(secondWrapperId),
-      ].sort(),
-    ).toEqual(blockSpecs.map((block) => block.id).sort());
-
-    view.unmount();
+describe("subscribed block shell traversal", () => {
+  it("renders opaque leading content, exact direct sequences, and one shell per block", () => {
+    const view = render(<Document capture={() => undefined}><aside data-testid="leading" /></Document>);
+    const list = view.container.querySelector(".editor-web-block-list")!;
+    expect(list.firstElementChild).toBe(view.getByTestId("leading"));
+    expect(list.querySelectorAll("[data-editor-block-shell='true']")).toHaveLength(records.length);
+    expect(view.getByTestId(`wrapper-${outerId}`).querySelectorAll(":scope > [data-editor-block-shell='true']")).toHaveLength(3);
+    expect(view.getByTestId(`wrapper-${nestedId}`).querySelectorAll(":scope > [data-editor-block-shell='true']")).toHaveLength(2);
+    for (const id of childIds) expect(view.getByTestId(`leaf-${id}`)).toHaveAttribute("data-children", "false");
   });
 
-  it("does not execute unrelated block renderers when root membership changes", () => {
-    nextLeafInstance = 0;
-    leafRenderers.clear();
-    const rootIds = Array.from(
-      { length: 128 },
-      (_, index) =>
-        `isolated-root-${String(index).padStart(3, "0")}` as BlockId,
-    );
-    const snapshot = createTestEditorSnapshot(
-      rootIds.map((id) => ({ id, type: "divider" as BlockType })),
-    );
+  it("moves projected keyed shells without executing renderers", () => {
+    leafRuns.clear(); wrapperRuns.clear();
+    const listeners = new Set<() => void>();
+    let projected: readonly BlockId[] | null = null;
+    const projection: EditorChildOrderProjection = {
+      subscribe(parentId, listener) { if (parentId === nestedId) listeners.add(listener); return () => listeners.delete(listener); },
+      getProjectedChildIds(parentId, canonical) { return parentId === nestedId && projected ? projected : canonical; },
+    };
+    const view = render(<Document capture={() => undefined} projection={projection} />);
+    const shell = view.container.querySelector(`[data-editor-block-id="${cId}"]`);
+    const leafCount = leafRuns.get(cId)!.mock.calls.length;
+    const wrapperCount = wrapperRuns.get(nestedId)!.mock.calls.length;
+    act(() => { projected = [dId, cId]; for (const listener of listeners) listener(); });
+    expect(Array.from(view.getByTestId(`wrapper-${nestedId}`).querySelectorAll<HTMLElement>(":scope > [data-editor-block-id]")).map((node) => node.dataset.editorBlockId)).toEqual([dId, cId]);
+    expect(view.container.querySelector(`[data-editor-block-id="${cId}"]`)).toBe(shell);
+    expect(leafRuns.get(cId)!.mock.calls.length).toBe(leafCount);
+    expect(wrapperRuns.get(nestedId)!.mock.calls.length).toBe(wrapperCount);
+  });
+
+  it("isolates child records, wrapper membership, siblings, and surviving shells", () => {
+    leafRuns.clear(); wrapperRuns.clear();
     let editor: EditorImplementation | null = null;
-
-    function LargeRootDocument() {
-      const runtime = useEditor({ definition, snapshot });
-      useLayoutEffect(() => {
-        editor = runtime as EditorImplementation;
-      }, [runtime]);
-      return <EditorDocument editor={runtime} />;
-    }
-
-    const view = render(<LargeRootDocument />);
-    const capturedEditor = requireEditor(editor);
-    const removedId = rootIds[64]!;
-    const unaffectedIds = rootIds.filter((blockId) => blockId !== removedId);
-    const shellsBefore = new Map(
-      unaffectedIds.map((blockId) => [
-        blockId,
-        view.container.querySelector(`[data-editor-block-id="${blockId}"]`),
-      ]),
-    );
-    const renderCountsBefore = new Map(
-      rootIds.map((blockId) => [
-        blockId,
-        leafRenderers.get(blockId)?.mock.calls.length ?? 0,
-      ]),
-    );
-
+    const view = render(<Document capture={(value) => (editor = value)} />);
+    const runtime = required(editor);
+    const outerCount = wrapperRuns.get(outerId)!.mock.calls.length;
+    const nestedCount = wrapperRuns.get(nestedId)!.mock.calls.length;
+    const siblingCount = leafRuns.get(bId)!.mock.calls.length;
+    const siblingShell = view.container.querySelector(`[data-editor-block-id="${bId}"]`);
+    act(() => { expect(runtime.updateBlockMetadata([{ blockId: cId, values: { changed: true } }])).toBe(true); });
+    expect(leafRuns.get(cId)!.mock.calls.length).toBe(2);
+    expect(leafRuns.get(bId)!.mock.calls.length).toBe(siblingCount);
+    expect(wrapperRuns.get(outerId)!.mock.calls.length).toBe(outerCount);
+    expect(wrapperRuns.get(nestedId)!.mock.calls.length).toBe(nestedCount);
     act(() => {
-      const result = capturedEditor.executeStructuralTransaction({
-        origin: "block-list-children/remove-one-of-many",
-        operations: [
-          removeBlocks({
-            blockIds: [removedId],
-            includeDescendants: true,
-            expectedParents: { [removedId]: null },
-          }),
-        ],
-      });
+      const result = runtime.executeStructuralTransaction({ origin: "neutral-reorder", operations: [moveBlocks({ blockIds: [cId], sourcePlacement: { parentId: nestedId, childIndex: 0 }, destinationPlacement: { parentId: nestedId, childIndex: 1 } })] });
       if (!result.ok) throw new Error(JSON.stringify(result));
     });
+    act(() => {
+      const result = runtime.executeStructuralTransaction({ origin: "neutral-add-child", operations: [moveBlocks({ blockIds: [aId], sourcePlacement: { parentId: outerId, childIndex: 0 }, destinationPlacement: { parentId: nestedId, childIndex: 2 } })] });
+      if (!result.ok) throw new Error(JSON.stringify(result));
+    });
+    act(() => {
+      const result = runtime.executeStructuralTransaction({ origin: "neutral-remove", operations: [removeBlocks({ blockIds: [dId], includeDescendants: true, expectedParents: { [dId]: nestedId } })] });
+      if (!result.ok) throw new Error(JSON.stringify(result));
+    });
+    expect(wrapperRuns.get(outerId)!.mock.calls.length).toBe(outerCount);
+    expect(wrapperRuns.get(nestedId)!.mock.calls.length).toBe(nestedCount);
+    expect(view.container.querySelector(`[data-editor-block-id="${bId}"]`)).toBe(siblingShell);
+  });
 
-    expect(
-      view.container.querySelector(`[data-editor-block-id="${removedId}"]`),
-    ).toBeNull();
-    for (const blockId of unaffectedIds) {
-      expect(leafRenderers.get(blockId)?.mock.calls.length).toBe(
-        renderCountsBefore.get(blockId),
-      );
-      expect(
-        view.container.querySelector(`[data-editor-block-id="${blockId}"]`),
-      ).toBe(shellsBefore.get(blockId));
-    }
-    view.unmount();
-    capturedEditor.dispose();
+  it("keeps editor instances isolated", () => {
+    leafRuns.clear();
+    let first: EditorImplementation | null = null;
+    let second: EditorImplementation | null = null;
+    render(<Document capture={(value) => (first = value)} />);
+    render(<Document capture={(value) => (second = value)} />);
+    const before = leafRuns.get(cId)!.mock.calls.length;
+    act(() => { expect(required(first).updateBlockMetadata([{ blockId: cId, values: { instance: 1 } }])).toBe(true); });
+    expect(leafRuns.get(cId)!.mock.calls.length).toBe(before + 1);
+    expect(required(second).getBlock(cId)?.metadata).toBeUndefined();
   });
 });
 
-function requireEditor(
-  editor: EditorImplementation | null,
-): EditorImplementation {
+function required(editor: EditorImplementation | null) {
   expect(editor).not.toBeNull();
-  if (!editor) throw new Error("expected the editor to be captured");
+  if (!editor) throw new Error("missing editor");
   return editor;
 }

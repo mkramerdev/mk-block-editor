@@ -7,7 +7,7 @@ import type {
   SelectionController,
 } from "@repo/editor-react/selection";
 import type { AdditionalSelectionRecord } from "../../runtime/collaboration/contracts.ts";
-import type { Editor } from "../../runtime/document/contracts.ts";
+import type { EditableEditor } from "../../runtime/document/contracts.ts";
 
 export interface EditorBlockScopedSelectionSnapshot {
   readonly local: CanonicalLocalSelection;
@@ -17,15 +17,14 @@ export interface EditorBlockScopedSelectionSnapshot {
 const emptyAdditional = Object.freeze(
   [],
 ) as readonly AdditionalSelectionRecord[];
-const subscribeNever = () => () => undefined;
 const readEmptyAdditional = () => emptyAdditional;
 
 /**
  * Wrapper-facing logical selection state. The subscriptions are scoped to the
- * requested canonical subtree; read editors never access an additional reader.
+ * requested canonical subtree and the editable editor's presence projection.
  */
 export function useEditorBlockScopedSelection(input: {
-  readonly editor: Editor;
+  readonly editor: EditableEditor;
   readonly selectionController: SelectionController;
   readonly blockId: BlockId;
 }): EditorBlockScopedSelectionSnapshot {
@@ -41,21 +40,19 @@ export function useEditorBlockScopedSelection(input: {
   );
   const local = useSyncExternalStore(subscribeLocal, readLocal, readLocal);
 
-  const additionalReader = editor.editable ? editor.additionalSelections : null;
+  const additionalReader = editor.additionalSelections;
   const subscribeAdditional = useCallback(
     (listener: () => void) =>
-      additionalReader
-        ? additionalReader.subscribeBlock(blockId, listener)
-        : subscribeNever(),
+      additionalReader.subscribeBlock(blockId, listener),
     [additionalReader, blockId],
   );
   const readAdditional = useCallback(
-    () => additionalReader?.getBlockSnapshot(blockId) ?? emptyAdditional,
+    () => additionalReader.getBlockSnapshot(blockId),
     [additionalReader, blockId],
   );
   const additional = useSyncExternalStore(
-    additionalReader ? subscribeAdditional : subscribeNever,
-    additionalReader ? readAdditional : readEmptyAdditional,
+    subscribeAdditional,
+    readAdditional,
     readEmptyAdditional,
   );
 

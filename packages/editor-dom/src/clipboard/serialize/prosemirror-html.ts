@@ -15,7 +15,6 @@ import {
   type PMNode,
   type Schema,
 } from "../../prosemirror/index.ts";
-import type { BlockLocalDocumentMappingOptions } from "../../schema/block-local/document-mapping.ts";
 import { tryParseBlockLocalProseMirrorDocument } from "../../schema/block-local/document-parsing.ts";
 import { blockLocalProseMirrorSchema } from "../../schema/block-local/schema.ts";
 import { proseMirrorRichTextToCanonicalJson } from "../../schema/inline/atom-json.ts";
@@ -25,7 +24,6 @@ let blockLocalDomSerializer: DOMSerializer | null = null;
 
 export interface SemanticHtmlProseMirrorOptions {
   schema?: Schema;
-  documentMapping?: BlockLocalDocumentMappingOptions;
   inlineAtoms?: readonly {
     readonly type: string;
     readonly metadata: Readonly<Record<string, InlineMetadataFieldDefinition>>;
@@ -62,7 +60,6 @@ export function serializeBlockRichTextContentHtml(
       content,
       blockType,
       schema,
-      options.documentMapping,
     );
     if (!pmDoc) return null;
     return serializePmNodeContent(pmDoc, doc, schema);

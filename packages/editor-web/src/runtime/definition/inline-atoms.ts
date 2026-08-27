@@ -3,7 +3,7 @@ import {
   type InlineMetadataFieldDefinition,
 } from "@repo/editor-core/content/inline-atoms";
 import type { JsonObject } from "@repo/editor-core/kernel";
-import type { EditorDefinition, InlineAtomDefinition } from "./contracts.ts";
+import type { EditableEditorDefinition, InlineAtomDefinition } from "./contracts.ts";
 import type { CompiledCanonicalEditorDefinition } from "./compiled-editor-definition.ts";
 import { createImmutableMap } from "./immutable-map.ts";
 
@@ -16,14 +16,13 @@ const reservedAtomNodeTypes = new Set([
   "text",
   "hard_break",
   "paragraph",
-  "heading",
 ]);
 export function compileEditorInlineAtoms(
-  definition: EditorDefinition,
+  definition: EditableEditorDefinition,
 ): CompiledEditorInlineAtoms {
   if (!Array.isArray(definition.inlineAtoms)) {
     throw new Error(
-      "EditorDefinition.inlineAtoms must be an array of inline atom definitions.",
+      "EditableEditorDefinition.inlineAtoms must be an array of inline atom definitions.",
     );
   }
   const definitions = new Map<string, InlineAtomDefinition>();

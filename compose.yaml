@@ -1,22 +1,64 @@
 services:
   editor-db:
     image: postgres:18
-    container_name: editor-db
     restart: unless-stopped
     environment:
-      POSTGRES_DB: editor_document
-      POSTGRES_USER: editor
-      POSTGRES_PASSWORD: editor
+      POSTGRES_DB: ${EDITOR_DB_NAME:-editor_document}
+      POSTGRES_USER: ${EDITOR_DB_USER:-editor}
+      POSTGRES_PASSWORD: ${EDITOR_DB_PASSWORD:?Set EDITOR_DB_PASSWORD at runtime}
     ports:
-      - "5435:5432"
+      - "127.0.0.1:${EDITOR_DB_PORT:-5435}:5432"
     volumes:
       - editor-db-data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U editor -d editor_document"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 5
       start_period: 10s
+
+  editor-realtime:
+    build:
+      context: .
+      dockerfile: services/editor-realtime/Dockerfile
+    ports:
+      - "127.0.0.1:${EDITOR_REALTIME_PUBLIC_PORT:-4455}:4455"
+    environment:
+      NODE_ENV: production
+      EDITOR_DOCUMENT_POSTGRES_URL: postgres://${EDITOR_DB_USER:-editor}:${EDITOR_DB_PASSWORD:?Set EDITOR_DB_PASSWORD at runtime}@editor-db:5432/${EDITOR_DB_NAME:-editor_document}
+      EDITOR_REALTIME_HOST: 0.0.0.0
+      EDITOR_REALTIME_PORT: 4455
+      EDITOR_REALTIME_PUBLIC_DOCUMENT_IDS: ${FIRST_DRAFT_DOCUMENT_ID:-01890f07-1c00-7000-8000-000000040001}
+      EDITOR_REALTIME_ALLOWED_ORIGINS: ${EDITOR_REALTIME_ALLOWED_ORIGINS:-http://localhost:3001,http://127.0.0.1:3001}
+      EDITOR_REALTIME_MAX_CONNECTIONS: ${EDITOR_REALTIME_MAX_CONNECTIONS:-100}
+      EDITOR_REALTIME_MAX_CONNECTIONS_PER_ADDRESS: ${EDITOR_REALTIME_MAX_CONNECTIONS_PER_ADDRESS:-10}
+      EDITOR_REALTIME_MAX_SESSIONS_PER_DOCUMENT: ${EDITOR_REALTIME_MAX_SESSIONS_PER_DOCUMENT:-50}
+      EDITOR_REALTIME_MAX_MESSAGES_PER_WINDOW: ${EDITOR_REALTIME_MAX_MESSAGES_PER_WINDOW:-2400}
+      EDITOR_REALTIME_MESSAGE_WINDOW_MS: ${EDITOR_REALTIME_MESSAGE_WINDOW_MS:-60000}
+      EDITOR_REALTIME_MAX_TRANSACTIONS_PER_WINDOW: ${EDITOR_REALTIME_MAX_TRANSACTIONS_PER_WINDOW:-600}
+      EDITOR_REALTIME_TRANSACTION_WINDOW_MS: ${EDITOR_REALTIME_TRANSACTION_WINDOW_MS:-60000}
+      EDITOR_REALTIME_MAX_BYTES_PER_WINDOW: ${EDITOR_REALTIME_MAX_BYTES_PER_WINDOW:-67108864}
+      EDITOR_REALTIME_BYTE_WINDOW_MS: ${EDITOR_REALTIME_BYTE_WINDOW_MS:-60000}
+      EDITOR_REALTIME_MAX_CLIENT_FRAME_BYTES: ${EDITOR_REALTIME_MAX_CLIENT_FRAME_BYTES:-2097152}
+      EDITOR_REALTIME_MAX_PENDING_TRANSACTIONS_PER_DOCUMENT: ${EDITOR_REALTIME_MAX_PENDING_TRANSACTIONS_PER_DOCUMENT:-64}
+    depends_on:
+      editor-db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget --quiet --spider http://127.0.0.1:4455/readyz || exit 1",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
 
 volumes:
   editor-db-data:

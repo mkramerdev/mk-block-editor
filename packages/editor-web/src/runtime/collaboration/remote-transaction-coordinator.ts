@@ -24,7 +24,7 @@ import {
   type SelectionController,
 } from "@repo/editor-react/selection";
 import type { EditorContentRuntime } from "@repo/editor-core/content";
-import type { EditorDefinition } from "../definition/contracts.ts";
+import type { EditableEditorDefinition } from "../definition/contracts.ts";
 import type { AdditionalSelectionManager } from "./additional-selection-manager.ts";
 import type {
   RemoteEditorTransaction,
@@ -49,7 +49,7 @@ interface PreparedRemoteCanonicalTransaction {
 }
 
 export interface RemoteTransactionCanonicalHost extends EditorSelectionGraphReader {
-  readonly definition: EditorDefinition;
+  readonly definition: EditableEditorDefinition;
   readonly contentRuntime: EditorContentRuntime;
   readonly selectionController: SelectionController;
   getSelectionGraphRevision(): number;
@@ -72,7 +72,7 @@ export interface RemoteTransactionCoordinator {
 
 export function createRemoteTransactionCoordinator(input: {
   readonly host: RemoteTransactionCanonicalHost;
-  readonly additionalSelections?: AdditionalSelectionManager;
+  readonly additionalSelections: AdditionalSelectionManager;
 }): RemoteTransactionCoordinator {
   return Object.freeze({
     applyRemoteTransaction(
@@ -91,20 +91,22 @@ export function createRemoteTransactionCoordinator(input: {
 
       const prepared = prepareRemoteCanonicalTransaction(host, decoded.value);
       if (!prepared.ok) return rejected("preparation-failed", prepared.message);
-      let authorSelection: RemoteTransactionSelectionResult =
-        ignoredReadSelection;
+      let authorSelection: RemoteTransactionSelectionResult | null = null;
       try {
         host.commitValidatedRemoteTransaction({
           ...prepared.value,
           afterCanonicalStateInstalled: () => {
-            authorSelection = input.additionalSelections
-              ? applyAuthorSelection(
-                  input.additionalSelections,
-                  envelope.authorSelection,
-                )
-              : ignoredReadSelection;
+            authorSelection = applyAuthorSelection(
+              input.additionalSelections,
+              envelope.authorSelection,
+            );
           },
         });
+        if (!authorSelection) {
+          throw new Error(
+            "Remote transaction host did not install author selection state.",
+          );
+        }
         return {
           status: "applied",
           changedBlockIds: prepared.value.changedBlockIds,
@@ -443,7 +445,7 @@ interface DecodedContentTransaction {
 
 function decodeContentTransaction(
   value: unknown,
-  definition: EditorDefinition,
+  definition: EditableEditorDefinition,
   contentFormat: string,
   contentVersion: number,
 ):
@@ -577,7 +579,7 @@ function decodeRemoteContentPayload(
 
 function decodeStableGraph(
   value: unknown,
-  definition: EditorDefinition,
+  definition: EditableEditorDefinition,
 ):
   | { readonly ok: true; readonly value: readonly StableChange[] | null }
   | { readonly ok: false; readonly message: string } {
@@ -653,7 +655,4 @@ function hasExactKeys(
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
-const ignoredReadSelection = Object.freeze({
-  status: "ignored-read-mode" as const,
-});
 const emptyBlockIds = Object.freeze([]) as readonly BlockId[];

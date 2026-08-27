@@ -6,12 +6,21 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
-  type CSSProperties,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
+  type RefObject,
 } from "react";
 import type { BlockId } from "@repo/editor-core/kernel";
-import { useDirectChildBlocks } from "@repo/editor-web/block-renderer";
-import type { FirstDraftBlockRendererProps } from "../../first-draft-editor-contracts.ts";
+import {
+  editorSelectionBoundsDataAttributes,
+  useDirectChildBlocks,
+} from "@repo/editor-web/block-renderer";
+import { Plus } from "lucide-react";
+import type {
+  FirstDraftBlockRendererProps,
+  FirstDraftEditor,
+} from "../../first-draft-editor-contracts.ts";
 import {
   FIRST_DRAFT_BLOCK_CONTROL_OFFSETS,
   FirstDraftBlockChrome,
@@ -19,11 +28,34 @@ import {
 import {
   COLUMN_PREFERRED_MIN_WIDTH_PX,
   columnWeightsToGridTracks,
-  readColumnLayoutWeight,
+  resolveColumnLayoutPresentation,
   resizeAdjacentColumnWeights,
   type OrderedColumnWeight,
 } from "../columns/model.ts";
-import { useSelectTab, useSelectedTab } from "../view-state.tsx";
+import {
+  resolveEffectiveFirstDraftTabPaneId,
+  useFirstDraftViewStateStore,
+  useSelectTab,
+  useSelectedTab,
+} from "../view-state.tsx";
+import {
+  useOptionalFirstDraftTabsActionUiSnapshot,
+  useOptionalFirstDraftTabsActionUiStore,
+  type FirstDraftTabsRenameSession,
+} from "../../tabs-action-menu/index.ts";
+import { addFirstDraftTab, renameFirstDraftTab } from "./tabs-mutations.ts";
+import {
+  isFirstDraftBlockDropAnchorEligible,
+  useFirstDraftBlockDropTargetRef,
+} from "../../block-drag-and-drop/index.ts";
+import { FIRST_DRAFT_DOCUMENT_DRAG_VISUAL_BOUNDS_TARGET } from "../../block-drag-and-drop/document-drag-visual-bounds.ts";
+import { EmptyWrapperAddTextControl } from "../empty-wrapper-add-text-control.tsx";
+import { FirstDraftAppendParagraphSurface } from "../append-paragraph-surface.tsx";
+import {
+  ColumnBoundaryPresentation,
+  ColumnsBoundaryOverlay,
+  ColumnsPresentation,
+} from "../presentations.tsx";
 
 type Props = FirstDraftBlockRendererProps;
 
@@ -49,24 +81,57 @@ interface ColumnResizeGesture {
   preview: readonly OrderedColumnWeight[];
 }
 
-export function ColumnsRenderer({ block, editor, children }: Props) {
-  const directChildren = useDirectChildBlocks(editor, block.id);
-  const columns = useMemo(
-    () =>
-      directChildren.map((child) => ({
-        id: child.id,
-        weight: readColumnLayoutWeight(child.metadata) ?? 0,
-      })),
-    [directChildren],
-  );
-  const valid =
-    columns.length >= 2 && columns.every(({ weight }) => weight > 0);
+export function ColumnsRenderer(props: Props) {
+  const afterTargetRef = useAfterBlockTargetRef(props.block.id);
+  const hasAfterTarget = shouldRenderAfterBlockTarget(props.editor, props.block.id);
   const gridRef = useRef<HTMLDivElement | null>(null);
+  const initialLayout = resolveColumnLayoutPresentation({
+    columnsId: props.block.id,
+    records: props.editor
+      .getChildBlockIds(props.block.id)
+      .map((blockId) => props.editor.getBlock(blockId)),
+  });
+  return <>
+    <ColumnsPresentation
+      tracks={initialLayout.tracks}
+      rootRef={gridRef}
+      rootAttributes={editorSelectionBoundsDataAttributes(props.block.id, {
+        target: FIRST_DRAFT_DOCUMENT_DRAG_VISUAL_BOUNDS_TARGET,
+      })}
+    >
+      {props.children}
+      <ColumnResizeController
+        block={props.block}
+        editor={props.editor}
+        gridRef={gridRef}
+      />
+    </ColumnsPresentation>
+    {hasAfterTarget ? <div ref={afterTargetRef} className="first-draft-block-drop-target" data-first-draft-block-drop-target-active="false" data-editor-ui="true" aria-hidden="true" /> : null}
+  </>;
+}
+
+function ColumnResizeController({
+  block,
+  editor,
+  gridRef,
+}: Pick<Props, "block" | "editor"> & {
+  readonly gridRef: RefObject<HTMLDivElement | null>;
+}) {
+  const directChildren = useDirectChildBlocks(editor, block.id);
+  const layout = useMemo(
+    () => resolveColumnLayoutPresentation({
+      columnsId: block.id,
+      records: directChildren,
+    }),
+    [block.id, directChildren],
+  );
+  const columns = layout.columns;
+  const valid = layout.resizeValid;
   const gestureRef = useRef<ColumnResizeGesture | null>(null);
+  const overlayRef = useRef<HTMLDivElement | null>(null);
   const revision = columns.map(({ id, weight }) => `${id}:${weight}`).join("|");
   const revisionRef = useRef(revision);
-  const tracks = columnWeightsToGridTracks(columns) ?? "none";
-  const style = { "--columns-block-tracks": tracks } as CSSProperties;
+  const tracks = layout.tracks;
 
   const cancelResize = useCallback((restorePreview = true) => {
     const gesture = gestureRef.current;
@@ -95,7 +160,7 @@ export function ColumnsRenderer({ block, editor, children }: Props) {
       const left = columns[index];
       const right = columns[index + 1];
       const gridElement = gridRef.current;
-      const overlayElement = event.currentTarget.parentElement;
+      const overlayElement = overlayRef.current;
       if (
         !left ||
         !right ||
@@ -141,7 +206,7 @@ export function ColumnsRenderer({ block, editor, children }: Props) {
       }
       editor.blurEditor();
     },
-    [cancelResize, columns, editor, revision, tracks, valid],
+    [cancelResize, columns, editor, gridRef, revision, tracks, valid],
   );
   const move = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -216,13 +281,14 @@ export function ColumnsRenderer({ block, editor, children }: Props) {
   );
 
   useLayoutEffect(() => {
+    setColumnTrackProperty(gridRef.current, tracks);
     revisionRef.current = revision;
     const gesture = gestureRef.current;
     if (gesture && gesture.revision !== revision) {
       // External column authority invalidates the local preview.
       cancelResize(false);
     }
-  }, [cancelResize, revision]);
+  }, [cancelResize, gridRef, revision, tracks]);
   useEffect(() => () => cancelResize(false), [cancelResize]);
 
   const keyboardResize = useCallback(
@@ -256,25 +322,17 @@ export function ColumnsRenderer({ block, editor, children }: Props) {
         { editorSuggestion: null },
       );
     },
-    [columns, editor],
+    [columns, editor, gridRef],
   );
 
-  return (
-    <div
-      ref={gridRef}
-      className="columns-block__grid"
-      role="group"
-      aria-label="Columns layout"
-      style={style}
-    >
-      {children}
-      {valid ? (
-        <div className="columns-block__resize-overlay" style={style}>
-          {columns.slice(0, -1).map((left, index) => {
-            const right = columns[index + 1]!;
-            return (
+  return columns.length > 1 ? (
+    <ColumnsBoundaryOverlay tracks={tracks} rootRef={overlayRef}>
+      {columns.slice(0, -1).map((left, index) => {
+        const right = columns[index + 1]!;
+        return (
+          <ColumnBoundaryPresentation key={`${left.id}|${right.id}`}>
+            {valid ? (
               <div
-                key={`${left.id}|${right.id}`}
                 className="columns-block__resize-handle"
                 role="separator"
                 aria-orientation="vertical"
@@ -316,12 +374,12 @@ export function ColumnsRenderer({ block, editor, children }: Props) {
                   );
                 }}
               />
-            );
-          })}
-        </div>
-      ) : null}
-    </div>
-  );
+            ) : null}
+          </ColumnBoundaryPresentation>
+        );
+      })}
+    </ColumnsBoundaryOverlay>
+  ) : null;
 }
 
 function previewResizeAt(
@@ -369,6 +427,17 @@ function restoreColumnPreview(gesture: ColumnResizeGesture): void {
   );
 }
 
+function setColumnTrackProperty(
+  element: HTMLElement | null,
+  tracks: string,
+): void {
+  if (
+    element?.style.getPropertyValue("--columns-block-tracks") !== tracks
+  ) {
+    element?.style.setProperty("--columns-block-tracks", tracks);
+  }
+}
+
 function releasePointerCapture(element: HTMLElement, pointerId: number): void {
   try {
     if (
@@ -383,62 +452,308 @@ function releasePointerCapture(element: HTMLElement, pointerId: number): void {
 }
 
 export function ColumnRenderer({ block, editor, children }: Props) {
-  const siblings = useDirectChildBlocks(editor, block.parentId!);
-  const index = siblings.findIndex((candidate) => candidate.id === block.id);
+  const childStartTargetRef = useChildStartTargetRef(block.id);
+  const hasChildTarget = shouldRenderChildStartTarget(editor, block.id);
   return (
-    <section className="columns-block__lane" aria-label={`Column ${index + 1}`}>
+    <section className="columns-block__lane" aria-label="Column">
+      {hasChildTarget ? <div ref={childStartTargetRef} className="first-draft-block-drop-target" data-first-draft-block-drop-target-active="false" data-editor-ui="true" aria-hidden="true" /> : null}
       {children}
+      <FirstDraftAppendParagraphSurface
+        editor={editor}
+        parentId={block.id}
+        scope="column"
+        ariaLabel="Add paragraph at end of column"
+      />
     </section>
   );
 }
 
-export function TabsRenderer({ block, editor, children }: Props) {
+export function TabsRenderer(props: Props) {
+  const afterTargetRef = useAfterBlockTargetRef(props.block.id);
+  const hasAfterTarget = shouldRenderAfterBlockTarget(props.editor, props.block.id);
+  return <>
+    <FirstDraftBlockChrome
+      blockId={props.block.id}
+      editor={props.editor}
+      blockStartOffset={FIRST_DRAFT_BLOCK_CONTROL_OFFSETS.tabs}
+    />
+    <div
+      className="tabs-block__tabs"
+      role="group"
+      aria-label="Tabs"
+      {...editorSelectionBoundsDataAttributes(props.block.id, {
+        target: FIRST_DRAFT_DOCUMENT_DRAG_VISUAL_BOUNDS_TARGET,
+      })}
+    >
+      <TabsNavigationController block={props.block} editor={props.editor} />
+      <div className="tabs-block__panel" role="tabpanel">
+        {props.children}
+      </div>
+    </div>
+    {hasAfterTarget ? <div ref={afterTargetRef} className="first-draft-block-drop-target" data-first-draft-block-drop-target-active="false" data-editor-ui="true" aria-hidden="true" /> : null}
+  </>;
+}
+
+function TabsNavigationController({
+  block,
+  editor,
+}: Pick<Props, "block" | "editor">) {
   const blocks = useDirectChildBlocks(editor, block.id);
   const selected = useSelectedTab(block.id);
   const select = useSelectTab(block.id);
+  const actionStore = useOptionalFirstDraftTabsActionUiStore();
+  const actionSnapshot = useOptionalFirstDraftTabsActionUiSnapshot();
+  const headerRef = useRef<HTMLDivElement | null>(null);
   const active =
     blocks.find((candidate) => candidate.id === selected) ?? blocks[0] ?? null;
+  useLayoutEffect(() => {
+    const header = headerRef.current;
+    if (!actionStore || !header) return;
+    return actionStore.registerTabsRoot(block.id, header);
+  }, [actionStore, block.id]);
+  const focusPane = useCallback((paneId: BlockId) => {
+    const root = headerRef.current;
+    for (const candidate of root?.querySelectorAll<HTMLElement>(
+      "[data-tab-pane-id]",
+    ) ?? []) {
+      if (candidate.dataset.tabPaneId === paneId) {
+        candidate.focus({ preventScroll: true });
+        break;
+      }
+    }
+  }, []);
+  const activateAt = useCallback(
+    (index: number) => {
+      const pane = blocks[index];
+      if (!pane) return;
+      select(pane.id);
+      focusPane(pane.id);
+    },
+    [blocks, focusPane, select],
+  );
   return (
-    <>
-      <FirstDraftBlockChrome
-        blockId={block.id}
-        editor={editor}
-        blockStartOffset={FIRST_DRAFT_BLOCK_CONTROL_OFFSETS.tabs}
-      />
-      <div className="tabs-block__tabs" role="group" aria-label="Tabs">
-        <div className="tabs-block__tablist" role="tablist" aria-label="Tabs">
-          {blocks.map((pane, index) => {
-            const title =
-              typeof pane.metadata?.title === "string" && pane.metadata.title
-                ? pane.metadata.title
-                : `Tab ${index + 1}`;
-            return (
-              <button
-                type="button"
-                className="tabs-block__tab"
-                role="tab"
-                aria-selected={pane.id === active?.id}
-                key={pane.id}
-                onMouseDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  select(pane.id as BlockId);
-                }}
-              >
-                {title}
-              </button>
-            );
-          })}
+        <div
+          ref={headerRef}
+          className="tabs-block__header"
+          tabIndex={-1}
+          data-editor-ui="true"
+          data-editor-preserve-selection="true"
+        >
+          <div className="tabs-block__tablist" role="tablist" aria-label="Tabs">
+            {blocks.map((pane, index) => {
+              const title =
+                typeof pane.metadata?.title === "string" && pane.metadata.title
+                  ? pane.metadata.title
+                  : `Tab ${index + 1}`;
+              const renaming =
+                actionSnapshot.kind === "rename" &&
+                actionSnapshot.tabsId === block.id &&
+                actionSnapshot.paneId === pane.id;
+              return (
+                <div className="tabs-block__tab-slot" key={pane.id}>
+                  {renaming && actionStore ? (
+                    <TabsRenameInput
+                      editor={editor}
+                      session={actionSnapshot}
+                      store={actionStore}
+                      restoreFocus={() => focusPane(pane.id)}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      className="tabs-block__tab"
+                      role="tab"
+                      aria-selected={pane.id === active?.id}
+                      tabIndex={pane.id === active?.id ? 0 : -1}
+                      data-editor-ui="true"
+                      data-editor-preserve-selection="true"
+                      data-tab-pane-id={pane.id}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onMouseDown={(event) => event.stopPropagation()}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        select(pane.id);
+                      }}
+                      onContextMenu={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        select(pane.id);
+                        actionStore?.openMenu({
+                          kind: "open",
+                          tabsId: block.id,
+                          paneId: pane.id,
+                          triggerElement: event.currentTarget,
+                        });
+                      }}
+                      onKeyDown={(event) => {
+                        if (
+                          event.key === "ContextMenu" ||
+                          (event.shiftKey && event.key === "F10")
+                        ) {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          select(pane.id);
+                          actionStore?.openMenu({
+                            kind: "open",
+                            tabsId: block.id,
+                            paneId: pane.id,
+                            triggerElement: event.currentTarget,
+                          });
+                          return;
+                        }
+                        let next: number | null = null;
+                        if (event.key === "ArrowLeft") {
+                          next = (index - 1 + blocks.length) % blocks.length;
+                        } else if (event.key === "ArrowRight") {
+                          next = (index + 1) % blocks.length;
+                        } else if (event.key === "Home") next = 0;
+                        else if (event.key === "End") next = blocks.length - 1;
+                        if (next === null) return;
+                        event.preventDefault();
+                        event.stopPropagation();
+                        activateAt(next);
+                      }}
+                    >
+                      {title}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {editor.editable ? (
+            <button
+              type="button"
+              className="tabs-block__add"
+              aria-label="Add tab"
+              data-editor-ui="true"
+              data-editor-preserve-selection="true"
+              onPointerDown={(event) => event.stopPropagation()}
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                const result = addFirstDraftTab(editor, block.id);
+                if (result.kind === "applied") select(result.paneId);
+              }}
+            >
+              <Plus aria-hidden="true" />
+            </button>
+          ) : null}
         </div>
-        <div className="tabs-block__panel" role="tabpanel">
-          {children}
-        </div>
-      </div>
-    </>
   );
 }
 
-export function TabPaneRenderer({ block, editor, children }: Props) {
+function TabsRenameInput({
+  editor,
+  session,
+  store,
+  restoreFocus,
+}: {
+  readonly editor: FirstDraftEditor;
+  readonly session: FirstDraftTabsRenameSession;
+  readonly store: import("../../tabs-action-menu/index.ts").FirstDraftTabsActionUiStore;
+  readonly restoreFocus: () => void;
+}) {
+  const [value, setValue] = useState(session.initialDisplayedTitle);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const settled = useRef(false);
+  useLayoutEffect(() => {
+    inputRef.current?.focus({ preventScroll: true });
+    inputRef.current?.select();
+  }, []);
+  const settle = useCallback(() => {
+    if (settled.current) return;
+    settled.current = true;
+    renameFirstDraftTab(editor, {
+      tabsId: session.tabsId,
+      paneId: session.paneId,
+      initialCanonicalTitle: session.initialCanonicalTitle,
+      initialDisplayedTitle: session.initialDisplayedTitle,
+      nextTitle: value,
+    });
+    store.finishRename();
+  }, [editor, session, store, value]);
+  const cancel = useCallback(() => {
+    if (settled.current) return;
+    settled.current = true;
+    store.cancelRename();
+    queueMicrotask(restoreFocus);
+  }, [restoreFocus, store]);
+  const onKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLInputElement>) => {
+      if (event.nativeEvent.isComposing) return;
+      if (event.key === "Enter") {
+        event.preventDefault();
+        inputRef.current?.blur();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        cancel();
+      }
+    },
+    [cancel],
+  );
+  return (
+    <input
+      ref={inputRef}
+      type="text"
+      className="tabs-block__rename"
+      aria-label={`Rename ${session.initialDisplayedTitle} tab`}
+      value={value}
+      size={Math.max(1, value.length)}
+      data-editor-ui="true"
+      data-editor-preserve-selection="true"
+      data-tab-pane-id={session.paneId}
+      onChange={(event) => setValue(event.currentTarget.value)}
+      onBlur={settle}
+      onKeyDown={onKeyDown}
+      onPointerDown={(event) => event.stopPropagation()}
+      onMouseDown={(event) => event.stopPropagation()}
+      onClick={(event) => event.stopPropagation()}
+    />
+  );
+}
+
+export function TabPaneRenderer(props: Props) {
+  const childStartTargetRef = useChildStartTargetRef(props.block.id);
+  const hasChildTarget = shouldRenderChildStartTarget(props.editor, props.block.id);
+  const paneRef = useRef<HTMLDivElement | null>(null);
+  const viewState = useFirstDraftViewStateStore();
+  const directPaneIds = props.block.parentId
+    ? props.editor.getChildBlockIds(props.block.parentId)
+    : [];
+  const initiallyActive = props.block.parentId !== null &&
+    resolveEffectiveFirstDraftTabPaneId(
+      viewState,
+      props.block.parentId,
+      directPaneIds,
+    ) === props.block.id;
+  return <>
+    {hasChildTarget ? <div ref={childStartTargetRef} className="first-draft-block-drop-target" data-first-draft-block-drop-target-active="false" data-editor-ui="true" aria-hidden="true" /> : null}
+    <div ref={paneRef} className="tabs-block__pane" hidden={!initiallyActive}>
+      <TabPaneVisibilityController
+        block={props.block}
+        editor={props.editor}
+        paneRef={paneRef}
+      />
+      <div className="tabs-block__pane-contents">
+        {props.children}
+        <EmptyWrapperAddTextControl
+          editor={props.editor}
+          wrapperId={props.block.id}
+        />
+      </div>
+    </div>
+  </>;
+}
+
+function TabPaneVisibilityController({
+  block,
+  editor,
+  paneRef,
+}: Pick<Props, "block" | "editor"> & {
+  readonly paneRef: RefObject<HTMLDivElement | null>;
+}) {
   const tabsId = block.parentId!;
   const selected = useSelectedTab(tabsId);
   const panes = useDirectChildBlocks(editor, tabsId);
@@ -446,15 +761,44 @@ export function TabPaneRenderer({ block, editor, children }: Props) {
     panes.find((candidate) => candidate.id === selected)?.id ??
     panes[0]?.id ??
     null;
+  const active = block.id === activePaneId;
+  useLayoutEffect(() => {
+    if (paneRef.current) paneRef.current.hidden = !active;
+  }, [active, paneRef]);
   return (
-    <div className="tabs-block__pane" hidden={block.id !== activePaneId}>
-      <FirstDraftBlockChrome
-        blockId={block.id}
-        editor={editor}
-        blockStartOffset={FIRST_DRAFT_BLOCK_CONTROL_OFFSETS.tabPane}
-        visible={block.id === activePaneId}
-      />
-      <div className="tabs-block__pane-contents">{children}</div>
-    </div>
+    <FirstDraftBlockChrome
+      blockId={block.id}
+      editor={editor}
+      blockStartOffset={FIRST_DRAFT_BLOCK_CONTROL_OFFSETS.tabPane}
+      visible={active}
+    />
   );
+}
+
+function useAfterBlockTargetRef(blockId: BlockId) {
+  return useFirstDraftBlockDropTargetRef({ kind: "after-block", blockId });
+}
+
+function useChildStartTargetRef(wrapperId: BlockId) {
+  return useFirstDraftBlockDropTargetRef({ kind: "wrapper-child-start", wrapperId });
+}
+
+function shouldRenderAfterBlockTarget(
+  editor: Props["editor"],
+  blockId: BlockId,
+): boolean {
+  return isFirstDraftBlockDropAnchorEligible(editor, {
+    kind: "after-block",
+    blockId,
+  });
+}
+
+function shouldRenderChildStartTarget(
+  editor: Props["editor"],
+  wrapperId: BlockId,
+): boolean {
+  return isFirstDraftBlockDropAnchorEligible(editor, {
+    kind: "wrapper-child-start",
+    wrapperId,
+  });
 }

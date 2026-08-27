@@ -25,6 +25,7 @@ import {
   type FirstDraftSlashAction,
 } from "./catalog.ts";
 import { materializeFirstDraftSlashAction } from "./materialize.ts";
+import { FirstDraftSlashActionIcon } from "./slash-action-icon.tsx";
 
 export interface FirstDraftSlashMenuProps {
   readonly editor: EditableEditor;
@@ -251,6 +252,7 @@ export function FirstDraftSlashMenu({
               accept(candidate);
             }}
           >
+            <FirstDraftSlashActionIcon action={candidate} />
             <span className="first-draft-slash-menu__label">
               {candidate.label}
             </span>

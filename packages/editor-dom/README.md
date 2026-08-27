@@ -31,11 +31,13 @@ the last case deliberately retains ProseMirror's native DOM-recovery fallback.
 
 The keymap and input plugin respect active composition. Browser default is
 prevented only after a path has claimed the event. Canonical ranges are
-consumed before the structural key bindings. Structural planning remains in
-`@repo/editor-core`; transaction execution and history remain in the runtime.
+consumed before the structural key bindings. Core owns structural transaction
+contracts and generic validation; product policy such as First Draft's Enter,
+Backspace, Delete, and wrapper behavior is planned by the product. Transaction
+execution and history remain in the runtime.
 
 Optional slash and mention trigger strings are declared as headless
-`EditorDefinition.typingTriggers` data. Trigger recognition and product menus
+`EditableEditorDefinition.typingTriggers` data. Trigger recognition and product menus
 are not owned by `@repo/editor-dom`. DOM rectangles may anchor product-owned UI
 or identify a candidate drop target, but they never determine document
 structure.

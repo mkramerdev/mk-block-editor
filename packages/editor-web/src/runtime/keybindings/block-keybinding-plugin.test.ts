@@ -141,7 +141,7 @@ function invokePlugin(
 ): boolean {
   const state = createBlockLocalProseMirrorState({
     blockId,
-    blockType: "paragraph",
+    blockType: "textBlock",
     doc: "text",
   });
   const dom = document.createElement("div");
@@ -153,7 +153,7 @@ function invokePlugin(
       keybindings: behavior.keybindings,
     },
     snapshot: createTestEditorSnapshot([
-      { id: blockId, type: "paragraph", text: "text" },
+      { id: blockId, type: "textBlock", text: "text" },
     ]),
   });
   const store = createEditorExternalStore(createInitialEditorSessionState({}));
@@ -162,7 +162,7 @@ function invokePlugin(
     store,
     editor: resolveEditorRuntimePort(editor),
     blockId,
-    blockType: "paragraph",
+    blockType: "textBlock",
   });
   const handleKeyDown = plugin.props.handleKeyDown;
   if (!handleKeyDown) throw new Error("Missing keybinding plugin handler.");

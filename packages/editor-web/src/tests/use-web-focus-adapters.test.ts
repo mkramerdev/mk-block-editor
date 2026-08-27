@@ -1,5 +1,13 @@
 import { createElement, useState } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
+import { asContentVersion, type BlockId } from "@repo/editor-core/kernel";
+import { contentSelection } from "@repo/editor-core/selection";
+import {
+  createEditorLogicalSelectionPoint,
+  createEditorSelectionTextAnchor,
+  createSelectionController,
+  type EditorSelectionGraphReader,
+} from "@repo/editor-react/selection";
 import { describe, expect, it, vi } from "vitest";
 import {
   useWebFocusAdapters,
@@ -12,8 +20,7 @@ describe("web focus adapters", () => {
       focusBlock: vi.fn(),
       focusText: vi.fn(),
       blurEditor: vi.fn(),
-      ownsNativeFocusTarget: vi.fn(() => false),
-      ownsActiveElement: vi.fn(() => false),
+      resolveNativeFocusTarget: vi.fn(() => null),
     };
     render(createElement(FocusLifecycleHarness, { editor }));
 
@@ -25,14 +32,19 @@ describe("web focus adapters", () => {
     expect(editor.focusText).not.toHaveBeenCalled();
   });
 
-  it("blurs through hidden lifecycle boundaries but stays inert on refocus", () => {
+  it("releases composition without blurring through lifecycle boundaries or refocusing", () => {
     const blurEditor = vi.fn();
+    const releaseComposition = vi.fn();
     const editor = {
       blurEditor,
-      ownsNativeFocusTarget: vi.fn(() => false),
-      ownsActiveElement: vi.fn(() => false),
+      resolveNativeFocusTarget: vi.fn(() => null),
     };
-    const rendered = render(createElement(FocusLifecycleHarness, { editor }));
+    const rendered = render(
+      createElement(FocusLifecycleHarness, {
+        editor,
+        releaseComposition,
+      }),
+    );
     const originalVisibility = Object.getOwnPropertyDescriptor(
       document,
       "visibilityState",
@@ -47,9 +59,10 @@ describe("web focus adapters", () => {
     window.dispatchEvent(new Event("pagehide"));
     fireEvent.wheel(screen.getByTestId("focus-lifecycle-list"));
 
-    expect(blurEditor).toHaveBeenCalledTimes(3);
+    expect(releaseComposition).toHaveBeenCalledTimes(3);
+    expect(blurEditor).not.toHaveBeenCalled();
 
-    blurEditor.mockClear();
+    releaseComposition.mockClear();
     Object.defineProperty(document, "visibilityState", {
       configurable: true,
       value: "visible",
@@ -57,12 +70,14 @@ describe("web focus adapters", () => {
     document.dispatchEvent(new Event("visibilitychange"));
     window.dispatchEvent(new Event("focus"));
     expect(blurEditor).not.toHaveBeenCalled();
+    expect(releaseComposition).not.toHaveBeenCalled();
 
     rendered.unmount();
     expect(blurEditor).not.toHaveBeenCalled();
     window.dispatchEvent(new Event("blur"));
     window.dispatchEvent(new Event("pagehide"));
     expect(blurEditor).not.toHaveBeenCalled();
+    expect(releaseComposition).not.toHaveBeenCalled();
 
     if (originalVisibility) {
       Object.defineProperty(document, "visibilityState", originalVisibility);
@@ -72,35 +87,97 @@ describe("web focus adapters", () => {
     }
   });
 
-  it("releases editor-owned text focus through the editor lifecycle at the window-blur boundary", () => {
+  it("preserves active text focus, native caret, and canonical selection across tab lifecycle", () => {
     const blurEditor = vi.fn();
+    const releaseComposition = vi.fn();
     const editor = {
       blurEditor,
-      ownsNativeFocusTarget: vi.fn(() => false),
-      ownsActiveElement: vi.fn(() => false),
+      resolveNativeFocusTarget: vi.fn((target: EventTarget | null) => {
+        const textRoot = screen.queryByTestId("focus-lifecycle-text-root");
+        return target === textRoot && textRoot instanceof HTMLElement
+          ? resolvedFocus(textRoot)
+          : null;
+      }),
     } satisfies WebFocusAdaptersOptions["editor"];
-    render(createElement(FocusLifecycleHarness, { editor }));
+    const rendered = render(
+      createElement(FocusLifecycleHarness, {
+        editor,
+        releaseComposition,
+      }),
+    );
     const textRoot = screen.getByTestId("focus-lifecycle-text-root");
-    blurEditor.mockImplementation(() => textRoot.blur());
+    const text = textRoot.firstChild;
+    if (!(text instanceof Text)) throw new Error("Missing focus fixture text");
+    const selectionController = createSelectionController();
+    const point = testSelectionPoint();
+    selectionController.commitSelectionPoint(point, selectionGraph, 1, {
+      publication: { kind: "silent" },
+      cause: "focus",
+    });
+    const canonical = selectionController.getCanonicalSnapshot();
+    const publications = vi.fn();
+    selectionController.subscribeStandaloneSettlements(publications);
+    const focus = vi.spyOn(textRoot as HTMLElement, "focus");
+    const native = document.getSelection();
+    const range = document.createRange();
+    range.setStart(text, 3);
+    range.collapse(true);
 
-    textRoot.focus();
+    (textRoot as HTMLElement).focus();
+    native?.removeAllRanges();
+    native?.addRange(range);
+    focus.mockClear();
     expect(document.activeElement).toBe(textRoot);
+    const originalVisibility = Object.getOwnPropertyDescriptor(
+      document,
+      "visibilityState",
+    );
 
     window.dispatchEvent(new Event("blur"));
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new Event("pagehide"));
 
-    expect(blurEditor).toHaveBeenCalledOnce();
-    expect(
-      screen
-        .getByTestId("focus-lifecycle-list")
-        .contains(document.activeElement),
-    ).toBe(false);
+    expect(releaseComposition).toHaveBeenCalledTimes(3);
+    expect(blurEditor).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(textRoot);
+    expect(native?.anchorNode).toBe(text);
+    expect(native?.anchorOffset).toBe(3);
+    expect(native?.focusNode).toBe(text);
+    expect(native?.focusOffset).toBe(3);
+    expect(selectionController.getCanonicalSnapshot()).toBe(canonical);
+    expect(publications).not.toHaveBeenCalled();
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new Event("focus"));
+
+    expect(focus).not.toHaveBeenCalled();
+    expect(blurEditor).not.toHaveBeenCalled();
+    expect(selectionController.getCanonicalSnapshot()).toBe(canonical);
+    expect(publications).not.toHaveBeenCalled();
+
+    rendered.unmount();
+    selectionController.dispose();
+    native?.removeAllRanges();
+    if (originalVisibility) {
+      Object.defineProperty(document, "visibilityState", originalVisibility);
+    } else {
+      delete (document as unknown as { visibilityState?: string })
+        .visibilityState;
+    }
   });
 
   it("does not release native focus owned by external or block-internal controls", () => {
     const editor = {
       blurEditor: vi.fn(),
-      ownsNativeFocusTarget: vi.fn(() => false),
-      ownsActiveElement: vi.fn(() => false),
+      resolveNativeFocusTarget: vi.fn(() => null),
     } satisfies WebFocusAdaptersOptions["editor"];
     render(createElement(FocusLifecycleHarness, { editor }));
     const external = document.createElement("input");
@@ -121,8 +198,7 @@ describe("web focus adapters", () => {
     const blurEditor = vi.fn();
     const editor = {
       blurEditor,
-      ownsNativeFocusTarget: vi.fn(() => false),
-      ownsActiveElement: vi.fn(() => false),
+      resolveNativeFocusTarget: vi.fn(() => null),
     } satisfies WebFocusAdaptersOptions["editor"];
     render(createElement(FocusLifecycleHarness, { editor }));
     const list = screen.getByTestId("focus-lifecycle-list");
@@ -131,7 +207,7 @@ describe("web focus adapters", () => {
     ) as HTMLInputElement;
 
     input.focus();
-    input.value = "https://first-draft.test/path";
+    input.value = "https://editor-example.test/path";
     input.setSelectionRange(8, 19);
     fireEvent.blur(list, { relatedTarget: input });
 
@@ -148,7 +224,7 @@ describe("web focus adapters", () => {
 
     const external = document.createElement("input");
     document.body.append(external);
-    fireEvent.blur(list, { relatedTarget: external });
+    fireEvent.focusOut(list, { relatedTarget: external });
     expect(blurEditor).toHaveBeenCalledOnce();
     external.remove();
   });
@@ -156,13 +232,16 @@ describe("web focus adapters", () => {
 
 function FocusLifecycleHarness({
   editor,
+  releaseComposition,
 }: {
   readonly editor: WebFocusAdaptersOptions["editor"];
+  readonly releaseComposition?: () => void;
 }) {
   const [listElement, setListElement] = useState<HTMLDivElement | null>(null);
   const focus = useWebFocusAdapters({
     editor,
     listElement,
+    releaseComposition,
   });
   return createElement(
     "div",
@@ -176,11 +255,15 @@ function FocusLifecycleHarness({
         onBlur: focus.handleListBlur,
         "data-testid": "focus-lifecycle-list",
       },
-      createElement("div", {
-        contentEditable: true,
-        "data-editor-text-root": "true",
-        "data-testid": "focus-lifecycle-text-root",
-      }),
+      createElement(
+        "div",
+        {
+          contentEditable: true,
+          "data-editor-text-root": "true",
+          "data-testid": "focus-lifecycle-text-root",
+        },
+        "hello",
+      ),
       createElement("button", {
         type: "button",
         "data-testid": "focus-lifecycle-control",
@@ -197,4 +280,46 @@ function FocusLifecycleHarness({
       ),
     ),
   );
+}
+
+const selectionGraph: EditorSelectionGraphReader = {
+  getBlock: (blockId) =>
+    blockId === ("text" as BlockId)
+      ? {
+          id: blockId,
+          type: "textBlock",
+          parentId: null,
+          tombstone: null,
+          metadataVersion: "1",
+          contentVersion: asContentVersion("1"),
+        }
+      : null,
+  getParentId: () => null,
+  getRootBlockIds: () => ["text" as BlockId],
+  getChildBlockIds: () => [],
+  readBlockSelectionModel: () => contentSelection(),
+};
+
+function testSelectionPoint() {
+  const anchor = createEditorSelectionTextAnchor({
+    codec: "focus-lifecycle-test",
+    payload: { encoded: "Mw==", assoc: 0 },
+  });
+  if (!anchor.ok) throw new Error(anchor.message);
+  const point = createEditorLogicalSelectionPoint({
+    graph: selectionGraph,
+    blockId: "text" as BlockId,
+    textOffset: 3,
+    textAnchor: anchor.textAnchor,
+  });
+  if (!point) throw new Error("Missing focus fixture selection point");
+  return point;
+}
+
+function resolvedFocus(target: HTMLElement) {
+  return {
+    kind: "text" as const,
+    blockId: "text" as BlockId,
+    registeredTarget: target,
+  };
 }

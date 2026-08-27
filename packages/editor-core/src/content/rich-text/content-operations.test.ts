@@ -17,10 +17,9 @@ import { asBlockId } from "../../kernel/identity/uuid.ts";
 
 const blockId = asBlockId("01890f07-1c00-7000-8000-000000000101");
 const testBlockDefinitions: Readonly<Record<BlockType, BlockDefinition>> = {
-  paragraph: {
+  textBlock: {
     type: "paragraph",
     kind: "text",
-    rootLayout: "normal",
     selection: contentSelection(),
   },
 };
@@ -126,6 +125,30 @@ describe("logical rich content operations", () => {
     expect(
       inverse?.kind === "replaceInlineRange" && inverse.deletedContent,
     ).toBe(operation.content);
+  });
+
+  it("targets the inserted entity identity when creating its inverse", () => {
+    const inverse = createInverseLogicalContentOperation({
+      kind: "setInlineEntity",
+      blockId,
+      blockType: "paragraph",
+      target: { kind: "text" },
+      range: {
+        from: { blockId, offset: 2 },
+        to: { blockId, offset: 5 },
+      },
+      entity: { type: "emoji", metadata: { value: "wave" } },
+      deletedContent: [{ type: "text", text: "abc" }],
+    });
+
+    expect(inverse).toMatchObject({
+      kind: "replaceInlineRange",
+      range: {
+        from: { blockId, offset: 2 },
+        to: { blockId, offset: 3 },
+      },
+      content: [{ type: "text", text: "abc" }],
+    });
   });
 
   it("returns null for invalid non-rich input instead of normalizing it to empty rich text", () => {

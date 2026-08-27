@@ -27,11 +27,14 @@ import {
   decodeFirstDraftBootstrap,
   serializeFirstDraftBootstrap,
   type ValidatedFirstDraftBootstrap,
-} from "../read-model/bootstrap.ts";
+} from "../bootstrap/bootstrap.ts";
 import {
   decodeFirstDraftWireFrame,
   encodeFirstDraftWireFrame,
 } from "./wire-frame.ts";
+
+/** Maximum raw frame accepted from a First Draft client connection. */
+export const MAX_FIRST_DRAFT_CLIENT_FRAME_BYTES = 2 * 1_024 * 1_024;
 export {
   FIRST_DRAFT_PROTOCOL_VERSION,
   MAX_FIRST_DRAFT_FRAME_BYTES,
@@ -67,11 +70,27 @@ export interface FirstDraftDocumentIdentity {
 
 export interface SubscribeFirstDraftDocumentMessage extends FirstDraftDocumentIdentity {
   readonly type: "subscribe-first-draft-document";
+  readonly knownRevision?: number;
 }
 
 export interface FirstDraftDocumentLoadedMessage extends FirstDraftDocumentIdentity {
   readonly type: "first-draft-document-loaded";
   readonly revision: number;
+  /** Decoded and validated exactly once by the WebSocket message boundary. */
+  readonly bootstrap: ValidatedFirstDraftBootstrap;
+}
+
+export type FirstDraftDocumentResynchronizationReason =
+  | "revision-unavailable"
+  | "revision-ahead"
+  | "invalid-history";
+
+export interface FirstDraftDocumentResynchronizedMessage
+  extends FirstDraftDocumentIdentity {
+  readonly type: "first-draft-document-resynchronized";
+  readonly requestedRevision: number;
+  readonly revision: number;
+  readonly reason: FirstDraftDocumentResynchronizationReason;
   /** Decoded and validated exactly once by the WebSocket message boundary. */
   readonly bootstrap: ValidatedFirstDraftBootstrap;
 }
@@ -233,6 +252,7 @@ export type FirstDraftClientMessage =
 export type FirstDraftServerMessage =
   | FirstDraftSessionConnectedMessage
   | FirstDraftDocumentLoadedMessage
+  | FirstDraftDocumentResynchronizedMessage
   | FirstDraftAcceptedTransactionReplayMessage
   | FirstDraftDocumentCaughtUpMessage
   | FirstDraftDocumentUnsubscribedMessage
@@ -299,11 +319,10 @@ export function encodeFirstDraftMessage(
           })),
         },
       }
-    : message.type === "first-draft-document-loaded"
+    : message.type === "first-draft-document-loaded" ||
+        message.type === "first-draft-document-resynchronized"
       ? {
-          type: message.type,
-          documentId: message.documentId,
-          revision: message.revision,
+          ...message,
           bootstrap: serializeFirstDraftBootstrap(message.bootstrap),
         }
       : message;
@@ -383,6 +402,53 @@ function validateMessageMetadata(
         error instanceof Error
           ? error.message
           : "First Draft initial document is invalid",
+      );
+    }
+  }
+  if (value.type === "first-draft-document-resynchronized") {
+    if (
+      payloads.length !== 0 ||
+      !hasExactKeys(value, [
+        "type",
+        "documentId",
+        "requestedRevision",
+        "revision",
+        "reason",
+        "bootstrap",
+      ]) ||
+      !validDocumentIdentity(value) ||
+      !isLocalRevision(value.requestedRevision) ||
+      !isLocalRevision(value.revision) ||
+      !isResynchronizationReason(value.reason)
+    ) {
+      return invalid("First Draft document resynchronization is malformed");
+    }
+    try {
+      const bootstrap = decodeFirstDraftBootstrap(value.bootstrap);
+      if (
+        bootstrap.documentId !== value.documentId ||
+        bootstrap.revision !== value.revision
+      ) {
+        return invalid(
+          "First Draft document resynchronization identity is inconsistent",
+        );
+      }
+      return {
+        ok: true,
+        message: Object.freeze({
+          type: "first-draft-document-resynchronized" as const,
+          documentId: value.documentId as string,
+          requestedRevision: value.requestedRevision as number,
+          revision: value.revision as number,
+          reason: value.reason as FirstDraftDocumentResynchronizationReason,
+          bootstrap,
+        }),
+      };
+    } catch (error) {
+      return invalid(
+        error instanceof Error
+          ? error.message
+          : "First Draft document resynchronization is invalid",
       );
     }
   }
@@ -671,7 +737,21 @@ function validSubscribeDocumentMessage(
   value: Record<string, unknown>,
 ): boolean {
   return (
-    hasExactKeys(value, ["type", "documentId"]) && validDocumentIdentity(value)
+    hasOnlyKeys(value, ["type", "documentId", "knownRevision"]) &&
+    Object.keys(value).length >= 2 &&
+    value.type === "subscribe-first-draft-document" &&
+    validDocumentIdentity(value) &&
+    (value.knownRevision === undefined || isLocalRevision(value.knownRevision))
+  );
+}
+
+function isResynchronizationReason(
+  value: unknown,
+): value is FirstDraftDocumentResynchronizationReason {
+  return (
+    value === "revision-unavailable" ||
+    value === "revision-ahead" ||
+    value === "invalid-history"
   );
 }
 
@@ -710,10 +790,19 @@ function validParticipantMetadata(value: unknown): boolean {
     hasExactKeys(value, ["displayName", "color"]) &&
     typeof value.displayName === "string" &&
     value.displayName.trim().length > 0 &&
-    value.displayName.length <= 256 &&
+    value.displayName.length <= 48 &&
+    value.displayName.trim() === value.displayName &&
+    !hasUnsafeDisplayNameCharacters(value.displayName) &&
     typeof value.color === "string" &&
     /^#[0-9a-fA-F]{6}$/.test(value.color)
   );
+}
+
+function hasUnsafeDisplayNameCharacters(value: string): boolean {
+  return [...value].some((character) => {
+    const code = character.charCodeAt(0);
+    return code <= 31 || code === 127 || "<>&".includes(character);
+  });
 }
 
 function validParticipantPresence(value: unknown): boolean {
@@ -1124,8 +1213,9 @@ function isBoundedIdentity(value: unknown): value is string {
   return (
     typeof value === "string" &&
     value.length > 0 &&
-    value.length <= 256 &&
-    value.trim() === value
+    value.length <= 64 &&
+    value.trim() === value &&
+    /^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value)
   );
 }
 

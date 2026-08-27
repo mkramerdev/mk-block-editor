@@ -1,11 +1,11 @@
 import type { EditorExternalStore } from "@repo/editor-react/store";
-import type { EditorRuntimePort } from "../document/render-port.ts";
+import type { EditableEditorRuntimePort } from "../document/render-port.ts";
 import {
   createEditorDocumentCommandExecutionContext,
   executeRegisteredEditorDocumentCommand,
   resolveRegisteredEditorCommand,
 } from "../commands/command-routing.ts";
-import type { EditorDefinition } from "../definition/contracts.ts";
+import type { EditableEditorDefinition } from "../definition/contracts.ts";
 import {
   normalizeKeyboardEventChord,
   type EditorKeybindingPlatform,
@@ -22,9 +22,9 @@ export type EditorKeybindingResolution =
     };
 
 export interface EditorKeybindingRuntimeContext {
-  readonly definition: EditorDefinition;
+  readonly definition: EditableEditorDefinition;
   readonly store: EditorExternalStore;
-  readonly editor: EditorRuntimePort;
+  readonly editor: EditableEditorRuntimePort;
 }
 
 export function resolveDocumentKeybinding(

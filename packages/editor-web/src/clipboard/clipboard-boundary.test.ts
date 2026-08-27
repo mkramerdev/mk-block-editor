@@ -10,6 +10,7 @@ import {
 import type { BlockDefinition } from "@repo/editor-core/definitions";
 import {
   createCanonicalBlockFragment,
+  createCanonicalBlockFragmentCandidate,
   createCanonicalBlockRecord,
   type CanonicalBlockFragment,
   type CanonicalBlockRecord,
@@ -31,40 +32,29 @@ import {
   importCanonicalFragmentPlainText,
 } from "./canonical-plain-text.ts";
 
-const renderer = () => null;
 const definitions: Readonly<Record<string, BlockDefinition>> = {
-  paragraph: {
+  textBlock: {
     kind: "text",
-    type: "paragraph",
-    renderer,
-    rootLayout: "normal",
+    type: "textBlock",
   },
-  heading: {
+  alternateTextBlock: {
     kind: "text",
-    type: "heading",
-    renderer,
-    rootLayout: "normal",
+    type: "alternateTextBlock",
   },
-  callout: {
+  containerWrapper: {
     kind: "wrapper",
-    type: "callout",
-    renderer,
-    rootLayout: "normal",
+    type: "containerWrapper",
     contentBoundary: false,
     content: { required: ["block"], additional: "block" },
-    defaultContent: "paragraph",
+    defaultContent: "textBlock",
   },
-  divider: {
+  atomicBlock: {
     kind: "atomic",
-    type: "divider",
-    renderer,
-    rootLayout: "normal",
+    type: "atomicBlock",
   },
-  image: {
+  alternateAtomicBlock: {
     kind: "atomic",
-    type: "image",
-    renderer,
-    rootLayout: "normal",
+    type: "alternateAtomicBlock",
   },
 };
 const schema = createBlockLocalProseMirrorSchema({
@@ -168,13 +158,13 @@ describe("canonical clipboard wire codec", () => {
           version: 1,
           roots: [
             {
-              type: "callout",
+              type: "containerWrapper",
               children: [
                 {
-                  type: "callout",
+                  type: "containerWrapper",
                   children: [
                     {
-                      type: "paragraph",
+                      type: "textBlock",
                       content: richText("A"),
                       plainText: "A",
                     },
@@ -232,7 +222,7 @@ describe("canonical clipboard wire codec", () => {
           ...valid,
           roots: [
             {
-              type: "image",
+              type: "alternateAtomicBlock",
               content: richText("forbidden"),
               plainText: "forbidden",
             },
@@ -288,7 +278,7 @@ describe("clipboard format boundary", () => {
   it("negotiates canonical HTML before generic HTML and plain text", () => {
     const written = new MemoryDataTransfer();
     boundary({
-      materializeSelection: () => textFragment("Canonical", "text"),
+      materializeSelection: () => candidate(textFragment("Canonical", "text")),
     }).writeSelection(written.asDataTransfer(), selection);
     const data = new MemoryDataTransfer({
       "text/html": written.values.get("text/html")!,
@@ -384,7 +374,7 @@ describe("clipboard format boundary", () => {
   it("produces one origin-independent canonical shape for the common text subset", () => {
     const direct = textFragment("Common text", "text");
     const written = new MemoryDataTransfer();
-    boundary({ materializeSelection: () => direct }).writeSelection(
+    boundary({ materializeSelection: () => candidate(direct) }).writeSelection(
       written.asDataTransfer(),
       selection,
     );
@@ -406,7 +396,7 @@ describe("clipboard format boundary", () => {
       ),
       importCanonicalFragmentPlainText("Common text", {
         blockDefinitions: definitions,
-        defaultTextBlockType: "paragraph",
+        defaultTextBlockType: "textBlock",
       }),
       direct,
     ];
@@ -429,15 +419,35 @@ describe("clipboard format boundary", () => {
   });
 
   it("materializes once and derives plain text and canonical semantic HTML", () => {
-    const materializeSelection = vi.fn(() => textFragment("Hello", "block"));
-    const target = new MemoryDataTransfer();
-    const result = boundary({ materializeSelection }).writeSelection(
-      target.asDataTransfer(),
-      selection,
+    const materializeSelection = vi.fn(() =>
+      candidate(textFragment("Hello", "block")),
     );
+    const plainTextExport = vi.fn(() => undefined);
+    const htmlExport = vi.fn(() => undefined);
+    const stringify = vi.spyOn(JSON, "stringify");
+    const target = new MemoryDataTransfer();
+    const result = boundary({
+      materializeSelection,
+      plainTextExportHandlers: [
+        { id: "count.plain-text", exportBlock: plainTextExport },
+      ],
+      htmlExportHandlers: [{ id: "count.html", export: htmlExport }],
+    }).writeSelection(target.asDataTransfer(), selection);
 
     expect(result).toBe(true);
     expect(materializeSelection).toHaveBeenCalledTimes(1);
+    expect(plainTextExport).toHaveBeenCalledOnce();
+    expect(htmlExport).toHaveBeenCalledOnce();
+    expect(
+      stringify.mock.calls.filter(
+        ([value]) =>
+          typeof value === "object" &&
+          value !== null &&
+          "kind" in value &&
+          value.kind === "repo.editor.blocks",
+      ),
+    ).toHaveLength(1);
+    stringify.mockRestore();
     expect(target.values.get("text/plain")).toBe("Hello");
     expect(target.writes).toEqual(["text/plain", "text/html"]);
     expect(target.values.get("text/html")).toContain("<p>");
@@ -453,7 +463,7 @@ describe("clipboard format boundary", () => {
     const source = textFragment("HTML transport", "block");
     const written = new MemoryDataTransfer();
     expect(
-      boundary({ materializeSelection: () => source }).writeSelection(
+      boundary({ materializeSelection: () => candidate(source) }).writeSelection(
         written.asDataTransfer(),
         selection,
       ),
@@ -468,20 +478,20 @@ describe("clipboard format boundary", () => {
     expect(imported?.blocks[0]?.id).not.toBe(source.blocks[0]?.id);
   });
 
-  it("uses plain text as the required write and treats HTML as optional", () => {
+  it("requires every materialized clipboard representation to be written", () => {
     const fragment = textFragment("A", "block");
     const optionalFailure = new MemoryDataTransfer({}, new Set(["text/html"]));
     expect(
       boundary({
-        materializeSelection: () => fragment,
+        materializeSelection: () => candidate(fragment),
       }).writeSelection(optionalFailure.asDataTransfer(), selection),
-    ).toBe(true);
+    ).toBe(false);
     expect(optionalFailure.values.get("text/plain")).toBe("A");
 
     const requiredFailure = new MemoryDataTransfer({}, new Set(["text/plain"]));
     expect(
       boundary({
-        materializeSelection: () => fragment,
+        materializeSelection: () => candidate(fragment),
       }).writeSelection(requiredFailure.asDataTransfer(), selection),
     ).toBe(false);
   });
@@ -490,7 +500,7 @@ describe("clipboard format boundary", () => {
     const target = new MemoryDataTransfer();
     expect(
       boundary({
-        materializeSelection: () => ({ ok: false }),
+        materializeSelection: () => null,
       }).writeSelection(target.asDataTransfer(), selection),
     ).toBe(false);
     expect(target.values.size).toBe(0);
@@ -512,7 +522,7 @@ describe("semantic HTML and plain text codecs", () => {
       const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
       const fragment = importCanonicalFragmentPlainText(text, {
         blockDefinitions: definitions,
-        defaultTextBlockType: "paragraph",
+        defaultTextBlockType: "textBlock",
         importHandlers: [createSingleTextBlockPlainTextImportHandler()],
       });
       expect(fragment?.blocks).toHaveLength(1);
@@ -535,7 +545,7 @@ describe("semantic HTML and plain text codecs", () => {
       expect(
         exportCanonicalFragmentPlainText(fragment!, {
           blockDefinitions: definitions,
-          defaultTextBlockType: "paragraph",
+          defaultTextBlockType: "textBlock",
         }),
       ).toBe(normalized);
     },
@@ -544,24 +554,24 @@ describe("semantic HTML and plain text codecs", () => {
   it("normalizes CRLF and CR before creating semantic hard breaks", () => {
     const fragment = importCanonicalFragmentPlainText("A\r\n\rB", {
       blockDefinitions: definitions,
-      defaultTextBlockType: "paragraph",
+      defaultTextBlockType: "textBlock",
       importHandlers: [createSingleTextBlockPlainTextImportHandler()],
     });
     expect(fragment?.blocks[0]?.plainText).toBe("A\n\nB");
   });
-  it("exports paragraphs, headings, marks, flattened wrappers, and safe atomics", () => {
+  it("exports neutral text, marks, recursively flattened wrappers, and no unsupported atomics", () => {
     const coherent = semanticFixture();
     const target = new MemoryDataTransfer();
     expect(
       boundary({
-        materializeSelection: () => coherent,
+        materializeSelection: () => candidate(coherent),
       }).writeSelection(target.asDataTransfer(), selection),
     ).toBe(true);
     const html = target.values.get("text/html") ?? "";
     expect(html).toContain("<p>");
     expect(html).toContain("<strong>");
-    expect(html).toContain("<h2>");
-    expect(html).toContain("<hr>");
+    expect(html).toContain("<p>Second</p>");
+    expect(html).not.toContain("<hr>");
     expect(html).toContain('data-editor-canonical-fragment="');
     expect(html).not.toMatch(/onclick|javascript:/);
   });
@@ -570,12 +580,12 @@ describe("semantic HTML and plain text codecs", () => {
     const partial = new MemoryDataTransfer();
     expect(
       boundary({
-        materializeSelection: () => textFragment("Inline", "text"),
+        materializeSelection: () => candidate(textFragment("Inline", "text")),
       }).writeSelection(partial.asDataTransfer(), selection),
     ).toBe(true);
     expect(partial.values.get("text/html")).toContain(">Inline</div>");
 
-    const image = createCanonicalBlockRecord({ type: "image" });
+    const image = createCanonicalBlockRecord({ type: "alternateAtomicBlock" });
     const imageFragment = createCanonicalBlockFragment({
       blocks: [image],
       rootBlockIds: [image.id],
@@ -586,12 +596,12 @@ describe("semantic HTML and plain text codecs", () => {
     const supported = new MemoryDataTransfer();
     expect(
       boundary({
-        materializeSelection: () => imageFragment,
+        materializeSelection: () => candidate(imageFragment),
         htmlExportHandlers: [
           {
             id: "image.semantic",
             export(block, context) {
-              if (block.type !== "image") return null;
+              if (block.type !== "alternateAtomicBlock") return null;
               const figure = context.document.createElement("figure");
               figure.textContent = "Image";
               return figure;
@@ -612,8 +622,8 @@ describe("semantic HTML and plain text codecs", () => {
     });
     const imported = boundary().readClipboardBlocks(data.asDataTransfer());
     expect(imported?.blocks.map((block) => block.type)).toEqual([
-      "heading",
-      "paragraph",
+      "alternateTextBlock",
+      "textBlock",
     ]);
     expect(imported?.blocks.map((block) => block.plainText)).toEqual([
       "Title",
@@ -627,7 +637,7 @@ describe("semantic HTML and plain text codecs", () => {
   });
 
   it("sanitizes unsafe semantic output contributed by block definitions", () => {
-    const image = createCanonicalBlockRecord({ type: "image" });
+    const image = createCanonicalBlockRecord({ type: "alternateAtomicBlock" });
     const imageFragment = createCanonicalBlockFragment({
       blocks: [image],
       rootBlockIds: [image.id],
@@ -638,12 +648,12 @@ describe("semantic HTML and plain text codecs", () => {
     const target = new MemoryDataTransfer();
     expect(
       boundary({
-        materializeSelection: () => imageFragment,
+        materializeSelection: () => candidate(imageFragment),
         htmlExportHandlers: [
           {
             id: "image.hostile",
             export(block, context) {
-              if (block.type !== "image") return null;
+              if (block.type !== "alternateAtomicBlock") return null;
               const figure = context.document.createElement("figure");
               figure.innerHTML =
                 '<script>bad()</script><a href="javascript:bad()" onclick="bad()" style="display:none" data-editor-state="hidden">Image</a><img src="data:text/html,bad" srcset="bad">';
@@ -682,14 +692,14 @@ describe("semantic HTML and plain text codecs", () => {
   it("preserves empty lines and uses the configured text import type without a target", () => {
     const fragment = importCanonicalFragmentPlainText("A\n\nB", {
       blockDefinitions: definitions,
-      defaultTextBlockType: "heading",
+      defaultTextBlockType: "alternateTextBlock",
     });
     expect(
       fragment?.blocks.map((block) => [block.type, block.plainText]),
     ).toEqual([
-      ["heading", "A"],
-      ["heading", ""],
-      ["heading", "B"],
+      ["alternateTextBlock", "A"],
+      ["alternateTextBlock", ""],
+      ["alternateTextBlock", "B"],
     ]);
   });
 
@@ -697,7 +707,7 @@ describe("semantic HTML and plain text codecs", () => {
     expect(
       exportCanonicalFragmentPlainText(wrapperFragment(), {
         blockDefinitions: definitions,
-        defaultTextBlockType: "paragraph",
+        defaultTextBlockType: "textBlock",
       }),
     ).toBe("Inside");
   });
@@ -708,19 +718,19 @@ function boundary(
 ) {
   return createEditorClipboardBoundary({
     blockDefinitions: definitions,
-    plainTextImportBlockType: "paragraph",
+    plainTextImportBlockType: "textBlock",
     materializeSelection: () => null,
     inlineMarks: [boldMarkDefinition, linkMarkDefinition],
     htmlImportHandlers: [
       createTextHtmlImportHandler({
-        id: "core.semantic-paragraph",
-        blockType: "paragraph",
+        id: "core.semantic-textBlock",
+        blockType: "textBlock",
         tags: ["p"],
       }),
       createTextHtmlImportHandler({
-        id: "core.semantic-heading",
-        blockType: "heading",
-        tags: ["h1", "h2", "h3", "h4", "h5", "h6"],
+        id: "core.semantic-alternateText",
+        blockType: "alternateTextBlock",
+        tags: ["h1", "h2", "h3"],
         metadata: (node) => ({ level: Number(node.tagName.slice(1)) }),
       }),
     ],
@@ -728,7 +738,7 @@ function boundary(
       parseHtmlCanonicalFragment(html, plainText, {
         schema,
         blockDefinitions: definitions,
-        plainTextBlockType: "paragraph",
+        plainTextBlockType: "textBlock",
         htmlImportHandlers: handlers,
         limits,
       }),
@@ -736,11 +746,20 @@ function boundary(
   });
 }
 
+function candidate(fragment: CanonicalBlockFragment) {
+  return createCanonicalBlockFragmentCandidate({
+    blocks: fragment.blocks,
+    rootBlockIds: fragment.rootBlockIds,
+    start: fragment.start,
+    end: fragment.end,
+  });
+}
+
 function textFragment(
   text: string,
   boundaryKind: "text" | "block",
 ): CanonicalBlockFragment {
-  const block = textRecord("paragraph", text);
+  const block = textRecord("textBlock", text);
   return createCanonicalBlockFragment({
     blocks: [block],
     rootBlockIds: [block.id],
@@ -751,7 +770,7 @@ function textFragment(
 }
 
 function multiRootFragment(): CanonicalBlockFragment {
-  const paragraph = textRecord("paragraph", "First", {
+  const textBlock = textRecord("textBlock", "First", {
     type: "doc",
     content: [
       {
@@ -760,23 +779,23 @@ function multiRootFragment(): CanonicalBlockFragment {
       },
     ],
   });
-  const heading = textRecord("heading", "Second", undefined, { level: 2 });
+  const alternateText = textRecord("alternateTextBlock", "Second", undefined, { level: 2 });
   return createCanonicalBlockFragment({
-    blocks: [paragraph, heading],
-    rootBlockIds: [paragraph.id, heading.id],
-    start: { kind: "block", blockId: paragraph.id },
-    end: { kind: "block", blockId: heading.id },
+    blocks: [textBlock, alternateText],
+    rootBlockIds: [textBlock.id, alternateText.id],
+    start: { kind: "block", blockId: textBlock.id },
+    end: { kind: "block", blockId: alternateText.id },
     blockDefinitions: definitions,
   });
 }
 
 function wrapperFragment(): CanonicalBlockFragment {
   const wrapper = createCanonicalBlockRecord({
-    type: "callout",
+    type: "containerWrapper",
     parentId: null,
   });
   const child = textRecord(
-    "paragraph",
+    "textBlock",
     "Inside",
     undefined,
     undefined,
@@ -792,15 +811,15 @@ function wrapperFragment(): CanonicalBlockFragment {
 }
 
 function atomicFragment(): CanonicalBlockFragment {
-  const divider = createCanonicalBlockRecord({
-    type: "divider",
+  const atomic = createCanonicalBlockRecord({
+    type: "atomicBlock",
     metadata: { role: "separator" },
   });
   return createCanonicalBlockFragment({
-    blocks: [divider],
-    rootBlockIds: [divider.id],
-    start: { kind: "block", blockId: divider.id },
-    end: { kind: "block", blockId: divider.id },
+    blocks: [atomic],
+    rootBlockIds: [atomic.id],
+    start: { kind: "block", blockId: atomic.id },
+    end: { kind: "block", blockId: atomic.id },
     blockDefinitions: definitions,
   });
 }
@@ -839,7 +858,7 @@ function textRecord(
 }
 
 function richText(text: string) {
-  return createBlockRichTextContentFromPlainText("paragraph", text);
+  return createBlockRichTextContentFromPlainText("textBlock", text);
 }
 
 function canonicalSemanticSignature(

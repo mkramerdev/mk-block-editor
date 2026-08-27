@@ -1,41 +1,27 @@
 # @repo/editor-web
 
-`@repo/editor-web` is the generic React DOM surface for the canonical block
-editor. Read and editable editors share one `EditorDocument` and canonical
-block tree, while their constructors and complete definitions live behind
-separate static entrypoints. Each block definition directly owns its renderer:
+`@repo/editor-web` is the generic React DOM surface for the canonical editable
+block editor. One `EditorDocument` renders the canonical block tree, and each
+block definition directly owns its renderer:
 
 ```tsx
 import { EditorDocument } from "@repo/editor-web/document-runtime";
 import { compileCanonicalEditorDefinition } from "@repo/editor-web/editor-definition";
 import { initializeEditableEditor } from "@repo/editor-web/editor";
-import {
-  compileReadEditorDefinition,
-  initializeReadEditor,
-} from "@repo/editor-web/read-runtime";
 
 const editor = initializeEditableEditor({
   compiledDefinition: compileCanonicalEditorDefinition(editableDefinition),
   snapshot,
   onChange,
 });
-const readEditor = initializeReadEditor({
-  compiledDefinition: compileReadEditorDefinition(readDefinition),
-  snapshot,
-});
 ```
-
-The read initializer constructs no ProseMirror view, editing schema, history,
-mutation commands, cut/paste pipeline, or additional-selection manager. It
-still owns canonical local selection, geometry, copy, recovery, and atomic
-remote content application.
 
 ## Definition composition
 
-Static composition is owned directly by `EditorDefinition`:
+Static composition is owned directly by `EditableEditorDefinition`:
 
 ```text
-EditorDefinition
+EditableEditorDefinition
 |- blocks
 |- inlineMarks
 |- inlineAtoms
@@ -47,8 +33,8 @@ EditorDefinition
 |- blockInternalSelectionSubsystems
 |- selectionFragment
 |- documentValidators
-|- commands (editable definitions)
-`- keybindings (editable definitions)
+|- commands
+`- keybindings
 ```
 
 Editable commands and keybindings are owned by the editable definition and
@@ -81,7 +67,7 @@ session. Existing text is never continuously scanned: hydration, replay,
 remote ingress, undo, redo, caret movement after old text, paste, and ordinary
 programmatic insertion cannot activate a session.
 
-Product code reads or subscribes to the session through the public `Editor`,
+Product code reads or subscribes to the session through the public `EditableEditor`,
 or through the headless `useEditorTypingTriggerSession(editor)` external-store
 adapter. The product owns candidates, filtering, menus, keyboard policy,
 loading state, portal choice, geometry-driven positioning, and presentation.
@@ -103,24 +89,21 @@ and transaction notification remain one finalized action.
 
 ## Runtime and DOM ownership
 
-`initializeReadEditor` and `initializeEditableEditor` validate their semantic
-definition, snapshot, and the renderers attached directly to its block
-definitions. `EditorDocument` owns one `BlockList`;
+`initializeEditableEditor` validates its semantic definition, snapshot, and
+the renderers attached directly to its block definitions. `EditorDocument`
+owns one `BlockList`;
 `BlockList` is the root grid and directly contains root `BlockShell` elements.
 Each shell is registered structural DOM and
 directly contains the caller's product renderer.
 
-`ReadTextBlockPrimitive` owns the PM-free canonical `.editor-web-text`
+`InactiveTextBlockPrimitive` owns the PM-free canonical `.editor-web-text`
 projection. Every editable document text runtime owns exactly one
 `SharedTextEditor`, which creates at most one `EditorView` lazily. Activation
 rebinds that same view to the selected text block and moves its DOM into the
 active block's slot. Individual block React mounts do not create or own
-EditorViews. Inactive blocks retain exact canonical read projections, including
+EditorViews. Inactive blocks retain exact canonical projections, including
 while the active projection is mounted and hidden. `BlockShell` owns neither
 native focus nor semantic selection and is never a focus target.
-
-Read editors allocate no `SharedTextEditor` or ProseMirror view, and their
-static runtime entrypoint does not load the editable ProseMirror path.
 
 The browser is the sole native-focus authority, read through the candidate
 target's `ownerDocument.activeElement`. Text and atomic targets register in a
@@ -205,22 +188,28 @@ The public semantic classes are:
 - `editor-web-document`: mounted document root.
 - `editor-web-block-list`: canonical block list.
 - `editor-web-block`: registered canonical block shell and direct renderer parent.
-- `editor-web-text`: editable or read-only text root.
+- `editor-web-text`: active or inactive editable-document text root.
 - `editor-web-error`: generic editor error state.
 - `editor-web-selection-paint-rect`: rectangular selection paint.
 - `editor-web-selection-paint-segment`: segmented selection paint.
 
 ## History
 
-History commands and keybindings are editable behavior supplied by the
-compiled definition. The editable session remains responsible for applying and
-disposing history resources; read editors allocate none.
+History commands and keybindings are supplied by the compiled definition. The
+editable session remains responsible for applying and disposing history
+resources. Local and Yjs content
+runtimes expose the same opaque operation-anchor ports to the backend-neutral
+editor-react replay algorithm. Operation replay is independent from saved
+selection restoration, refreshes its opposite plan after every successful
+transition, resolves all operation boundaries for an affected block through
+one history lease, and has no numeric-offset or selection-position fallback.
+An authoritative local reconciliation without canonical operation lineage
+clears history instead of attempting to migrate anchors.
 
 ## Public subpaths
 
 - `@repo/editor-web/document-runtime`
 - `@repo/editor-web/editor-definition`
-- `@repo/editor-web/read-runtime`
 - `@repo/editor-web/editor`
 - `@repo/editor-web/clipboard-runtime`
 - `@repo/editor-web/block-renderer`

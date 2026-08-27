@@ -14,6 +14,7 @@ import type {
   AppliedContentCommit,
   EditorContentCommitPort,
 } from "../../operations/runtime/content-commit.ts";
+import type { EditorOperationAnchor } from "../../operations/runtime/operation-replay.ts";
 
 export type EditorRawBlockContent = RichTextDocumentNodeJson;
 
@@ -98,6 +99,14 @@ export type EditorLiveTextAnchorResolveResult =
   | EditorContentTextAnchorResolveResult
   | { readonly ok: false; readonly reason: "not-live" };
 
+export type EditorOperationAnchorCreateResult =
+  | { readonly ok: true; readonly anchor: EditorOperationAnchor }
+  | {
+      readonly ok: false;
+      readonly reason: "invalid" | "missing-text";
+      readonly message?: string;
+    };
+
 export interface EditorExternalContentApplication {
   readonly blockGraphVersion: number;
   readonly blockId: BlockId;
@@ -140,6 +149,10 @@ export interface EditorContentRuntime extends EditorContentCommitPort {
       readonly affinity: EditorContentTextAffinity | null;
     },
   ): EditorContentTextAnchorCreateResult;
+  createOperationAnchorInContext(
+    lease: EditorBlockContentLease,
+    input: { readonly textOffset: number; readonly association: -1 | 1 },
+  ): EditorOperationAnchorCreateResult;
   tryCreateTextAnchorInLiveContext(input: {
     readonly blockId: BlockId;
     readonly blockType: BlockType;
@@ -155,6 +168,10 @@ export interface EditorContentRuntime extends EditorContentCommitPort {
       readonly payload: RelativeTextPoint;
     },
   ): EditorContentTextAnchorResolveResult;
+  resolveOperationAnchorInContext(
+    lease: EditorBlockContentLease,
+    anchor: EditorOperationAnchor,
+  ): EditorContentTextAnchorResolveResult;
   tryResolveTextAnchorInLiveContext(input: {
     readonly blockId: BlockId;
     readonly blockType: BlockType;
@@ -168,5 +185,6 @@ export interface EditorContentRuntime extends EditorContentCommitPort {
   subscribeContentCommits(
     listener: (commit: AppliedContentCommit) => void,
   ): () => void;
+  subscribeOperationAnchorInvalidation(listener: () => void): () => void;
   destroy(): void;
 }

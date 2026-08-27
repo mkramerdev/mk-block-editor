@@ -1,3 +1,4 @@
+import type { VersionedBlock } from "@repo/editor-core/document";
 import type { BlockId, JsonObject } from "@repo/editor-core/kernel";
 
 export const COLUMN_LAYOUT_WEIGHT_FIELD = "layoutWeight" as const;
@@ -7,6 +8,44 @@ export const COLUMN_PREFERRED_MIN_WIDTH_PX = 160;
 export interface OrderedColumnWeight {
   readonly id: BlockId;
   readonly weight: number;
+}
+
+export interface ColumnLayoutPresentation {
+  readonly columns: readonly OrderedColumnWeight[];
+  readonly resizeValid: boolean;
+  readonly tracks: string;
+}
+
+/**
+ * Resolves presentation from an ordered, non-subscribing or subscribed graph
+ * snapshot. Invalid canonical weight metadata disables resizing but never
+ * collapses the current live column shells into implicit grid rows.
+ */
+export function resolveColumnLayoutPresentation(input: {
+  readonly columnsId: BlockId;
+  readonly records: readonly (VersionedBlock | null)[];
+}): ColumnLayoutPresentation {
+  const liveColumns = input.records.filter(
+    (record): record is VersionedBlock =>
+      record !== null &&
+      record.tombstone === null &&
+      record.parentId === input.columnsId &&
+      record.type === "column",
+  );
+  const columns = liveColumns.map((record) => ({
+    id: record.id,
+    weight: readColumnLayoutWeight(record.metadata) ?? 0,
+  }));
+  const weightedTracks = columnWeightsToGridTracks(columns);
+  return {
+    columns,
+    resizeValid: weightedTracks !== null,
+    tracks:
+      weightedTracks ??
+      (columns.length > 0
+        ? `repeat(${columns.length}, minmax(0, 1fr))`
+        : "minmax(0, 1fr)"),
+  };
 }
 
 export function readColumnLayoutWeight(metadata: unknown): number | null {

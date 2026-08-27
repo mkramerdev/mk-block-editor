@@ -13,12 +13,12 @@ describe("editor block factory", () => {
     expect(
       createBlockRecord({
         id: blockId,
-        type: "heading",
+        type: "alternateTextBlock",
         metadata: { level: 99, archived: true },
       }),
     ).toStrictEqual({
       id: blockId,
-      type: "heading",
+      type: "alternateTextBlock",
       parentId: null,
       tombstone: null,
       metadata: { level: 99, archived: true },
@@ -31,7 +31,7 @@ describe("editor block factory", () => {
     expect(
       createBlockRecord({
         id: "child" as BlockId,
-        type: "paragraph",
+        type: "textBlock",
         parentId: parentId,
         tombstone: {
           deletedAt: 10,
@@ -40,7 +40,7 @@ describe("editor block factory", () => {
       }),
     ).toStrictEqual({
       id: "child",
-      type: "paragraph",
+      type: "textBlock",
       parentId: parentId,
       tombstone: {
         deletedAt: 10,
@@ -55,7 +55,7 @@ describe("editor block factory", () => {
     expect(
       createVersionedBlockRecord({
         id: blockId,
-        type: "paragraph",
+        type: "textBlock",
         version: {
           metadataVersion: "7",
           contentVersion: "v1" as ContentVersion,
@@ -63,7 +63,7 @@ describe("editor block factory", () => {
       }),
     ).toStrictEqual({
       id: blockId,
-      type: "paragraph",
+      type: "textBlock",
       parentId: null,
       metadataVersion: "7",
       contentVersion: "v1",

@@ -42,7 +42,6 @@ export {
   isLogicalContentOperationKind,
   validateLogicalContentOperation,
 } from "../../content/rich-text/content-operations.ts";
-export { rebaseLogicalContentOperationByExpectedContent } from "../../content/rich-text/content-rebase.ts";
 export {
   EditorImmutableBinary,
   type EditorContentCheckpoint,

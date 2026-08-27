@@ -8,8 +8,8 @@ import {
 } from "@testing-library/react";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { asBlockId, type BlockId } from "@repo/editor-core/kernel";
-import { createBlockRecord } from "@repo/editor-core/metadata";
+import type { BlockId } from "@repo/editor-core/kernel";
+import { linkMarkDefinition } from "@repo/editor-core/content/marks";
 import {
   createCommittedSelectionSnapshot,
   type CommittedSelectionSnapshot,
@@ -19,11 +19,6 @@ import {
   type SelectionInlineMarkFormatStates,
 } from "@repo/editor-react/selection";
 import type { EditableEditor } from "@repo/editor-web/editor";
-import {
-  compileReadEditorDefinition,
-  initializeReadEditor,
-  type ReadEditorDefinition,
-} from "@repo/editor-web/read-runtime";
 import { FirstDraftSelectionMenu } from "./first-draft-selection-menu.tsx";
 
 describe("FirstDraftSelectionMenu", () => {
@@ -393,48 +388,6 @@ describe("FirstDraftSelectionMenu", () => {
     expect(editor.selection.subscribe).toHaveBeenCalledOnce();
   });
 
-  it("renders no menu for a read-only editor", () => {
-    const blockId = asBlockId("01890f07-1c00-7000-8000-000000000906");
-    const definition = {
-      blocks: {
-        paragraph: {
-          kind: "text",
-          rootLayout: "normal",
-          type: "paragraph",
-          split: { default: "paragraph" },
-          renderer: () => null,
-        },
-        divider: {
-          kind: "atomic",
-          rootLayout: "normal",
-          type: "divider",
-          renderer: () => null,
-        },
-      },
-      defaultRoot: "paragraph",
-      inlineMarks: [],
-      inlineAtoms: [],
-    } satisfies ReadEditorDefinition;
-    const editor = initializeReadEditor({
-      compiledDefinition: compileReadEditorDefinition(definition),
-      snapshot: {
-        blockGraphVersion: 1,
-        blocks: {
-          [blockId]: createBlockRecord({
-            id: blockId,
-            type: "divider",
-          }),
-        },
-        rootBlockIds: [blockId],
-        childIdsByParentId: {},
-        content: {},
-        opaqueContentCheckpoints: {},
-      },
-    });
-    render(<FirstDraftSelectionMenu editor={editor} />);
-    expect(screen.queryByLabelText("Text formatting")).toBeNull();
-    editor.dispose();
-  });
 });
 
 function editorFixture(
@@ -482,6 +435,7 @@ function editorFixture(
     : states;
   return {
     editable: true,
+    definition: { inlineMarks: [linkMarkDefinition] },
     selection: {
       getSnapshot: vi.fn(() => ({
         kind: "document",

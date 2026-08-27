@@ -17,7 +17,7 @@ const id = (suffix: number): BlockId =>
 const record = (blockId: BlockId): VersionedBlock =>
   createVersionedBlockRecord({
     id: blockId,
-    type: "paragraph",
+    type: "textBlock",
     version: { metadataVersion: "1", contentVersion: null },
   });
 const graph = (

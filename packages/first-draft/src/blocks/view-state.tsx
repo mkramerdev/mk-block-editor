@@ -16,12 +16,24 @@ interface ViewStateSnapshot {
 
 export interface FirstDraftViewStateStore {
   getSnapshot(): ViewStateSnapshot;
+  getSelectedTab(containerId: BlockId): BlockId | null;
   isBlockCollapsed(blockId: BlockId): boolean;
   setBlockCollapsed(blockId: BlockId, collapsed: boolean): void;
   deleteBlockState(blockId: BlockId): void;
   subscribe(listener: () => void): () => void;
   selectTab(containerId: BlockId, childId: BlockId): void;
   toggleCollapsed(blockId: BlockId): void;
+}
+
+export function resolveEffectiveFirstDraftTabPaneId(
+  store: Pick<FirstDraftViewStateStore, "getSelectedTab">,
+  tabsId: BlockId,
+  directPaneIds: readonly BlockId[],
+): BlockId | null {
+  const selected = store.getSelectedTab(tabsId);
+  return selected && directPaneIds.includes(selected)
+    ? selected
+    : directPaneIds[0] ?? null;
 }
 
 interface FirstDraftViewStateOptions {
@@ -42,6 +54,9 @@ export function createFirstDraftViewStateStore(
   };
   return {
     getSnapshot: () => snapshot,
+    getSelectedTab(containerId) {
+      return selected[containerId] ?? null;
+    },
     isBlockCollapsed(blockId) {
       return collapsed.has(blockId);
     },
@@ -52,7 +67,17 @@ export function createFirstDraftViewStateStore(
       publish();
     },
     deleteBlockState(blockId) {
-      if (!collapsed.delete(blockId)) return;
+      let changed = collapsed.delete(blockId);
+      if (Object.prototype.hasOwnProperty.call(selected, blockId)) {
+        delete selected[blockId];
+        changed = true;
+      }
+      for (const [containerId, childId] of Object.entries(selected)) {
+        if (childId !== blockId) continue;
+        delete selected[containerId as BlockId];
+        changed = true;
+      }
+      if (!changed) return;
       publish();
     },
     subscribe(listener) {
@@ -100,12 +125,16 @@ function useStore(): FirstDraftViewStateStore {
   return store;
 }
 
+export function useFirstDraftViewStateStore(): FirstDraftViewStateStore {
+  return useStore();
+}
+
 export function useSelectedTab(containerId: BlockId): BlockId | null {
   const store = useStore();
   return useSyncExternalStore(
     store.subscribe,
-    () => store.getSnapshot().selectedTabs[containerId] ?? null,
-    () => store.getSnapshot().selectedTabs[containerId] ?? null,
+    () => store.getSelectedTab(containerId),
+    () => store.getSelectedTab(containerId),
   );
 }
 

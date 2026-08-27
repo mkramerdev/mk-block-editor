@@ -20,22 +20,17 @@ import type {
 } from "../../../selection/model/types.ts";
 import { createEditorSelectionTextAnchor } from "../../../selection/anchors/text-anchor.ts";
 import { createInitialEditorManifestState } from "../state/command-state.ts";
-import type { EditorHistorySelection } from "../history.ts";
+import type { EditorHistoryEntry, EditorHistorySelection } from "../history.ts";
 import { EditorImplementation } from "./editor-implementation.ts";
 
-const renderer = () => null;
 const definitions: Readonly<Record<BlockType, BlockDefinition>> = {
-  paragraph: {
+  textBlock: {
     kind: "text",
-    type: "paragraph",
-    rootLayout: "normal",
-    renderer,
+    type: "textBlock",
   },
-  callout: {
+  containerWrapper: {
     kind: "atomic",
-    type: "callout",
-    rootLayout: "normal",
-    renderer,
+    type: "containerWrapper",
   },
 };
 const blockId = asBlockId("01890f07-1c00-7000-8000-000000000001");
@@ -52,12 +47,7 @@ const testTextAnchorResolver: EditorSelectionTextAnchorResolver = {
 };
 
 interface HistoryTestAccess {
-  readonly history: readonly {
-    readonly forward: unknown;
-    readonly inverse: unknown;
-    readonly selectionBefore: EditorHistorySelection;
-    readonly selectionAfter: EditorHistorySelection;
-  }[];
+  readonly history: readonly EditorHistoryEntry[];
   readonly historyIndex: number;
 }
 
@@ -74,11 +64,14 @@ function createTestEditor(
     readonly createSelectionTextAnchor?: NonNullable<
       InitializeEditorImplementationOptions["createSelectionTextAnchor"]
     >;
+    readonly acquireTextContentAccess?: NonNullable<
+      InitializeEditorImplementationOptions["acquireTextContentAccess"]
+    >;
   } = {},
 ): EditorImplementation {
   const block = createVersionedBlockRecord({
     id: blockId,
-    type: "paragraph",
+    type: "textBlock",
     parentId: null,
     version: {
       metadataVersion: "1",
@@ -87,7 +80,7 @@ function createTestEditor(
   });
   const secondBlock = createVersionedBlockRecord({
     id: secondBlockId,
-    type: "callout",
+    type: "containerWrapper",
     parentId: null,
     metadata: { existing: "kept", nested: { width: 100, height: 80 } },
     version: {
@@ -103,7 +96,7 @@ function createTestEditor(
       childIdsByParentId: {},
     }),
     blockDefinitions: definitions,
-    defaultRootBlockType: "paragraph",
+    defaultRootBlockType: "textBlock",
     inlineMarks: [],
     readBlockPlainText: () => "history selection",
     resolveSelectionTextAnchor:
@@ -112,6 +105,9 @@ function createTestEditor(
     ...(options.createSelectionTextAnchor === undefined
       ? {}
       : { createSelectionTextAnchor: options.createSelectionTextAnchor }),
+    ...(options.acquireTextContentAccess === undefined
+      ? {}
+      : { acquireTextContentAccess: options.acquireTextContentAccess }),
     ...(options.maximumHistoryEntries === undefined
       ? {}
       : { maximumHistoryEntries: options.maximumHistoryEntries }),
@@ -144,7 +140,7 @@ function applyInvalidMetadataUpdate(editor: EditorImplementation): boolean {
 function removeTestBlock(editor: EditorImplementation): void {
   const replacement = createVersionedBlockRecord({
     id: missingBlockId,
-    type: "paragraph",
+    type: "textBlock",
     parentId: null,
     version: {
       metadataVersion: "1",
@@ -197,7 +193,7 @@ function logicalSelection(offset: number): EditorSelection {
   if (!anchor.ok) throw new Error(anchor.message);
   const point = {
     blockId,
-    blockType: "paragraph",
+    blockType: "textBlock",
     blockCategory: "text" as const,
     textOffset: offset,
     textAnchor: anchor.textAnchor,
@@ -545,7 +541,7 @@ describe("EditorImplementation linear history", () => {
     editor.dispose();
   });
 
-  it("leaves the document, cursor, and availability unchanged after failed undo", () => {
+  it("clears undo history when recovery replaces the target block", () => {
     const editor = createTestEditor();
     expect(setMetadata(editor, "first")).toBe(true);
     removeTestBlock(editor);
@@ -555,18 +551,16 @@ describe("EditorImplementation linear history", () => {
     editor.commandAvailability.subscribe(listener);
     editor.selectionController.canonical.subscribe(selectionEffect);
 
-    expect(editor.undo()).toMatchObject({
-      status: "operation-application-failed",
-    });
+    expect(editor.undo()).toEqual({ status: "history-empty" });
     expect(editor.getCommandState()).toEqual(before);
-    expect(editor.canUndo).toBe(true);
+    expect(editor.canUndo).toBe(false);
     expect(editor.canRedo).toBe(false);
     expect(listener).not.toHaveBeenCalled();
     expect(selectionEffect).not.toHaveBeenCalled();
     editor.dispose();
   });
 
-  it("leaves the document, cursor, and availability unchanged after failed redo", () => {
+  it("clears redo history when recovery replaces the target block", () => {
     const editor = createTestEditor();
     expect(setMetadata(editor, "first")).toBe(true);
     expect(editor.undo()).toEqual({ status: "applied" });
@@ -577,12 +571,10 @@ describe("EditorImplementation linear history", () => {
     editor.commandAvailability.subscribe(listener);
     editor.selectionController.canonical.subscribe(selectionEffect);
 
-    expect(editor.redo()).toMatchObject({
-      status: "operation-application-failed",
-    });
+    expect(editor.redo()).toEqual({ status: "history-empty" });
     expect(editor.getCommandState()).toEqual(before);
     expect(editor.canUndo).toBe(false);
-    expect(editor.canRedo).toBe(true);
+    expect(editor.canRedo).toBe(false);
     expect(listener).not.toHaveBeenCalled();
     expect(selectionEffect).not.toHaveBeenCalled();
     editor.dispose();
@@ -695,7 +687,7 @@ describe("EditorImplementation linear history", () => {
     second.dispose();
   });
 
-  it("does not record or publish availability for external snapshot ingress", () => {
+  it("clears operation-anchor history at an external snapshot reconciliation boundary", () => {
     const editor = createTestEditor();
     expect(setMetadata(editor, "local")).toBe(true);
     const before = {
@@ -707,7 +699,7 @@ describe("EditorImplementation linear history", () => {
     editor.commandAvailability.subscribe(listener);
     const replacement = createVersionedBlockRecord({
       id: blockId,
-      type: "paragraph",
+      type: "textBlock",
       parentId: null,
       metadata: { remote: true },
       version: {
@@ -724,12 +716,14 @@ describe("EditorImplementation linear history", () => {
       childIdsByParentId: {},
     });
 
-    expect(historyAccess(editor).history).toEqual(before.history);
-    expect(historyAccess(editor).historyIndex).toBe(before.index);
-    expect(editor.commandAvailability.getSnapshot()).toEqual(
-      before.availability,
-    );
-    expect(listener).not.toHaveBeenCalled();
+    expect(before.history).toHaveLength(1);
+    expect(historyAccess(editor).history).toEqual([]);
+    expect(historyAccess(editor).historyIndex).toBe(0);
+    expect(editor.commandAvailability.getSnapshot()).toEqual({
+      canUndo: false,
+      canRedo: false,
+    });
+    expect(listener).toHaveBeenCalledOnce();
     editor.dispose();
   });
 
@@ -778,7 +772,16 @@ describe("EditorImplementation linear history", () => {
     const stored = historyAccess(editor).history[0]!;
 
     expect(Object.isFrozen(stored)).toBe(true);
-    expect(Object.isFrozen(stored.forward)).toBe(true);
+    expect(Object.isFrozen(stored.semanticForward)).toBe(true);
+    expect(stored.state).toBe("applied");
+    if (stored.state !== "applied") throw new Error("Expected applied history");
+    expect(Object.isFrozen(stored.nextUndo)).toBe(true);
+    expect(stored.nextUndo.steps).toMatchObject([
+      {
+        kind: "anchor-free",
+        operation: { kind: "updateBlockMetadata" },
+      },
+    ]);
     expect(
       historyDocumentSelection(stored.selectionBefore)?.anchor.textOffset,
     ).toBe(1);
@@ -786,14 +789,16 @@ describe("EditorImplementation linear history", () => {
       historyDocumentSelection(stored.selectionAfter)?.focus.textOffset,
     ).toBe(1);
     expect(
-      (stored.forward as UpdateBlockMetadataOperation).updates[0]?.values
-        .stored,
+      (stored.semanticForward as UpdateBlockMetadataOperation).updates[0]
+        ?.values.stored,
     ).toBe("saved");
     expect(Object.keys(stored).sort()).toEqual([
-      "forward",
-      "inverse",
+      "nextUndo",
       "selectionAfter",
       "selectionBefore",
+      "semanticForward",
+      "semanticInverse",
+      "state",
     ]);
 
     expect(editor.undo()).toEqual({ status: "applied" });
@@ -849,25 +854,213 @@ describe("EditorImplementation linear history", () => {
   });
 
   it("rejects reentrant history commands while replay is applying", () => {
-    let nestedResult: ReturnType<EditorImplementation["undo"]> | null = null;
+    const observed: Array<{
+      readonly action: "undo" | "redo";
+      readonly nestedResult: ReturnType<EditorImplementation["undo"]>;
+      readonly historyIndex: number;
+      readonly state: EditorHistoryEntry["state"];
+      readonly canUndo: boolean;
+      readonly canRedo: boolean;
+    }> = [];
     const editor = createTestEditor({
       onCanonicalCommit: (commit, currentEditor) => {
-        if (commit.historyAction === "undo") {
-          nestedResult = currentEditor.undo();
-        }
+        if (commit.historyAction !== "undo" && commit.historyAction !== "redo")
+          return;
+        const access = historyAccess(currentEditor);
+        observed.push({
+          action: commit.historyAction,
+          nestedResult:
+            commit.historyAction === "undo"
+              ? currentEditor.undo()
+              : currentEditor.redo(),
+          historyIndex: access.historyIndex,
+          state: access.history[0]!.state,
+          canUndo: currentEditor.canUndo,
+          canRedo: currentEditor.canRedo,
+        });
       },
     });
     expect(setMetadata(editor, "first")).toBe(true);
 
     expect(editor.undo()).toEqual({ status: "applied" });
-    expect(nestedResult).toEqual({
-      status: "execution-unavailable",
-      reason: "history-replay-in-progress",
-    });
-    expect(editor.canUndo).toBe(false);
-    expect(editor.canRedo).toBe(true);
+    expect(editor.redo()).toEqual({ status: "applied" });
+    expect(observed).toEqual([
+      {
+        action: "undo",
+        nestedResult: {
+          status: "execution-unavailable",
+          reason: "history-replay-in-progress",
+        },
+        historyIndex: 0,
+        state: "undone",
+        canUndo: false,
+        canRedo: true,
+      },
+      {
+        action: "redo",
+        nestedResult: {
+          status: "execution-unavailable",
+          reason: "history-replay-in-progress",
+        },
+        historyIndex: 1,
+        state: "applied",
+        canUndo: true,
+        canRedo: false,
+      },
+    ]);
+    expect(metadataValue(editor)).toBe("first");
+    expect(editor.canUndo).toBe(true);
+    expect(editor.canRedo).toBe(false);
     editor.dispose();
   });
+
+  it("keeps replay healthy when saved selection restoration fails", () => {
+    const editor = createTestEditor({
+      resolveSelectionTextAnchor: (point) => ({
+        ok: false,
+        reason: "missing-text",
+        blockId: point.blockId,
+      }),
+      createSelectionTextAnchor: () => ({ ok: false }),
+    });
+    settleTestSelection(editor, logicalSelection(1));
+    expect(setMetadata(editor, "first")).toBe(true);
+
+    expect(editor.undo()).toEqual({ status: "applied" });
+    expect(editor.canUndo).toBe(false);
+    expect(editor.canRedo).toBe(true);
+    expect(historyAccess(editor).history[0]?.state).toBe("undone");
+    expect(editor.redo()).toEqual({ status: "applied" });
+    expect(editor.canUndo).toBe(true);
+    expect(editor.canRedo).toBe(false);
+    expect(historyAccess(editor).history[0]?.state).toBe("applied");
+    expect(metadataValue(editor)).toBe("first");
+    editor.dispose();
+  });
+
+  it.each([
+    "acquire-unavailable",
+    "acquire-throw",
+    "resolve-failure",
+    "resolve-throw",
+    "create-failure",
+    "create-throw",
+    "release-throw",
+  ] as const)(
+    "treats %s as best-effort during graph history selection restoration",
+    (failureMode) => {
+      let replaying = false;
+      let releaseCalls = 0;
+      const publications: CanonicalEditorCommit[] = [];
+      const createAnchor: NonNullable<
+        InitializeEditorImplementationOptions["createSelectionTextAnchor"]
+      > = (point) => {
+        if (replaying && failureMode === "create-throw") {
+          throw new Error("test selection anchor creation failed");
+        }
+        if (
+          replaying &&
+          (failureMode === "create-failure" ||
+            failureMode === "resolve-failure")
+        ) {
+          return { ok: false };
+        }
+        const created = createEditorSelectionTextAnchor({
+          codec: "test-runtime-anchor",
+          payload: { encoded: "AQ==", assoc: 1 },
+        });
+        return created.ok
+          ? {
+              ok: true,
+              textAnchor: created.textAnchor,
+              textOffset: point.textOffset,
+            }
+          : { ok: false };
+      };
+      const editor = createTestEditor({
+        acquireTextContentAccess: () => {
+          if (replaying && failureMode === "acquire-throw") {
+            throw new Error("test selection content acquisition failed");
+          }
+          if (replaying && failureMode === "acquire-unavailable") return null;
+          return () => {
+            releaseCalls += 1;
+            if (replaying && failureMode === "release-throw") {
+              throw new Error("test selection content release failed");
+            }
+          };
+        },
+        resolveSelectionTextAnchor: (point) => {
+          if (replaying && failureMode === "resolve-throw") {
+            throw new Error("test selection anchor resolution failed");
+          }
+          if (
+            replaying &&
+            (failureMode === "resolve-failure" ||
+              failureMode === "create-failure" ||
+              failureMode === "create-throw")
+          ) {
+            return {
+              ok: false,
+              reason: "missing-text",
+              blockId: point.blockId,
+            };
+          }
+          return {
+            ok: true,
+            blockId: point.blockId,
+            textAnchor: point.textAnchor!,
+            textOffset: point.textOffset,
+            affinity: point.affinity,
+          };
+        },
+        createSelectionTextAnchor: createAnchor,
+        onCanonicalCommit: (commit, currentEditor) => {
+          publications.push(commit);
+          if (commit.historyAction === "command") return;
+          const access = historyAccess(currentEditor);
+          expect(access.historyIndex).toBe(
+            commit.historyAction === "undo" ? 0 : 1,
+          );
+          expect(access.history[0]?.state).toBe(
+            commit.historyAction === "undo" ? "undone" : "applied",
+          );
+          expect(currentEditor.canUndo).toBe(commit.historyAction === "redo");
+          expect(currentEditor.canRedo).toBe(commit.historyAction === "undo");
+          expect(commit.selectionAfter).toEqual({ kind: "none" });
+        },
+      });
+      settleTestSelection(editor, logicalSelection(1));
+      expect(setMetadata(editor, "first")).toBe(true);
+      clearTestSelection(editor);
+      replaying = true;
+
+      expect(editor.undo()).toEqual({ status: "applied" });
+      expect(metadataValue(editor)).toBeUndefined();
+      expect(readCanonicalFocusOffset(editor)).toBeUndefined();
+      expect(editor.canUndo).toBe(false);
+      expect(editor.canRedo).toBe(true);
+      expect(historyAccess(editor).history[0]?.state).toBe("undone");
+
+      expect(editor.redo()).toEqual({ status: "applied" });
+      expect(metadataValue(editor)).toBe("first");
+      expect(readCanonicalFocusOffset(editor)).toBeUndefined();
+      expect(editor.canUndo).toBe(true);
+      expect(editor.canRedo).toBe(false);
+      expect(historyAccess(editor).history[0]?.state).toBe("applied");
+      expect(publications.map((commit) => commit.historyAction)).toEqual([
+        "command",
+        "undo",
+        "redo",
+      ]);
+      expect(releaseCalls).toBe(
+        failureMode === "acquire-unavailable" || failureMode === "acquire-throw"
+          ? 0
+          : 2,
+      );
+      editor.dispose();
+    },
+  );
 });
 
 function publishedFocusAnchor(change: CanonicalEditorCommit): string | null {

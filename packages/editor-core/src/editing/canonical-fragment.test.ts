@@ -14,34 +14,24 @@ import {
   type CanonicalBlockRecord,
 } from "./canonical-fragment.ts";
 import { createCollisionSafeBlockIdAllocator } from "./block-editing/block-id-allocator.ts";
-
-const renderer = () => null;
 const definitions: Readonly<Record<string, BlockDefinition>> = {
-  paragraph: {
+  textBlock: {
     kind: "text",
-    type: "paragraph",
-    renderer,
-    rootLayout: "normal",
+    type: "textBlock",
   },
-  divider: {
+  atomicBlock: {
     kind: "atomic",
-    type: "divider",
-    renderer,
-    rootLayout: "normal",
+    type: "atomicBlock",
   },
-  quote: {
+  wrapperBlock: {
     kind: "wrapper",
-    type: "quote",
-    renderer,
-    rootLayout: "normal",
+    type: "wrapperBlock",
     contentBoundary: false,
-    content: { required: ["paragraph"], additional: "paragraph" },
+    content: { required: ["textBlock"], additional: "textBlock" },
   },
   selectableWrapper: {
     kind: "wrapper",
     type: "selectableWrapper",
-    renderer,
-    rootLayout: "normal",
     selection: wholeSelection(),
     contentBoundary: false,
     content: { required: [] },
@@ -58,9 +48,9 @@ function textRecord(
 ): CanonicalBlockRecord {
   return {
     id: blockId,
-    type: "paragraph",
+    type: "textBlock",
     parentId,
-    content: createBlockRichTextContentFromPlainText("paragraph", plainText),
+    content: createBlockRichTextContentFromPlainText("textBlock", plainText),
     plainText,
   };
 }
@@ -85,7 +75,7 @@ describe("canonical block fragments", () => {
     const child = id(2);
     const result = createCanonicalBlockFragment({
       blocks: [
-        { id: root, type: "quote", parentId: null },
+        { id: root, type: "wrapperBlock", parentId: null },
         textRecord(child, "hello", root),
       ],
       rootBlockIds: [root],
@@ -100,16 +90,15 @@ describe("canonical block fragments", () => {
   it("rejects a constrained child used as a fragment root", () => {
     const constrainedDefinitions: Readonly<Record<string, BlockDefinition>> = {
       ...definitions,
-      quote: {
-        ...definitions.quote!,
-        parents: { allowed: ["quoteList"] },
+      wrapperBlock: {
+        ...definitions.wrapperBlock!,
+        parents: { allowed: ["containerWrapper"] },
       },
-      quoteList: {
+      containerWrapper: {
         kind: "wrapper",
-        type: "quoteList",
-        rootLayout: "normal",
+        type: "containerWrapper",
         contentBoundary: false,
-        content: { required: ["quote"], additional: "quote" },
+        content: { required: ["wrapperBlock"], additional: "wrapperBlock" },
       },
     };
     const root = id(10);
@@ -118,7 +107,7 @@ describe("canonical block fragments", () => {
       validateCanonicalBlockFragment(
         fragment(
           [
-            { id: root, type: "quote", parentId: null },
+            { id: root, type: "wrapperBlock", parentId: null },
             textRecord(text, "task", root),
           ],
           [root],
@@ -126,7 +115,7 @@ describe("canonical block fragments", () => {
         { blockDefinitions: constrainedDefinitions },
       ),
     ).toContain(
-      `fragment block ${root} has invalid direct parent for type quote`,
+      `fragment block ${root} has invalid direct parent for type wrapperBlock`,
     );
   });
 
@@ -145,8 +134,8 @@ describe("canonical block fragments", () => {
       name: "cycles",
       value: fragment(
         [
-          { id: id(1), type: "quote", parentId: id(2) },
-          { id: id(2), type: "quote", parentId: id(1) },
+          { id: id(1), type: "wrapperBlock", parentId: id(2) },
+          { id: id(2), type: "wrapperBlock", parentId: id(1) },
         ],
         [id(1)],
       ),
@@ -171,9 +160,9 @@ describe("canonical block fragments", () => {
         [
           {
             id: id(1),
-            type: "divider",
+            type: "atomicBlock",
             parentId: null,
-            content: createBlockRichTextContentFromPlainText("divider", "x"),
+            content: createBlockRichTextContentFromPlainText("atomicBlock", "x"),
             plainText: "x",
           },
         ],
@@ -184,7 +173,7 @@ describe("canonical block fragments", () => {
     {
       name: "missing content on text blocks",
       value: fragment(
-        [{ id: id(1), type: "paragraph", parentId: null, plainText: "x" }],
+        [{ id: id(1), type: "textBlock", parentId: null, plainText: "x" }],
         [id(1)],
       ),
       error: "missing rich-text content",
@@ -203,7 +192,7 @@ describe("canonical block fragments", () => {
     const source = {
       [root]: {
         id: root,
-        type: "quote",
+        type: "wrapperBlock",
         parentId: null,
         tombstone: null,
         metadataVersion: "1",
@@ -211,7 +200,7 @@ describe("canonical block fragments", () => {
       },
       [child]: {
         id: child,
-        type: "paragraph",
+        type: "textBlock",
         parentId: root,
         tombstone: null,
         metadataVersion: "1",
@@ -225,12 +214,12 @@ describe("canonical block fragments", () => {
       blockDefinitions: definitions,
       readContent: (blockId) =>
         blockId === child
-          ? createBlockRichTextContentFromPlainText("paragraph", "same")
+          ? createBlockRichTextContentFromPlainText("textBlock", "same")
           : null,
     });
     expect(duplicated.blocks.map((block) => block.type)).toEqual([
-      "quote",
-      "paragraph",
+      "wrapperBlock",
+      "textBlock",
     ]);
     expect(duplicated.blocks[1]).toMatchObject({ plainText: "same" });
     expect(new Set(duplicated.blocks.map((block) => block.id)).has(root)).toBe(
@@ -244,14 +233,14 @@ describe("canonical block fragments", () => {
 
   it("materializes application-created wrapper trees as detached canonical content", () => {
     const created = materializeCanonicalBlockCreation({
-      type: "quote",
+      type: "wrapperBlock",
       blockDefinitions: definitions,
       initialText: "inside",
     });
 
     expect(created.fragment.blocks.map((block) => block.type)).toEqual([
-      "quote",
-      "paragraph",
+      "wrapperBlock",
+      "textBlock",
     ]);
     expect(created.fragment.rootBlockIds).toEqual([created.rootBlockId]);
     expect(created.fragment.blocks[0]?.parentId).toBeNull();
@@ -284,7 +273,7 @@ describe("canonical block fragments", () => {
     const collision = id(90);
     const candidates = [collision, id(91), id(92)];
     const created = materializeCanonicalBlockCreation({
-      type: "quote",
+      type: "wrapperBlock",
       blockDefinitions: definitions,
       createBlockId: () => candidates.shift() ?? id(93),
       isBlockIdReserved: (blockId) => blockId === collision,
@@ -301,15 +290,15 @@ describe("canonical block fragments", () => {
     const child = id(41);
     const metadata = { tone: "note" } as const;
     const content = createBlockRichTextContentFromPlainText(
-      "paragraph",
+      "textBlock",
       "same content",
     );
     const source = createCanonicalBlockFragment({
       blocks: [
-        { id: root, type: "quote", parentId: null, metadata },
+        { id: root, type: "wrapperBlock", parentId: null, metadata },
         {
           id: child,
-          type: "paragraph",
+          type: "textBlock",
           parentId: root,
           content,
           plainText: "same content",
@@ -354,8 +343,8 @@ describe("canonical block fragments", () => {
     expect(result.start).toEqual({ kind: "block", blockId: first });
     expect(result.end).toEqual({ kind: "text", blockId: second });
     expect(result.blocks.map((block) => block.type)).toEqual([
-      "quote",
-      "paragraph",
+      "wrapperBlock",
+      "textBlock",
     ]);
     expect(result.blocks[0]?.metadata).toBe(metadata);
     expect(result.blocks[1]?.content).toBe(content);

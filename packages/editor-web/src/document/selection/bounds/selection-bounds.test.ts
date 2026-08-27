@@ -131,7 +131,7 @@ describe("editor selection bounds", () => {
   });
 
   it("ignores nested child block bounds while resolving a parent block", () => {
-    const parent = blockShell("callout-a");
+    const parent = blockShell("container-a");
     const child = blockShell("panel-a");
     const inner = document.createElement("div");
     applyDataAttributes(
@@ -142,7 +142,7 @@ describe("editor selection bounds", () => {
     parent.append(child);
 
     expect(
-      resolveEditorSelectionBoundsElement(parent, "callout-a" as BlockId),
+      resolveEditorSelectionBoundsElement(parent, "container-a" as BlockId),
     ).toBe(parent);
   });
 });

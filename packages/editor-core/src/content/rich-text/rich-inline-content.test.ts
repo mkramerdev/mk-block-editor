@@ -32,7 +32,7 @@ import {
 describe("rich inline content contract", () => {
   it("uses one neutral rich-text block node for caller-owned text block types", () => {
     expect(textBlockNodeNameForBlockType("paragraph")).toBe("paragraph");
-    expect(textBlockNodeNameForBlockType("heading")).toBe("paragraph");
+    expect(textBlockNodeNameForBlockType("alternateTextBlock")).toBe("paragraph");
     expect(textBlockNodeNameForBlockType("customText")).toBe("paragraph");
   });
 
@@ -108,7 +108,7 @@ describe("rich inline content contract", () => {
       validateRichTextDocumentNodeJson({ type: "paragraph", content: [] })
         .errors,
     ).toContain("content.type must be doc");
-    expect(validateRichTextBlockNodeJson({ type: "heading" }).errors).toContain(
+    expect(validateRichTextBlockNodeJson({ type: "alternateTextBlock" }).errors).toContain(
       "block.type must be paragraph",
     );
     expect(validateRichTextInlineNodeJson({ type: "text" }).errors).toContain(
@@ -151,7 +151,7 @@ describe("rich inline content contract", () => {
 
   it("creates, normalizes, and retargets neutral rich text documents", () => {
     expect(
-      createBlockRichTextContentFromPlainText("heading", "Title"),
+      createBlockRichTextContentFromPlainText("alternateTextBlock", "Title"),
     ).toStrictEqual({
       type: "doc",
       content: [
@@ -174,7 +174,7 @@ describe("rich inline content contract", () => {
       ],
     });
 
-    const heading = retargetRichTextDocument(
+    const alternateText = retargetRichTextDocument(
       {
         type: "doc",
         content: [
@@ -185,9 +185,9 @@ describe("rich inline content contract", () => {
           },
         ],
       },
-      "heading",
+      "alternateTextBlock",
     );
-    expect(heading).toStrictEqual({
+    expect(alternateText).toStrictEqual({
       type: "doc",
       content: [
         { type: "paragraph", content: [{ type: "text", text: "Title" }] },

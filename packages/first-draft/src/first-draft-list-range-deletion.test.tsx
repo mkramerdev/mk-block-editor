@@ -3,6 +3,7 @@ import type { EditorInstanceSnapshot } from "@repo/editor-core/codecs";
 import { richTextDocumentContentSize } from "@repo/editor-core/content/rich-text";
 import type { BlockId } from "@repo/editor-core/kernel";
 import type { EditorImplementation } from "@repo/editor-react/editor";
+import { addEditorBlockOperations } from "@repo/editor-web/block-operations";
 import { EditorDocument } from "@repo/editor-web/document-runtime";
 import { compileCanonicalEditorDefinition } from "@repo/editor-web/editor-definition";
 import { initializeCompiledTestEditableEditor as initializeEditableEditor } from "./test-editor.ts";
@@ -11,7 +12,7 @@ import {
   createYjsBlockContentRuntime,
   type YjsBlockContentRuntime,
 } from "@repo/editor-yjs-dom";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { FirstDraftBlockHoverProvider } from "./block-controls/index.ts";
 import {
   createFirstDraftViewStateStore,
@@ -19,7 +20,7 @@ import {
 } from "./blocks/view-state.tsx";
 import { createFirstDraftEditorDefinition } from "./first-draft-definition.tsx";
 import { createFirstDraftSnapshot } from "./first-draft-fixture.ts";
-import { createFirstDraftBootstrapFromSnapshot } from "./read-model/bootstrap.ts";
+import { createFirstDraftBootstrapFromSnapshot } from "./bootstrap/bootstrap.ts";
 
 interface ListCase {
   readonly name: string;
@@ -41,7 +42,7 @@ const listCases: readonly ListCase[] = [
       id("fd-ordered-2-text"),
       id("fd-ordered-3-text"),
     ],
-    extraTextId: id("fd-paragraph-before-checklist"),
+    extraTextId: id("fd-paragraph-outro"),
     renderedItemSelector: ".list-item-block__item",
     htmlListTag: "ol",
   },
@@ -71,7 +72,7 @@ const listCases: readonly ListCase[] = [
       id("fd-check-checked-text"),
       id("fd-check-copy-text"),
     ],
-    extraTextId: id("fd-paragraph-interactions"),
+    extraTextId: id("fd-paragraph-outro"),
     renderedItemSelector: ".checklist-block__item",
     htmlListTag: "ul",
   },
@@ -263,7 +264,7 @@ describe("First Draft canonical list-item range deletion", () => {
 
     expect(event.defaultPrevented).toBe(true);
     expect(clipboard.getData("text/plain")).toContain(
-      "Invite five internal project teams",
+      "Create content with the blocks that fit the idea.",
     );
     expect(clipboard.getData("text/html")).toContain(
       `<${listCase.htmlListTag}`,
@@ -283,6 +284,387 @@ describe("First Draft canonical list-item range deletion", () => {
     fixture.dispose();
   });
 });
+
+describe("First Draft product wrapper range deletion", () => {
+  afterEach(cleanup);
+
+  it.each([
+    ["quote", "fd-heading-1", "heading", "fd-quote-text", "paragraph", "fd-quote"],
+    ["code", "fd-paragraph-intro", "paragraph", "fd-code-text", "paragraph", "fd-code"],
+    ["callout", "fd-bullet-nested-text", "paragraph", "fd-callout-text", "paragraph", "fd-callout"],
+  ] as const)(
+    "unwraps a partial %s boundary in one real range transaction",
+    (_name, destinationId, destinationType, donorId, _donorType, wrapperId) => {
+      const fixture = renderFullRangeFixture();
+      commitOpenRange(
+        fixture,
+        id(destinationId),
+        destinationType,
+        id(donorId),
+      );
+
+      fireEvent.keyDown(fixture.activeTextView, { key: "Backspace" });
+
+      expect(fixture.editor.getBlock(id(wrapperId))).toBeNull();
+      expect(fixture.editor.getBlock(id(donorId))).toBeNull();
+      expect(fixture.editor.getBlock(id(destinationId))).not.toBeNull();
+      expect(fixture.onChange).toHaveBeenCalledTimes(1);
+      expect(fixture.editor.undo()).toEqual({ status: "applied" });
+      expect(fixture.editor.getBlock(id(wrapperId))?.type).toBe(_name);
+      expect(fixture.editor.redo()).toEqual({ status: "applied" });
+      expect(fixture.editor.getBlock(id(wrapperId))).toBeNull();
+      fixture.dispose();
+    },
+  );
+
+  it("promotes toggle body contents when a partial range consumes the summary", () => {
+    const fixture = renderFullRangeFixture(createToggleRangeSnapshot());
+    const promotedIds = fixture.editor.getChildBlockIds(
+      id("fd-toggle-heading-body"),
+    );
+    commitOpenRange(
+      fixture,
+      id("fd-paragraph-outro"),
+      "paragraph",
+      id("fd-toggle-heading-summary"),
+    );
+
+    fireEvent.keyDown(fixture.activeTextView, { key: "Delete" });
+
+    expect(fixture.editor.getBlock(id("fd-toggle-heading"))).toBeNull();
+    expect(promotedIds.map((blockId) => fixture.editor.getParentId(blockId))).toEqual(
+      promotedIds.map(() => null),
+    );
+    expect(fixture.onChange).toHaveBeenCalledTimes(1);
+    fixture.dispose();
+  });
+
+  it("applies column underflow while preserving the effective tab boundary", () => {
+    const columns = renderFullRangeFixture();
+    const survivingColumnContents = columns.editor.getChildBlockIds(
+      id("fd-column-right"),
+    );
+    commitOpenRange(
+      columns,
+      id("fd-paragraph-layouts"),
+      "paragraph",
+      id("fd-column-left-heading"),
+    );
+    fireEvent.keyDown(columns.activeTextView, { key: "Backspace" });
+    expect(columns.editor.getBlock(id("fd-columns"))).toBeNull();
+    expect(
+      survivingColumnContents.map((blockId) => columns.editor.getParentId(blockId)),
+    ).toEqual(survivingColumnContents.map(() => null));
+    expect(columns.onChange).toHaveBeenCalledTimes(1);
+    columns.dispose();
+
+    const tabs = renderFullRangeFixture();
+    const tabsId = id("fd-tabs");
+    const activePaneId = id("fd-tab-overview");
+    const activeTextId = id("fd-tab-overview-text");
+    const paneIds = tabs.editor.getChildBlockIds(tabsId);
+    const paneMetadata = paneIds.map(
+      (paneId) => tabs.editor.getBlock(paneId)?.metadata,
+    );
+    const inactiveContents = paneIds.slice(1).map((paneId) =>
+      tabs.editor.getChildBlockIds(paneId),
+    );
+    const tabsShell = blockShell(tabs.container, tabsId);
+    const paneShells = paneIds.map((paneId) =>
+      blockShell(tabs.container, paneId),
+    );
+    commitOpenRange(
+      tabs,
+      id("fd-paragraph-tabs"),
+      "paragraph",
+      activeTextId,
+    );
+    fireEvent.keyDown(tabs.activeTextView, { key: "Delete" });
+
+    expect(tabs.editor.getBlock(tabsId)?.type).toBe("tabs");
+    expect(tabs.editor.getChildBlockIds(tabsId)).toEqual(paneIds);
+    expect(tabs.editor.getChildBlockIds(activePaneId)).toEqual([]);
+    expect(tabs.editor.getBlock(activeTextId)).toBeNull();
+    expect(
+      paneIds.map((paneId) => tabs.editor.getBlock(paneId)?.metadata),
+    ).toEqual(paneMetadata);
+    expect(
+      paneIds.slice(1).map((paneId) =>
+        tabs.editor.getChildBlockIds(paneId),
+      ),
+    ).toEqual(inactiveContents);
+    expect(tabs.editor.getRootBlockIds()).not.toContain(activeTextId);
+    expect(blockShell(tabs.container, tabsId)).toBe(tabsShell);
+    paneIds.forEach((paneId, index) => {
+      expect(blockShell(tabs.container, paneId)).toBe(paneShells[index]);
+    });
+    expect(
+      blockShell(tabs.container, activePaneId).querySelector(
+        ".empty-wrapper-add-text-button",
+      ),
+    ).not.toBeNull();
+    expect(tabs.onChange).toHaveBeenCalledTimes(1);
+
+    act(() => expect(tabs.editor.undo()).toEqual({ status: "applied" }));
+    expect(tabs.editor.getChildBlockIds(activePaneId)).toEqual([activeTextId]);
+    expect(tabs.editor.getBlock(activeTextId)?.parentId).toBe(activePaneId);
+    expect(
+      blockShell(tabs.container, activePaneId).querySelector(
+        ".empty-wrapper-add-text-button",
+      ),
+    ).toBeNull();
+    act(() => expect(tabs.editor.redo()).toEqual({ status: "applied" }));
+    expect(tabs.editor.getChildBlockIds(activePaneId)).toEqual([]);
+
+    tabs.onChange.mockClear();
+    const addText = blockShell(
+      tabs.container,
+      activePaneId,
+    ).querySelector<HTMLButtonElement>(".empty-wrapper-add-text-button")!;
+    fireEvent.click(addText);
+    const insertedId = tabs.editor.getChildBlockIds(activePaneId)[0]!;
+    expect(tabs.editor.getBlock(insertedId)).toMatchObject({
+      type: "paragraph",
+      parentId: activePaneId,
+    });
+    expect(tabs.editor.getChildBlockIds(tabsId)).toEqual(paneIds);
+    expect(tabs.onChange).toHaveBeenCalledOnce();
+    expect(
+      blockShell(tabs.container, activePaneId).querySelector(
+        ".empty-wrapper-add-text-button",
+      ),
+    ).toBeNull();
+    expect(document.activeElement).toBe(
+      blockShell(tabs.container, insertedId).querySelector(
+        '[data-editor-text-root="true"]',
+      ),
+    );
+    tabs.dispose();
+  });
+
+  it("preserves tabs for a range from the active pane into the following block", () => {
+    const fixture = renderFullRangeFixture();
+    const tabsId = id("fd-tabs");
+    const activePaneId = id("fd-tab-overview");
+    const activeTextId = id("fd-tab-overview-text");
+    const donorId = id("fd-paragraph-after-tabs");
+    const paneIds = fixture.editor.getChildBlockIds(tabsId);
+    const inactiveContents = paneIds.slice(1).map((paneId) =>
+      fixture.editor.getChildBlockIds(paneId),
+    );
+    const activeText = fixture.editor.readBlockPlainText(
+      activeTextId,
+      "paragraph",
+    );
+    const donorText = fixture.editor.readBlockPlainText(donorId, "paragraph");
+
+    commitOpenRange(fixture, activeTextId, "paragraph", donorId);
+    fireEvent.keyDown(fixture.activeTextView, { key: "Backspace" });
+
+    expect(fixture.editor.getBlock(tabsId)?.type).toBe("tabs");
+    expect(fixture.editor.getChildBlockIds(tabsId)).toEqual(paneIds);
+    expect(fixture.editor.getChildBlockIds(activePaneId)).toEqual([
+      activeTextId,
+    ]);
+    expect(fixture.editor.getBlock(activeTextId)?.parentId).toBe(activePaneId);
+    expect(fixture.editor.getBlock(donorId)).toBeNull();
+    expect(
+      fixture.editor.readBlockPlainText(activeTextId, "paragraph"),
+    ).toBe(activeText.slice(0, -1) + donorText.slice(1));
+    expect(
+      paneIds.slice(1).map((paneId) =>
+        fixture.editor.getChildBlockIds(paneId),
+      ),
+    ).toEqual(inactiveContents);
+    expect(fixture.editor.getRootBlockIds()).not.toContain(activeTextId);
+    expect(fixture.onChange).toHaveBeenCalledOnce();
+    expect(document.activeElement).toBe(
+      blockShell(fixture.container, activeTextId).querySelector(
+        '[data-editor-text-root="true"]',
+      ),
+    );
+
+    act(() => expect(fixture.editor.undo()).toEqual({ status: "applied" }));
+    expect(fixture.editor.getBlock(donorId)?.parentId).toBeNull();
+    expect(fixture.editor.getChildBlockIds(activePaneId)).toEqual([
+      activeTextId,
+    ]);
+    act(() => expect(fixture.editor.redo()).toEqual({ status: "applied" }));
+    expect(fixture.editor.getBlock(donorId)).toBeNull();
+    expect(fixture.editor.getChildBlockIds(tabsId)).toEqual(paneIds);
+    fixture.dispose();
+  });
+
+  it("keeps ordinary multi-block range deletion inside the active pane", () => {
+    const fixture = renderFullRangeFixture();
+    const tabsId = id("fd-tabs");
+    const paneId = id("fd-tab-overview");
+    const firstId = id("fd-tab-overview-text");
+    let insertion!: ReturnType<typeof fixture.editor.insertBlockAt>;
+    act(() => {
+      insertion = fixture.editor.insertBlockAt({
+        placement: { parentId: paneId, childIndex: 1 },
+        blockType: "paragraph",
+        selection: false,
+      });
+    });
+    if (!insertion.ok) {
+      throw new Error("Failed to add second active-pane paragraph");
+    }
+    const secondId = fixture.editor.getChildBlockIds(paneId)[1]!;
+    act(() => {
+      fixture.editor.transaction(() => {
+        expect(
+          fixture.editor.insertText({
+            blockId: secondId,
+            offset: 0,
+            text: "Second pane paragraph",
+          }),
+        ).toBe(true);
+        fixture.editor.setTransactionSelection({ kind: "preserve" });
+      });
+    });
+    fixture.onChange.mockClear();
+
+    commitOpenRange(fixture, firstId, "paragraph", secondId);
+    fireEvent.keyDown(fixture.activeTextView, { key: "Delete" });
+
+    expect(fixture.editor.getBlock(tabsId)?.type).toBe("tabs");
+    expect(fixture.editor.getChildBlockIds(paneId)).toEqual([firstId]);
+    expect(fixture.editor.getBlock(secondId)).toBeNull();
+    expect(fixture.editor.getBlock(firstId)?.parentId).toBe(paneId);
+    expect(fixture.onChange).toHaveBeenCalledOnce();
+    fixture.dispose();
+  });
+});
+
+function renderFullRangeFixture(
+  snapshot: EditorInstanceSnapshot = createFirstDraftSnapshot(),
+) {
+  const bootstrap = createFirstDraftBootstrapFromSnapshot({
+    documentId: "product-wrapper-range-deletion",
+    revision: 0,
+    snapshot,
+  });
+  const viewState = createFirstDraftViewStateStore();
+  let contentRuntime: YjsBlockContentRuntime | null = null;
+  const definition = {
+    ...createFirstDraftEditorDefinition(viewState),
+    content: {
+      createRuntime: (source) => {
+        const runtime = createYjsBlockContentRuntime(source);
+        contentRuntime = runtime;
+        return runtime;
+      },
+    },
+  } satisfies EditableEditorDefinition;
+  const onChange = vi.fn();
+  const editor = addEditorBlockOperations(
+    initializeEditableEditor({
+      compiledDefinition: compileCanonicalEditorDefinition(definition),
+      snapshot: bootstrap.snapshot,
+      validatedSnapshot: bootstrap,
+      onChange,
+      onChangeError: (error) => {
+        throw error;
+      },
+      createTransactionId: () => crypto.randomUUID(),
+    }),
+  );
+  const rendered = render(
+    <FirstDraftViewStateProvider store={viewState}>
+      <div data-editor-interaction-scope="true">
+        <FirstDraftBlockHoverProvider enabled>
+          <EditorDocument editor={editor} />
+        </FirstDraftBlockHoverProvider>
+      </div>
+    </FirstDraftViewStateProvider>,
+  );
+  return {
+    ...rendered,
+    snapshot,
+    editor,
+    onChange,
+    contentRuntime: requireContentRuntime(contentRuntime),
+    get activeTextView(): HTMLElement {
+      const view =
+        rendered.container.querySelector<HTMLElement>(".ProseMirror");
+      if (!view) throw new Error("Missing active shared text view");
+      return view;
+    },
+    dispose() {
+      rendered.unmount();
+      editor.dispose();
+    },
+  };
+}
+
+function createToggleRangeSnapshot(): EditorInstanceSnapshot {
+  const source = createFirstDraftSnapshot();
+  const destinationId = id("fd-paragraph-outro");
+  const toggleId = id("fd-toggle-heading");
+  const summaryId = id("fd-toggle-heading-summary");
+  const bodyId = id("fd-toggle-heading-body");
+  const bodyIds = source.childIdsByParentId[bodyId] ?? [];
+  const includedIds = [
+    destinationId,
+    toggleId,
+    summaryId,
+    bodyId,
+    ...bodyIds,
+  ];
+  return {
+    ...source,
+    blocks: Object.fromEntries(
+      includedIds.map((blockId) => [blockId, source.blocks[blockId]!]),
+    ),
+    rootBlockIds: [destinationId, toggleId],
+    childIdsByParentId: {
+      [toggleId]: [summaryId, bodyId],
+      [bodyId]: bodyIds,
+    },
+    content: Object.fromEntries(
+      [destinationId, summaryId, ...bodyIds].map((blockId) => [
+        blockId,
+        source.content[blockId]!,
+      ]),
+    ),
+    opaqueContentCheckpoints: Object.fromEntries(
+      [destinationId, summaryId, ...bodyIds].map((blockId) => [
+        blockId,
+        source.opaqueContentCheckpoints[blockId]!,
+      ]),
+    ),
+  };
+}
+
+function commitOpenRange(
+  fixture: ReturnType<typeof renderFullRangeFixture>,
+  destinationId: BlockId,
+  destinationType: string,
+  donorId: BlockId,
+): void {
+  const destinationContent = fixture.editor.readBlockContent(
+    destinationId,
+    destinationType,
+  );
+  if (!destinationContent) {
+    throw new Error(`Missing destination content for ${destinationId}`);
+  }
+  const hold = fixture.contentRuntime.acquireBlockContent(
+    destinationId,
+    destinationType,
+    "canonical-transaction",
+  );
+  commitSelection(
+    fixture.editor,
+    destinationId,
+    richTextDocumentContentSize(destinationContent) - 1,
+    donorId,
+    1,
+  );
+  hold.release();
+}
 
 function renderListFixture(
   listCase: ListCase,
@@ -373,7 +755,7 @@ function createFourItemOrderedListSnapshot(): EditorInstanceSnapshot {
     id("fd-ordered-1-text"),
     id("fd-ordered-2-text"),
     id("fd-ordered-3-text"),
-    id("fd-paragraph-before-checklist"),
+    id("fd-paragraph-outro"),
   ] as const;
   const fourthItem = {
     ...source.blocks[itemIds[2]]!,
@@ -578,7 +960,14 @@ function renderedOrderedItems(container: HTMLElement) {
     'ol[data-editor-block-type="orderedList"]',
   );
   if (!list) throw new Error("Missing ordered list");
-  return [...list.children].map((element) => {
+  const documentDropTargets = list.querySelectorAll(
+    ":scope > .first-draft-block-drop-target",
+  );
+  expect(documentDropTargets).toHaveLength(1);
+  expect(list.lastElementChild).toBe(documentDropTargets[0]);
+  return [...list.children]
+    .filter((element) => element.hasAttribute("data-editor-block-id"))
+    .map((element) => {
     if (!(element instanceof HTMLLIElement)) {
       throw new Error("Ordered-list direct child is not an li");
     }
@@ -592,7 +981,15 @@ function renderedOrderedItems(container: HTMLElement) {
       marker: marker.textContent,
       ariaHidden: marker.getAttribute("aria-hidden"),
     };
-  });
+    });
+}
+
+function blockShell(container: ParentNode, blockId: BlockId): HTMLElement {
+  const result = container.querySelector<HTMLElement>(
+    `[data-editor-block-shell="true"][data-editor-block-id="${blockId}"]`,
+  );
+  if (!result) throw new Error(`Missing block shell ${blockId}`);
+  return result;
 }
 
 function clipboardEvent(

@@ -24,7 +24,6 @@ export function createBlockLocalProseMirrorViewProps(
     state: providedState,
     doc,
     schema,
-    documentMapping,
     pluginOptions: providedPluginOptions,
     attributes,
     nodeViews: providedNodeViews,
@@ -38,7 +37,6 @@ export function createBlockLocalProseMirrorViewProps(
     "state",
     "doc",
     "schema",
-    "documentMapping",
     "pluginOptions",
     "attributes",
     "nodeViews",
@@ -53,7 +51,6 @@ export function createBlockLocalProseMirrorViewProps(
       blockType,
       doc,
       schema,
-      documentMapping,
       pluginOptions: providedPluginOptions,
     });
   const pluginOptions: BlockLocalDomPluginOptions = {
@@ -61,11 +58,7 @@ export function createBlockLocalProseMirrorViewProps(
     blockType,
     ...providedPluginOptions,
   };
-  const nodeViews = createBlockLocalNodeViews(
-    blockType,
-    pluginOptions,
-    providedNodeViews,
-  );
+  const nodeViews = createBlockLocalNodeViews(providedNodeViews);
   const viewAttributes = {
     ...getBlockEditorAttributes({
       blockId,

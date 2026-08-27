@@ -10,6 +10,7 @@ import {
   extractPlainTextFromRichTextDocument,
   isRichTextDocument,
   richInlineContentSize,
+  richTextBlockInlineContent,
   richTextDocumentContentSize,
   type RichTextDocumentNodeJson,
 } from "@repo/editor-core/content/rich-text";
@@ -20,11 +21,16 @@ import {
 import { createVersionedBlockRecord } from "@repo/editor-core/metadata";
 import type {
   ContentOperationProposalAcceptanceContext,
+  AppliedContentCommit,
   EditorContentCommitInput,
   EditorContentCommitPort,
   ValidatedContentCommit,
 } from "../operations/content-commit.ts";
-import type { EditorLogicalContentOperation } from "@repo/editor-core/operations";
+import {
+  operationAnchorRequirement,
+  type EditorLogicalContentOperation,
+  type EditorContentOperationReplayStep,
+} from "@repo/editor-core/operations";
 import type {
   EditorSelection,
   EditorLogicalSelectionPoint,
@@ -45,55 +51,27 @@ import { executeStructuralEditComposition } from "../operations/structural-compo
 import { createInitialEditorManifestState } from "../state/command-state.ts";
 import { EditorImplementation } from "./editor-implementation.ts";
 
-const renderer = () => null;
 const definitions: Readonly<Record<BlockType, BlockDefinition>> = {
-  paragraph: {
+  textBlock: {
     kind: "text",
-    type: "paragraph",
-    rootLayout: "normal",
-    renderer,
-    split: { default: "paragraph" },
+    type: "textBlock",
   },
-  divider: {
+  atomicBlock: {
     kind: "atomic",
-    type: "divider",
-    rootLayout: "normal",
-    renderer,
+    type: "atomicBlock",
   },
-  placeholder: {
-    kind: "atomic",
-    type: "placeholder",
-    rootLayout: "normal",
-    renderer,
-    replaceWith: "paragraph",
-  },
-  restorativeBody: {
+  containerWrapper: {
     kind: "wrapper",
-    type: "restorativeBody",
-    rootLayout: "normal",
-    renderer,
+    type: "containerWrapper",
     contentBoundary: false,
     content: { required: ["block"], additional: "block" },
-    defaultContent: "placeholder",
+    defaultContent: "textBlock",
   },
-  callout: {
+  fixedWrapper: {
     kind: "wrapper",
-    type: "callout",
-    rootLayout: "normal",
-    renderer,
+    type: "fixedWrapper",
     contentBoundary: false,
-    content: { required: ["block"], additional: "block" },
-    defaultContent: "paragraph",
-    rangeDeletion: { kind: "unwrap-boundary-contents" },
-  },
-  quote: {
-    kind: "wrapper",
-    type: "quote",
-    rootLayout: "normal",
-    renderer,
-    contentBoundary: false,
-    content: { required: ["paragraph"] },
-    rangeDeletion: { kind: "unwrap-boundary-contents" },
+    content: { required: ["textBlock"] },
   },
 };
 
@@ -104,7 +82,45 @@ const internalSelectionSubsystem = registerInternalSelectionSubsystem(
 )!;
 
 function text(value: string): RichTextDocumentNodeJson {
-  return createBlockRichTextContentFromPlainText("paragraph", value);
+  return createBlockRichTextContentFromPlainText("textBlock", value);
+}
+
+function testReplayStep(
+  operation: EditorLogicalContentOperation,
+): EditorContentOperationReplayStep {
+  const requirement = operationAnchorRequirement(operation);
+  const anchor = (offset: number, association: -1 | 1) => ({
+    codec: "test-operation-anchor",
+    payload: { offset },
+    association,
+  });
+  if (requirement.kind === "position") {
+    if (operation.kind !== "insertInlineContent")
+      throw new Error("bad test operation");
+    return {
+      kind: "content",
+      blockId: operation.blockId,
+      blockType: operation.blockType,
+      operation,
+      anchors: {
+        kind: "position",
+        position: anchor(requirement.offset, requirement.association),
+      },
+    };
+  }
+  if (operation.kind === "insertInlineContent")
+    throw new Error("bad test operation");
+  return {
+    kind: "content",
+    blockId: operation.blockId,
+    blockType: operation.blockType,
+    operation,
+    anchors: {
+      kind: "range",
+      start: anchor(requirement.startOffset, requirement.startAssociation),
+      end: anchor(requirement.endOffset, requirement.endAssociation),
+    },
+  };
 }
 
 function markedTextWithInlineAtoms(): RichTextDocumentNodeJson {
@@ -169,7 +185,7 @@ function resolvedBlockRange(
 function paragraphFragment(...suffixes: readonly number[]) {
   const records = suffixes.map((suffix) => ({
     id: id(suffix),
-    type: "paragraph",
+    type: "textBlock",
     parentId: null,
     content: text(`paragraph ${suffix}`),
     plainText: `paragraph ${suffix}`,
@@ -198,12 +214,26 @@ function createTestEditor(
     readonly selectionAnchorRuntime?: AssociationAwareTestAnchorRuntime;
     readonly selectionAnchorRequiresContentAccess?: boolean;
     readonly failSelectionAnchorAfterContent?: boolean;
+    readonly failReplaySelectionAnchors?: boolean;
+    readonly replaySelectionRestorationFailure?:
+      | "acquire-unavailable"
+      | "acquire-throw"
+      | "resolve-failure"
+      | "resolve-throw"
+      | "create-failure"
+      | "create-throw"
+      | "release-throw";
+    readonly failOperationAnchorCapture?: boolean;
+    readonly replayCaptureFailure?: "none" | "incomplete" | "malformed";
+    readonly resolveOperationAnchors?: NonNullable<
+      InitializeEditorImplementationOptions["resolveOperationAnchors"]
+    >;
     readonly onContentCommitted?: () => void;
     readonly onContentPublished?: () => void;
     readonly documentValidators?: InitializeEditorImplementationOptions["documentValidators"];
   } = {},
 ) {
-  const blocks = options.blocks ?? [block(1, "paragraph")];
+  const blocks = options.blocks ?? [block(1, "textBlock")];
   const content = new Map(options.content ?? [[blocks[0]!.id, text("one")]]);
   const roots = blocks
     .filter((entry) => entry.parentId === null)
@@ -226,6 +256,7 @@ function createTestEditor(
   >();
   let preparedCommitCount = 0;
   let contentWasCommitted = false;
+  let lastCommittedOrigin: unknown = null;
   const validateContentCommit = vi.fn((input: EditorContentCommitInput) => {
     if (options.rejectContentOperations) {
       return {
@@ -241,9 +272,10 @@ function createTestEditor(
         preparedCommitCount <= (options.preparedNoChangeCount ?? 0)
           ? []
           : [
-              ...new Set(
-                input.changes.map((change) => change.baseToken.blockId),
-              ),
+              ...new Set([
+                ...input.changes.map((change) => change.baseToken.blockId),
+                ...(input.removedBlockIds ?? []),
+              ]),
             ],
       blocks: input.changes.map((change) => ({
         blockId: change.baseToken.blockId,
@@ -257,7 +289,32 @@ function createTestEditor(
           )
           .reverse(),
       })),
-      removedBlocks: [],
+      removedBlocks: (input.removedBlockIds ?? []).map((removedBlockId) => {
+        const removed = blocks.find(
+          (candidate) => candidate.id === removedBlockId,
+        );
+        const removedContent = content.get(removedBlockId);
+        const inlineContent = removedContent
+          ? richTextBlockInlineContent(removedContent)
+          : [];
+        return {
+          blockId: removedBlockId,
+          blockType: removed?.type ?? "textBlock",
+          inverseContentOperations:
+            inlineContent.length === 0
+              ? []
+              : [
+                  {
+                    kind: "insertInlineContent" as const,
+                    blockId: removedBlockId,
+                    blockType: removed?.type ?? "textBlock",
+                    target: { kind: "text" as const },
+                    position: { blockId: removedBlockId, offset: 0 },
+                    content: inlineContent,
+                  },
+                ],
+        };
+      }),
     };
     preparedState.set(prepared, {
       input,
@@ -272,76 +329,132 @@ function createTestEditor(
     });
     return prepared;
   });
-  const commitContent = vi.fn((prepared: ValidatedContentCommit) => {
-    if (options.failContentApplication) {
-      throw new Error("test content application failed");
-    }
-    const state = preparedState.get(prepared);
-    if (!state) throw new Error("unknown prepared test commit");
-    for (const change of state.input.changes) {
-      let next = state.input.introducedBlocks?.[change.baseToken.blockId]
-        ? createBlockRichTextContentFromPlainText(
-            change.baseToken.blockType,
-            "",
-          )
-        : content.get(change.baseToken.blockId);
-      for (const operation of change.operations) {
-        next =
-          applyLogicalContentOperationToRichTextDocument(
-            operation.blockType,
-            next,
-            operation,
-            {
-              blockDefinitions: definitions,
-              inlineMarks: [],
-            },
-          ) ?? undefined;
-        if (!next) {
-          throw new Error("test logical content operation failed");
-        }
-        options.selectionAnchorRuntime?.apply(operation);
+  const commitContent = vi.fn(
+    (prepared: ValidatedContentCommit, replayCapture: "none" | "inverse") => {
+      if (options.failContentApplication) {
+        throw new Error("test content application failed");
       }
-      if (next) content.set(change.baseToken.blockId, next);
-    }
-    contentWasCommitted = true;
-    options.onContentCommitted?.();
-    const applied = {
-      kind: "applied-content-commit" as const,
-      baseGraphRevision: state.input.graphRevision,
-      graphRevision:
-        state.input.resultingGraphRevision ?? state.input.graphRevision,
-      affectedBlockIds: prepared.affectedBlockIds,
-      blocks: options.materializeAppliedBlocks
-        ? state.input.changes.map((change) => {
-            return {
-              blockId: change.baseToken.blockId,
-              blockType: change.baseToken.blockType,
-              baseToken: change.baseToken,
-              committedToken: {
-                ...change.baseToken,
-                contentRevision: change.baseToken.contentRevision + 1,
+      const state = preparedState.get(prepared);
+      if (!state) throw new Error("unknown prepared test commit");
+      for (const change of state.input.changes) {
+        let next = state.input.introducedBlocks?.[change.baseToken.blockId]
+          ? createBlockRichTextContentFromPlainText(
+              change.baseToken.blockType,
+              "",
+            )
+          : content.get(change.baseToken.blockId);
+        for (const operation of change.operations) {
+          next =
+            applyLogicalContentOperationToRichTextDocument(
+              operation.blockType,
+              next,
+              operation,
+              {
+                blockDefinitions: definitions,
+                inlineMarks: [],
               },
-              operationUpdate: {} as never,
-              contentOperations: change.operations,
-              inverseContentOperations: [...change.operations]
-                .reverse()
-                .map((operation) => {
-                  const inverse =
-                    createInverseLogicalContentOperation(operation);
-                  if (!inverse) {
-                    throw new Error(
-                      "test content preparation accepted a non-reversible operation",
-                    );
-                  }
-                  return inverse;
-                }),
-            };
-          })
-        : [],
-      origin: state.input.origin,
-    };
-    return applied;
-  });
+            ) ?? undefined;
+          if (!next) {
+            throw new Error("test logical content operation failed");
+          }
+          options.selectionAnchorRuntime?.apply(operation);
+        }
+        if (next) content.set(change.baseToken.blockId, next);
+      }
+      contentWasCommitted = true;
+      lastCommittedOrigin = state.input.origin;
+      options.onContentCommitted?.();
+      const capturedSteps = prepared.blocks
+        .slice()
+        .reverse()
+        .flatMap((block) => block.inverseContentOperations.map(testReplayStep))
+        .concat(
+          prepared.removedBlocks
+            .slice()
+            .reverse()
+            .flatMap((block) =>
+              block.inverseContentOperations.map(testReplayStep),
+            ),
+        );
+      const isHistoryReplay =
+        state.input.origin === "undo" || state.input.origin === "redo";
+      if (isHistoryReplay && options.replayCaptureFailure === "incomplete") {
+        capturedSteps.pop();
+      } else if (
+        isHistoryReplay &&
+        options.replayCaptureFailure === "malformed" &&
+        capturedSteps[0]
+      ) {
+        const step = capturedSteps[0];
+        capturedSteps[0] = (step.anchors.kind === "position"
+          ? {
+              ...step,
+              anchors: {
+                ...step.anchors,
+                position: {
+                  ...step.anchors.position,
+                  association: 1,
+                },
+              },
+            }
+          : {
+              ...step,
+              anchors: {
+                ...step.anchors,
+                start: {
+                  ...step.anchors.start,
+                  association: -1,
+                },
+              },
+            }) as unknown as EditorContentOperationReplayStep;
+      }
+      const applied = {
+        kind: "applied-content-commit" as const,
+        baseGraphRevision: state.input.graphRevision,
+        graphRevision:
+          state.input.resultingGraphRevision ?? state.input.graphRevision,
+        affectedBlockIds: prepared.affectedBlockIds,
+        blocks: options.materializeAppliedBlocks
+          ? state.input.changes.map((change) => {
+              return {
+                blockId: change.baseToken.blockId,
+                blockType: change.baseToken.blockType,
+                baseToken: change.baseToken,
+                committedToken: {
+                  ...change.baseToken,
+                  contentRevision: change.baseToken.contentRevision + 1,
+                },
+                operationUpdate: {} as never,
+                contentOperations: change.operations,
+                inverseContentOperations: [...change.operations]
+                  .reverse()
+                  .map((operation) => {
+                    const inverse =
+                      createInverseLogicalContentOperation(operation);
+                    if (!inverse) {
+                      throw new Error(
+                        "test content preparation accepted a non-reversible operation",
+                      );
+                    }
+                    return inverse;
+                  }),
+              };
+            })
+          : [],
+        origin: state.input.origin,
+        replayCapture:
+          replayCapture === "inverse" &&
+          !options.failOperationAnchorCapture &&
+          !(isHistoryReplay && options.replayCaptureFailure === "none")
+            ? {
+                kind: "inverse" as const,
+                steps: capturedSteps,
+              }
+            : { kind: "none" as const },
+      } as AppliedContentCommit;
+      return applied;
+    },
+  );
   const publishContentCommit = vi.fn(() => options.onContentPublished?.());
   const markInconsistent = vi.fn((message: string): never => {
     throw new Error(`test content runtime inconsistent: ${message}`);
@@ -416,6 +529,20 @@ function createTestEditor(
   const blurEditor = vi.fn();
   const contentAccessCounts = new Map<BlockId, number>();
   const acquireTextContentAccess = vi.fn((blockId: BlockId) => {
+    const replaying =
+      lastCommittedOrigin === "undo" || lastCommittedOrigin === "redo";
+    if (
+      replaying &&
+      options.replaySelectionRestorationFailure === "acquire-throw"
+    ) {
+      throw new Error("test replay selection content acquisition failed");
+    }
+    if (
+      replaying &&
+      options.replaySelectionRestorationFailure === "acquire-unavailable"
+    ) {
+      return null;
+    }
     contentAccessCounts.set(
       blockId,
       (contentAccessCounts.get(blockId) ?? 0) + 1,
@@ -424,6 +551,12 @@ function createTestEditor(
       const next = (contentAccessCounts.get(blockId) ?? 1) - 1;
       if (next === 0) contentAccessCounts.delete(blockId);
       else contentAccessCounts.set(blockId, next);
+      if (
+        replaying &&
+        options.replaySelectionRestorationFailure === "release-throw"
+      ) {
+        throw new Error("test replay selection content release failed");
+      }
     };
   });
   const editorRef: { current: EditorImplementation | null } = {
@@ -437,7 +570,7 @@ function createTestEditor(
       childIdsByParentId: children,
     }),
     blockDefinitions: definitions,
-    defaultRootBlockType: "paragraph",
+    defaultRootBlockType: "textBlock",
     inlineMarks: [],
     documentValidators: options.documentValidators,
     onCanonicalCommit,
@@ -447,17 +580,48 @@ function createTestEditor(
       return value ? extractPlainTextFromRichTextDocument(value) : "";
     },
     resolveSelectionTextAnchor: (point) =>
-      options.selectionAnchorRequiresContentAccess &&
-      !contentAccessCounts.has(point.blockId)
-        ? { ok: false, reason: "missing-text", blockId: point.blockId }
-        : (options.selectionAnchorRuntime?.resolve(point) ?? {
-            ok: true,
-            blockId: point.blockId,
-            textAnchor: point.textAnchor!,
-            textOffset: point.textOffset,
-            affinity: point.affinity,
-          }),
+      (lastCommittedOrigin === "undo" || lastCommittedOrigin === "redo") &&
+      options.replaySelectionRestorationFailure === "resolve-throw"
+        ? (() => {
+            throw new Error("test replay selection anchor resolution failed");
+          })()
+        : (lastCommittedOrigin === "undo" || lastCommittedOrigin === "redo") &&
+            (options.replaySelectionRestorationFailure === "resolve-failure" ||
+              options.replaySelectionRestorationFailure === "create-failure" ||
+              options.replaySelectionRestorationFailure === "create-throw")
+          ? { ok: false, reason: "missing-text", blockId: point.blockId }
+          : options.failReplaySelectionAnchors &&
+              (lastCommittedOrigin === "undo" || lastCommittedOrigin === "redo")
+            ? { ok: false, reason: "missing-text", blockId: point.blockId }
+            : options.selectionAnchorRequiresContentAccess &&
+                !contentAccessCounts.has(point.blockId)
+              ? { ok: false, reason: "missing-text", blockId: point.blockId }
+              : (options.selectionAnchorRuntime?.resolve(point) ?? {
+                  ok: true,
+                  blockId: point.blockId,
+                  textAnchor: point.textAnchor!,
+                  textOffset: point.textOffset,
+                  affinity: point.affinity,
+                }),
     createSelectionTextAnchor: (input) => {
+      const replaying =
+        lastCommittedOrigin === "undo" || lastCommittedOrigin === "redo";
+      if (
+        replaying &&
+        options.replaySelectionRestorationFailure === "create-throw"
+      ) {
+        throw new Error("test replay selection anchor creation failed");
+      }
+      if (
+        replaying &&
+        (options.replaySelectionRestorationFailure === "create-failure" ||
+          options.replaySelectionRestorationFailure === "resolve-failure")
+      ) {
+        return { ok: false as const };
+      }
+      if (options.failReplaySelectionAnchors && replaying) {
+        return { ok: false as const };
+      }
       if (options.failSelectionAnchorAfterContent && contentWasCommitted) {
         return { ok: false as const };
       }
@@ -490,6 +654,19 @@ function createTestEditor(
           }
         : { ok: false as const };
     },
+    resolveOperationAnchors:
+      options.resolveOperationAnchors ??
+      ((input) => {
+        const textOffsets = input.anchors.map((anchor) => {
+          const payload = anchor.payload as { readonly offset?: unknown };
+          return payload.offset;
+        });
+        return textOffsets.every(
+          (textOffset): textOffset is number => typeof textOffset === "number",
+        )
+          ? { ok: true as const, textOffsets }
+          : { ok: false as const };
+      }),
     validateBlockContent: (_blockType, value) => isRichTextDocument(value),
     contentCommit,
     acquireTextContentAccess,
@@ -693,7 +870,7 @@ describe("EditorImplementation active transaction", () => {
     );
     const base = {
       blockId: id(1),
-      blockType: "paragraph" as const,
+      blockType: "textBlock" as const,
       graphRevision: 1,
       contentRevision: 0,
     };
@@ -705,7 +882,7 @@ describe("EditorImplementation active transaction", () => {
             {
               kind: "deleteInlineRange",
               blockId: id(1),
-              blockType: "paragraph",
+              blockType: "textBlock",
               target: { kind: "text" },
               range: {
                 from: { blockId: id(1), offset: 5 },
@@ -718,13 +895,13 @@ describe("EditorImplementation active transaction", () => {
             direction: "forward",
             anchor: {
               blockId: id(1),
-              blockType: "paragraph",
+              blockType: "textBlock",
               textOffset: 5,
               affinity: "backward",
             },
             focus: {
               blockId: id(1),
-              blockType: "paragraph",
+              blockType: "textBlock",
               textOffset: 5,
               affinity: "backward",
             },
@@ -854,393 +1031,6 @@ describe("EditorImplementation active transaction", () => {
     unaffectedFixture.dispose();
   });
 
-  it("records one native typing history entry from the prepared selection anchors", () => {
-    const anchorRuntime = createAssociationAwareTestAnchorRuntime();
-    const createAnchor = vi.fn(anchorRuntime.create);
-    const fixture = createTestEditor({
-      content: new Map([[id(1), text("hello")]]),
-      materializeAppliedBlocks: true,
-      selectionAnchorRuntime: { ...anchorRuntime, create: createAnchor },
-    });
-    fixture.editor.selectionController.commitCanonicalSelection(
-      anchorRuntime.selection(id(1), 5, "backward"),
-      fixture.editor,
-      1,
-      { publication: { kind: "standalone-local" }, cause: "keyboard" },
-      { resolveTextAnchor: anchorRuntime.resolve },
-    );
-    createAnchor.mockClear();
-
-    expect(
-      fixture.editor.acceptContentOperationProposal(
-        contentInsertionProposal(fixture.editor, 5, "!", 6, 6),
-        {
-          origin: "prosemirror-proposal",
-          selectionPresentation: "native-already-established",
-          provenance: null,
-        },
-      ).ok,
-    ).toBe(true);
-
-    expect(createAnchor).toHaveBeenCalledTimes(2);
-    expect(
-      (
-        fixture.editor as unknown as {
-          readonly history: readonly EditorHistoryEntry[];
-        }
-      ).history,
-    ).toHaveLength(1);
-    fixture.dispose();
-  });
-
-  it.each(["resolve", "create"] as const)(
-    "rejects a command atomically when required history anchor %s fails",
-    (failure) => {
-      const baseRuntime = createAssociationAwareTestAnchorRuntime();
-      let failHistoryAnchor = false;
-      const selectionAnchorRuntime: AssociationAwareTestAnchorRuntime = {
-        ...baseRuntime,
-        resolve: (point) =>
-          failHistoryAnchor && failure === "resolve"
-            ? { ok: false, reason: "missing-text", blockId: point.blockId }
-            : baseRuntime.resolve(point),
-        create: (input) =>
-          failHistoryAnchor && failure === "create"
-            ? { ok: false }
-            : baseRuntime.create(input),
-      };
-      const fixture = createTestEditor({
-        content: new Map([[id(1), text("hello world")]]),
-        materializeAppliedBlocks: true,
-        selectionAnchorRuntime,
-      });
-      const initial = baseRuntime.selection(id(1), 5, "forward");
-      expect(
-        fixture.editor.selectionController.commitCanonicalSelection(
-          initial,
-          fixture.editor,
-          fixture.editor.getSelectionGraphRevision(),
-          {
-            publication: { kind: "standalone-local" },
-            cause: "keyboard",
-          },
-          { resolveTextAnchor: baseRuntime.resolve },
-        ),
-      ).toMatchObject({ kind: "changed" });
-      const canonicalBefore =
-        fixture.editor.selectionController.getCanonicalSnapshot();
-      const revisionBefore = fixture.editor.getEditorInfo().documentRevision;
-      failHistoryAnchor = true;
-
-      const result = fixture.editor.acceptContentOperationProposal(
-        {
-          base: {
-            blockId: id(1),
-            blockType: "paragraph",
-            graphRevision: 1,
-            contentRevision: 0,
-          },
-          operations: [
-            {
-              kind: "deleteInlineRange",
-              blockId: id(1),
-              blockType: "paragraph",
-              target: { kind: "text" },
-              range: {
-                from: { blockId: id(1), offset: 5 },
-                to: { blockId: id(1), offset: 11 },
-              },
-              deletedContent: [{ type: "text", text: " world" }],
-            },
-          ],
-          selectionAfter: {
-            direction: "forward",
-            anchor: {
-              blockId: id(1),
-              blockType: "paragraph",
-              textOffset: 5,
-              affinity: "backward",
-            },
-            focus: {
-              blockId: id(1),
-              blockType: "paragraph",
-              textOffset: 5,
-              affinity: "backward",
-            },
-          },
-        },
-        {
-          origin: "prosemirror-proposal",
-          selectionPresentation: "native-already-established",
-          provenance: null,
-        },
-      );
-
-      expect(result).toMatchObject({ ok: false, reason: "application-failed" });
-      expect(readContentText(fixture, id(1))).toBe("hello world");
-      expect(fixture.editor.selectionController.getCanonicalSnapshot()).toBe(
-        canonicalBefore,
-      );
-      expect(fixture.editor.getEditorInfo().documentRevision).toBe(
-        revisionBefore,
-      );
-      expect(fixture.commitContent).not.toHaveBeenCalled();
-      expect(fixture.markInconsistent).not.toHaveBeenCalled();
-      expect(fixture.onCanonicalCommit).not.toHaveBeenCalled();
-      expect(fixture.publishContentCommit).not.toHaveBeenCalled();
-      expect(
-        (fixture.editor as unknown as { readonly history: readonly unknown[] })
-          .history,
-      ).toHaveLength(0);
-      fixture.dispose();
-    },
-  );
-
-  it.each(["resolve", "create"] as const)(
-    "rejects a structural command atomically when required history anchor %s fails",
-    (failure) => {
-      const baseRuntime = createAssociationAwareTestAnchorRuntime();
-      let failHistoryAnchor = false;
-      const selectionAnchorRuntime: AssociationAwareTestAnchorRuntime = {
-        ...baseRuntime,
-        resolve: (point) =>
-          failHistoryAnchor && failure === "resolve"
-            ? { ok: false, reason: "missing-text", blockId: point.blockId }
-            : baseRuntime.resolve(point),
-        create: (input) =>
-          failHistoryAnchor && failure === "create"
-            ? { ok: false }
-            : baseRuntime.create(input),
-      };
-      const fixture = createTestEditor({
-        content: new Map([[id(1), text("hello world")]]),
-        materializeAppliedBlocks: true,
-        selectionAnchorRuntime,
-      });
-      const initial = baseRuntime.selection(id(1), 5, "forward");
-      expect(
-        fixture.editor.selectionController.commitCanonicalSelection(
-          initial,
-          fixture.editor,
-          fixture.editor.getSelectionGraphRevision(),
-          {
-            publication: { kind: "standalone-local" },
-            cause: "keyboard",
-          },
-          { resolveTextAnchor: baseRuntime.resolve },
-        ),
-      ).toMatchObject({ kind: "changed" });
-      const canonicalBefore =
-        fixture.editor.selectionController.getCanonicalSnapshot();
-      const revisionBefore = fixture.editor.getEditorInfo().documentRevision;
-      const graphRevisionBefore = fixture.editor.getSelectionGraphRevision();
-      failHistoryAnchor = true;
-
-      expect(
-        fixture.editor.executeCoreBlockKeyBehavior({
-          key: "enter",
-          blockId: id(1),
-          blockType: "paragraph",
-          cursorOffset: 5,
-        }),
-      ).toBe(false);
-
-      expect(fixture.editor.getRootBlockIds()).toEqual([id(1)]);
-      expect(readContentText(fixture, id(1))).toBe("hello world");
-      expect(fixture.editor.selectionController.getCanonicalSnapshot()).toBe(
-        canonicalBefore,
-      );
-      expect(fixture.editor.getEditorInfo().documentRevision).toBe(
-        revisionBefore,
-      );
-      expect(fixture.editor.getSelectionGraphRevision()).toBe(
-        graphRevisionBefore,
-      );
-      expect(fixture.commitContent).not.toHaveBeenCalled();
-      expect(fixture.markInconsistent).not.toHaveBeenCalled();
-      expect(fixture.onCanonicalCommit).not.toHaveBeenCalled();
-      expect(fixture.publishContentCommit).not.toHaveBeenCalled();
-      expect(
-        (fixture.editor as unknown as { readonly history: readonly unknown[] })
-          .history,
-      ).toHaveLength(0);
-      fixture.dispose();
-    },
-  );
-
-  it("commits structural content without per-edit checkpoint preflight", () => {
-    const baseRuntime = createAssociationAwareTestAnchorRuntime();
-    const fixture = createTestEditor({
-      content: new Map([[id(1), text("hello world")]]),
-      materializeAppliedBlocks: true,
-      selectionAnchorRuntime: baseRuntime,
-    });
-    expect(
-      fixture.editor.selectionController.commitCanonicalSelection(
-        baseRuntime.selection(id(1), 5, "forward"),
-        fixture.editor,
-        fixture.editor.getSelectionGraphRevision(),
-        { publication: { kind: "standalone-local" }, cause: "keyboard" },
-        { resolveTextAnchor: baseRuntime.resolve },
-      ),
-    ).toMatchObject({ kind: "changed" });
-
-    expect(
-      fixture.editor.executeCoreBlockKeyBehavior({
-        key: "enter",
-        blockId: id(1),
-        blockType: "paragraph",
-        cursorOffset: 5,
-      }),
-    ).toBe(true);
-    expect(fixture.commitContent).toHaveBeenCalledOnce();
-    expect(fixture.markInconsistent).not.toHaveBeenCalled();
-    expect(fixture.publishContentCommit).toHaveBeenCalledOnce();
-    expect(fixture.onCanonicalCommit).toHaveBeenCalledOnce();
-    expect(fixture.editor.canUndo).toBe(true);
-    fixture.dispose();
-  });
-
-  it.each([
-    {
-      splitOffset: 0,
-      expectedSourceText: "",
-      expectedGeneratedText: "hello world",
-      expectedHistoryAssoc: -1,
-    },
-    {
-      splitOffset: 5,
-      expectedSourceText: "hello",
-      expectedGeneratedText: " world",
-      expectedHistoryAssoc: -1,
-    },
-    {
-      splitOffset: 11,
-      expectedSourceText: "hello world",
-      expectedGeneratedText: "",
-      expectedHistoryAssoc: 1,
-    },
-  ])(
-    "restores replay-aware structural history selection at split offset $splitOffset",
-    ({
-      splitOffset,
-      expectedSourceText,
-      expectedGeneratedText,
-      expectedHistoryAssoc,
-    }) => {
-      const anchorRuntime = createAssociationAwareTestAnchorRuntime();
-      const commits: CanonicalEditorCommit[] = [];
-      const publishedSelections: ReturnType<
-        typeof transactionSelectionOffsets
-      >[] = [];
-      const fixture = createTestEditor({
-        content: new Map([[id(1), text("hello world")]]),
-        selectionAnchorRuntime: anchorRuntime,
-        onCanonicalCommit: (commit) => {
-          commits.push(commit);
-          publishedSelections.push(transactionSelectionOffsets(commit));
-        },
-      });
-      const sourceId = id(1);
-      const initial = anchorRuntime.selection(sourceId, splitOffset, "forward");
-      expect(
-        fixture.editor.selectionController.commitCanonicalSelection(
-          initial,
-          fixture.editor,
-          fixture.editor.getSelectionGraphRevision(),
-          {
-            publication: { kind: "standalone-local" },
-            cause: "pointer",
-          },
-          { resolveTextAnchor: anchorRuntime.resolve },
-        ),
-      ).toMatchObject({ kind: "changed" });
-
-      expect(
-        fixture.editor.executeCoreBlockKeyBehavior({
-          key: "enter",
-          blockId: sourceId,
-          blockType: "paragraph",
-          cursorOffset: splitOffset,
-        }),
-      ).toBe(true);
-      const generatedId = fixture.editor
-        .getRootBlockIds()
-        .find((blockId) => blockId !== sourceId);
-      expect(generatedId).toBeDefined();
-      expect(readContentText(fixture, sourceId)).toBe(expectedSourceText);
-      expect(readContentText(fixture, generatedId!)).toBe(
-        expectedGeneratedText,
-      );
-      expect(publishedSelections[0]).toEqual({
-        before: { blockId: sourceId, offset: splitOffset },
-        after: { blockId: generatedId, offset: 0 },
-      });
-      const recorded = (
-        fixture.editor as unknown as {
-          readonly history: readonly EditorHistoryEntry[];
-        }
-      ).history[0];
-      expect(recorded?.selectionBefore.kind).toBe("document");
-      if (recorded?.selectionBefore.kind !== "document") {
-        throw new Error("Expected a recorded document history selection");
-      }
-      expect(
-        recorded.selectionBefore.selection.focus.textAnchor?.payload.assoc,
-      ).toBe(expectedHistoryAssoc);
-
-      expect(fixture.editor.undo()).toEqual({ status: "applied" });
-      expect(publishedSelections[1]).toEqual({
-        before: { blockId: generatedId, offset: 0 },
-        after: { blockId: sourceId, offset: splitOffset },
-      });
-      expect(readCanonicalSelection(fixture.editor)).toEqual({
-        direction: "forward",
-        anchor: splitOffset,
-        focus: splitOffset,
-      });
-
-      expect(fixture.editor.redo()).toEqual({ status: "applied" });
-      expect(publishedSelections[2]).toEqual({
-        before: { blockId: sourceId, offset: splitOffset },
-        after: { blockId: generatedId, offset: 0 },
-      });
-      expect(fixture.editor.undo()).toEqual({ status: "applied" });
-      expect(publishedSelections[3]).toEqual({
-        before: { blockId: generatedId, offset: 0 },
-        after: { blockId: sourceId, offset: splitOffset },
-      });
-      expect(fixture.editor.redo()).toEqual({ status: "applied" });
-      expect(publishedSelections[4]).toEqual({
-        before: { blockId: sourceId, offset: splitOffset },
-        after: { blockId: generatedId, offset: 0 },
-      });
-      expect(commits.map((commit) => commit.historyAction)).toEqual([
-        "command",
-        "undo",
-        "redo",
-        "undo",
-        "redo",
-      ]);
-      expect(
-        commits.map((commit) => [
-          commit.baseDocumentRevision,
-          commit.documentRevision,
-        ]),
-      ).toEqual([
-        [1, 2],
-        [2, 3],
-        [3, 4],
-        [4, 5],
-        [5, 6],
-      ]);
-      expect(new Set(commits.map((commit) => commit.transactionId)).size).toBe(
-        5,
-      );
-      fixture.dispose();
-    },
-  );
-
   it("advances content graph authority when replaying accepted metadata", () => {
     const fixture = createTestEditor();
 
@@ -1278,7 +1068,7 @@ describe("EditorImplementation active transaction", () => {
       fixture.editor.insertBlocks(
         { parentId: null, childIndex: 0 },
         createCanonicalBlockFragment({
-          blocks: [{ id: id(10), type: "divider", parentId: null }],
+          blocks: [{ id: id(10), type: "atomicBlock", parentId: null }],
           rootBlockIds: [id(10)],
           start: { kind: "block", blockId: id(10) },
           end: { kind: "block", blockId: id(10) },
@@ -1292,224 +1082,8 @@ describe("EditorImplementation active transaction", () => {
     fixture.dispose();
   });
 
-  it("rejects a hydrated mixed restorative-default graph", () => {
-    const body = block(1, "restorativeBody");
-    const placeholder = block(2, "placeholder", body.id);
-    const paragraph = block(3, "paragraph", body.id);
-    expect(() =>
-      createTestEditor({
-        blocks: [body, placeholder, paragraph],
-        content: new Map([[paragraph.id, text("invalid")]]),
-      }),
-    ).toThrow(/violate the direct restorativeBody content definition/u);
-  });
-
-  it("rejects a malformed remote mixed graph atomically", () => {
-    const body = block(1, "restorativeBody");
-    const placeholder = block(2, "placeholder", body.id);
-    const inserted = block(10, "divider", body.id);
-    const fixture = createTestEditor({
-      blocks: [body, placeholder],
-      content: new Map(),
-    });
-
-    expect(() =>
-      fixture.editor.applyEditorBlockGraphPatch({
-        origin: "remote-materialized-patch",
-        blockGraphVersion: 2,
-        patch: {
-          affectedBlockIds: [body.id, inserted.id],
-          upsertedBlocks: [inserted],
-          rootBlockIds: [body.id],
-          childIdsByParentId: {
-            [body.id]: [placeholder.id, inserted.id],
-          },
-        },
-      }),
-    ).toThrow(/violate the direct restorativeBody content definition/u);
-    expect(fixture.editor.getChildBlockIds(body.id)).toEqual([placeholder.id]);
-    expect(fixture.editor.getBlock(inserted.id)).toBeNull();
-    fixture.dispose();
-  });
-
-  it.each([[[10]], [[10, 11]]] as const)(
-    "atomically replaces a restorative default when inserting %s block(s)",
-    (suffixes) => {
-      const body = block(1, "restorativeBody");
-      const placeholder = block(2, "placeholder", body.id);
-      const fixture = createTestEditor({
-        blocks: [body, placeholder],
-        content: new Map(),
-      });
-      const fragment = paragraphFragment(...suffixes);
-      const result = fixture.editor.transaction(() => {
-        fixture.editor.insertBlocks(
-          { parentId: body.id, childIndex: 1 },
-          fragment,
-        );
-      });
-
-      expect(result).toMatchObject({ ok: true, changed: true });
-      expect(fixture.editor.getChildBlockIds(body.id)).toEqual(
-        fragment.rootBlockIds,
-      );
-      expect(fixture.editor.getBlock(placeholder.id)).toBeNull();
-      if (result.ok && result.changed) {
-        expect(result.transaction.selection).toMatchObject({
-          blockId: fragment.rootBlockIds.at(-1),
-        });
-        expect(result.transaction.selection).not.toMatchObject({
-          blockId: placeholder.id,
-        });
-      }
-      fixture.dispose();
-    },
-  );
-
-  it.each([[[10]], [[10, 11]]] as const)(
-    "atomically replaces a restorative default when pasting %s block(s)",
-    (suffixes) => {
-      const body = block(1, "restorativeBody");
-      const placeholder = block(2, "placeholder", body.id);
-      const fixture = createTestEditor({
-        blocks: [body, placeholder],
-        content: new Map(),
-      });
-      const fragment = paragraphFragment(...suffixes);
-
-      expect(
-        executeStructuralEditComposition(
-          fixture.editor,
-          {
-            insertions: [
-              {
-                placement: { parentId: body.id, childIndex: 1 },
-                fragment,
-              },
-            ],
-          },
-          { provenance: null },
-        ),
-      ).toMatchObject({ ok: true, changed: true });
-      expect(fixture.editor.getChildBlockIds(body.id)).toEqual(
-        fragment.rootBlockIds,
-      );
-      expect(fixture.editor.getBlock(placeholder.id)).toBeNull();
-      fixture.dispose();
-    },
-  );
-
-  it("restores the source default when moving its final real child out", () => {
-    const body = block(1, "restorativeBody");
-    const paragraph = block(2, "paragraph", body.id);
-    const fixture = createTestEditor({
-      blocks: [body, paragraph],
-      content: new Map([[paragraph.id, text("move")]]),
-    });
-
-    expect(
-      fixture.editor.moveBlocks({
-        blockIds: [paragraph.id],
-        destination: { parentId: null, childIndex: 1 },
-      }),
-    ).toMatchObject({ ok: true, changed: true });
-    const restored = fixture.editor.getChildBlockIds(body.id);
-    expect(restored).toHaveLength(1);
-    expect(fixture.editor.getBlock(restored[0]!)?.type).toBe("placeholder");
-    expect(fixture.editor.getRootBlockIds()).toEqual([body.id, paragraph.id]);
-    fixture.dispose();
-  });
-
-  it.each([[[10]], [[10, 11]]] as const)(
-    "atomically replaces a restorative default when moving %s block(s)",
-    (suffixes) => {
-      const external = suffixes.map((suffix) => block(suffix, "paragraph"));
-      const body = block(1, "restorativeBody");
-      const placeholder = block(2, "placeholder", body.id);
-      const fixture = createTestEditor({
-        blocks: [...external, body, placeholder],
-        content: new Map(
-          external.map((entry) => [entry.id, text(String(entry.id))]),
-        ),
-      });
-
-      const result = fixture.editor.moveBlocks({
-        blockIds: external.map((entry) => entry.id),
-        destination: { parentId: body.id, childIndex: 1 },
-      });
-
-      expect(result).toMatchObject({ ok: true, changed: true });
-      expect(fixture.editor.getChildBlockIds(body.id)).toEqual(
-        external.map((entry) => entry.id),
-      );
-      expect(fixture.editor.getBlock(placeholder.id)).toBeNull();
-      fixture.dispose();
-    },
-  );
-
-  it("restores exactly one default only after the final real child is deleted", () => {
-    const body = block(1, "restorativeBody");
-    const first = block(2, "paragraph", body.id);
-    const second = block(3, "paragraph", body.id);
-    const fixture = createTestEditor({
-      blocks: [body, first, second],
-      content: new Map([
-        [first.id, text("first")],
-        [second.id, text("second")],
-      ]),
-    });
-
-    expect(
-      fixture.editor.transaction(() => {
-        fixture.editor.deleteBlocks({
-          blockIds: [first.id],
-          includeDescendants: true,
-        });
-      }),
-    ).toMatchObject({ ok: true, changed: true });
-    expect(fixture.editor.getChildBlockIds(body.id)).toEqual([second.id]);
-
-    expect(
-      fixture.editor.transaction(() => {
-        fixture.editor.deleteBlocks({
-          blockIds: [second.id],
-          includeDescendants: true,
-        });
-      }),
-    ).toMatchObject({ ok: true, changed: true });
-    const restored = fixture.editor.getChildBlockIds(body.id);
-    expect(restored).toHaveLength(1);
-    expect(fixture.editor.getBlock(restored[0]!)?.type).toBe("placeholder");
-    fixture.dispose();
-  });
-
-  it("undoes and redoes the placeholder-only/content-only transition", () => {
-    const body = block(1, "restorativeBody");
-    const placeholder = block(2, "placeholder", body.id);
-    const fixture = createTestEditor({
-      blocks: [body, placeholder],
-      content: new Map(),
-    });
-    const fragment = paragraphFragment(10);
-
-    expect(
-      fixture.editor.transaction(() => {
-        fixture.editor.insertBlocks(
-          { parentId: body.id, childIndex: 0 },
-          fragment,
-        );
-      }),
-    ).toMatchObject({ ok: true, changed: true });
-    expect(fixture.editor.getChildBlockIds(body.id)).toEqual([id(10)]);
-    expect(fixture.editor.undo()).toEqual({ status: "applied" });
-    expect(fixture.editor.getChildBlockIds(body.id)).toEqual([placeholder.id]);
-    expect(fixture.editor.redo()).toEqual({ status: "applied" });
-    expect(fixture.editor.getChildBlockIds(body.id)).toEqual([id(10)]);
-    fixture.dispose();
-  });
-
   it("atomically replaces a deleted last root with the definition-owned default", () => {
-    const onlyRoot = block(1, "divider");
+    const onlyRoot = block(1, "atomicBlock");
     const fixture = createTestEditor({
       blocks: [onlyRoot],
       content: new Map(),
@@ -1527,7 +1101,7 @@ describe("EditorImplementation active transaction", () => {
     expect(defaultRootId).toBeDefined();
     expect(defaultRootId).not.toBe(original.id);
     expect(fixture.editor.getRootBlockIds()).toEqual([defaultRootId]);
-    expect(fixture.editor.getBlock(defaultRootId!)?.type).toBe("paragraph");
+    expect(fixture.editor.getBlock(defaultRootId!)?.type).toBe("textBlock");
     expect(readContentText(fixture, defaultRootId!)).toBe("");
     expect(
       fixture.editor.selectionController.canonical.getSnapshot(),
@@ -1545,7 +1119,7 @@ describe("EditorImplementation active transaction", () => {
 
     expect(fixture.editor.undo()).toEqual({ status: "applied" });
     expect(fixture.editor.getRootBlockIds()).toEqual([original.id]);
-    expect(fixture.editor.getBlock(original.id)?.type).toBe("divider");
+    expect(fixture.editor.getBlock(original.id)?.type).toBe("atomicBlock");
     expect(fixture.editor.getBlock(defaultRootId!)).toBeNull();
 
     expect(fixture.editor.redo()).toEqual({ status: "applied" });
@@ -1560,13 +1134,13 @@ describe("EditorImplementation active transaction", () => {
   });
 
   it("rejects nesting and aborts the outer transaction even if ignored", () => {
-    const divider = block(2, "divider");
+    const atomic = block(2, "atomicBlock");
     const fixture = createTestEditor({
-      blocks: [block(1, "paragraph"), divider],
+      blocks: [block(1, "textBlock"), atomic],
       content: new Map([[id(1), text("one")]]),
     });
     const result = fixture.editor.transaction(() => {
-      fixture.editor.deleteRange(resolvedBlockRange(divider));
+      fixture.editor.deleteRange(resolvedBlockRange(atomic));
       expect(fixture.editor.transaction(() => undefined)).toMatchObject({
         ok: false,
         phase: "nested",
@@ -1574,7 +1148,7 @@ describe("EditorImplementation active transaction", () => {
     });
 
     expect(result).toMatchObject({ ok: false, phase: "nested" });
-    expect(fixture.editor.getBlock(divider.id)).not.toBeNull();
+    expect(fixture.editor.getBlock(atomic.id)).not.toBeNull();
     expect(fixture.onCanonicalCommit).not.toHaveBeenCalled();
     fixture.dispose();
   });
@@ -1617,30 +1191,30 @@ describe("EditorImplementation active transaction", () => {
   });
 
   it("aborts successful earlier mutations when a later mutation fails", () => {
-    const divider = block(2, "divider");
+    const atomic = block(2, "atomicBlock");
     const fixture = createTestEditor({
-      blocks: [block(1, "paragraph"), divider],
+      blocks: [block(1, "textBlock"), atomic],
       content: new Map([[id(1), text("one")]]),
     });
     const before = fixture.editor.getCommandState();
     const result = fixture.editor.transaction(() => {
-      fixture.editor.deleteRange(resolvedBlockRange(divider));
-      fixture.editor.joinTextBlocks(id(1), divider.id);
+      fixture.editor.deleteRange(resolvedBlockRange(atomic));
+      fixture.editor.joinTextBlocks(id(1), atomic.id);
     });
 
     expect(result).toMatchObject({ ok: false, phase: "mutation" });
     expect(fixture.editor.getCommandState().blockGraphVersion).toBe(
       before.blockGraphVersion,
     );
-    expect(fixture.editor.getBlock(divider.id)).not.toBeNull();
+    expect(fixture.editor.getBlock(atomic.id)).not.toBeNull();
     expect(fixture.onCanonicalCommit).not.toHaveBeenCalled();
     expect(fixture.publications).not.toHaveBeenCalled();
     fixture.dispose();
   });
 
   it("rejects a complete draft that fails final wrapper validation", () => {
-    const wrapper = block(1, "quote");
-    const paragraph = block(2, "paragraph", wrapper.id);
+    const wrapper = block(1, "fixedWrapper");
+    const paragraph = block(2, "textBlock", wrapper.id);
     const fixture = createTestEditor({
       blocks: [wrapper, paragraph],
       content: new Map([[paragraph.id, text("inside")]]),
@@ -1650,7 +1224,7 @@ describe("EditorImplementation active transaction", () => {
       fixture.editor.insertBlocks(
         { parentId: wrapper.id, childIndex: 1 },
         createCanonicalBlockFragment({
-          blocks: [{ id: insertedId, type: "divider", parentId: null }],
+          blocks: [{ id: insertedId, type: "atomicBlock", parentId: null }],
           rootBlockIds: [insertedId],
           start: { kind: "block", blockId: insertedId },
           end: { kind: "block", blockId: insertedId },
@@ -1673,7 +1247,7 @@ describe("EditorImplementation active transaction", () => {
     const secondId = id(11);
     const fragment = (blockId: BlockId) =>
       createCanonicalBlockFragment({
-        blocks: [{ id: blockId, type: "divider", parentId: null }],
+        blocks: [{ id: blockId, type: "atomicBlock", parentId: null }],
         rootBlockIds: [blockId],
         start: { kind: "block", blockId },
         end: { kind: "block", blockId },
@@ -1710,10 +1284,31 @@ describe("EditorImplementation active transaction", () => {
     fixture.dispose();
   });
 
+  it("restores canonical insertion content when redoing created text blocks", () => {
+    const fixture = createTestEditor();
+    const insertedId = id(10);
+
+    expect(
+      fixture.editor.transaction(() => {
+        fixture.editor.insertBlocks(
+          { parentId: null, childIndex: 1 },
+          paragraphFragment(10),
+        );
+      }),
+    ).toMatchObject({ ok: true, changed: true });
+    expect(readContentText(fixture, insertedId)).toBe("paragraph 10");
+
+    expect(fixture.editor.undo()).toEqual({ status: "applied" });
+    expect(fixture.editor.getBlock(insertedId)).toBeNull();
+    expect(fixture.editor.redo()).toEqual({ status: "applied" });
+    expect(readContentText(fixture, insertedId)).toBe("paragraph 10");
+    fixture.dispose();
+  });
+
   it("composes typed subtree deletion with insertion", () => {
-    const wrapper = block(1, "callout");
-    const child = block(2, "paragraph", wrapper.id);
-    const survivor = block(3, "divider");
+    const wrapper = block(1, "containerWrapper");
+    const child = block(2, "textBlock", wrapper.id);
+    const survivor = block(3, "atomicBlock");
     const insertedId = id(10);
     const fixture = createTestEditor({
       blocks: [wrapper, child, survivor],
@@ -1731,7 +1326,7 @@ describe("EditorImplementation active transaction", () => {
       fixture.editor.insertBlocks(
         { parentId: null, childIndex: 0 },
         createCanonicalBlockFragment({
-          blocks: [{ id: insertedId, type: "divider", parentId: null }],
+          blocks: [{ id: insertedId, type: "atomicBlock", parentId: null }],
           rootBlockIds: [insertedId],
           start: { kind: "block", blockId: insertedId },
           end: { kind: "block", blockId: insertedId },
@@ -1755,8 +1350,8 @@ describe("EditorImplementation active transaction", () => {
   });
 
   it("rejects overlapping subtree deletion requests atomically", () => {
-    const wrapper = block(1, "callout");
-    const child = block(2, "paragraph", wrapper.id);
+    const wrapper = block(1, "containerWrapper");
+    const child = block(2, "textBlock", wrapper.id);
     const fixture = createTestEditor({
       blocks: [wrapper, child],
       content: new Map([[child.id, text("inside")]]),
@@ -1778,8 +1373,8 @@ describe("EditorImplementation active transaction", () => {
   });
 
   it("commits graph and composed metadata changes as one history unit", () => {
-    const paragraph = block(1, "paragraph");
-    const removed = block(2, "divider");
+    const paragraph = block(1, "textBlock");
+    const removed = block(2, "atomicBlock");
     const fixture = createTestEditor({
       blocks: [paragraph, removed],
       content: new Map([[paragraph.id, text("one")]]),
@@ -1826,6 +1421,14 @@ describe("EditorImplementation active transaction", () => {
     expect(fixture.editor.undo()).toEqual({ status: "applied" });
     expect(fixture.editor.getBlock(paragraph.id)?.metadata).toBeUndefined();
     expect(fixture.editor.getBlock(removed.id)?.id).toBe(removed.id);
+    expect(fixture.onCanonicalCommit.mock.calls[1]![0]).toMatchObject({
+      kind: "block-graph",
+      historyAction: "undo",
+      metadataOperation: {
+        kind: "updateBlockMetadata",
+        deletions: [{ blockId: paragraph.id, fields: ["first", "second"] }],
+      },
+    });
     expect(fixture.editor.undo()).toEqual({ status: "history-empty" });
     expect(fixture.editor.redo()).toEqual({ status: "applied" });
     expect(fixture.editor.getBlock(paragraph.id)?.metadata).toEqual({
@@ -1833,12 +1436,25 @@ describe("EditorImplementation active transaction", () => {
       second: "value",
     });
     expect(fixture.editor.getBlock(removed.id)).toBeNull();
+    expect(fixture.onCanonicalCommit.mock.calls[2]![0]).toMatchObject({
+      kind: "block-graph",
+      historyAction: "redo",
+      metadataOperation: {
+        kind: "updateBlockMetadata",
+        updates: [
+          {
+            blockId: paragraph.id,
+            values: { first: true, second: "value" },
+          },
+        ],
+      },
+    });
     fixture.dispose();
   });
 
   it("rolls metadata back when the complete final graph is invalid", () => {
-    const wrapper = block(1, "quote");
-    const paragraph = block(2, "paragraph", wrapper.id);
+    const wrapper = block(1, "fixedWrapper");
+    const paragraph = block(2, "textBlock", wrapper.id);
     const insertedId = id(10);
     const fixture = createTestEditor({
       blocks: [wrapper, paragraph],
@@ -1852,7 +1468,7 @@ describe("EditorImplementation active transaction", () => {
       fixture.editor.insertBlocks(
         { parentId: wrapper.id, childIndex: 1 },
         createCanonicalBlockFragment({
-          blocks: [{ id: insertedId, type: "divider", parentId: null }],
+          blocks: [{ id: insertedId, type: "atomicBlock", parentId: null }],
           rootBlockIds: [insertedId],
           start: { kind: "block", blockId: insertedId },
           end: { kind: "block", blockId: insertedId },
@@ -1870,15 +1486,15 @@ describe("EditorImplementation active transaction", () => {
   });
 
   it("rejects the staged transaction when its base graph becomes stale", () => {
-    const divider = block(2, "divider");
+    const atomic = block(2, "atomicBlock");
     const fixture = createTestEditor({
-      blocks: [block(1, "paragraph"), divider],
+      blocks: [block(1, "textBlock"), atomic],
       content: new Map([[id(1), text("one")]]),
     });
 
     const result = fixture.editor.transaction(() => {
       fixture.editor.deleteBlocks({
-        blockIds: [divider.id],
+        blockIds: [atomic.id],
         includeDescendants: true,
       });
       fixture.editor.replayLogicalBlockMetadataOperation({
@@ -1888,7 +1504,7 @@ describe("EditorImplementation active transaction", () => {
     });
 
     expect(result).toMatchObject({ ok: false, phase: "commit" });
-    expect(fixture.editor.getBlock(divider.id)?.id).toBe(divider.id);
+    expect(fixture.editor.getBlock(atomic.id)?.id).toBe(atomic.id);
     expect(fixture.editor.getBlock(id(1))?.metadata).toEqual({ remote: true });
     fixture.dispose();
   });
@@ -1903,7 +1519,7 @@ describe("EditorImplementation active transaction", () => {
           blocks: [
             {
               id: insertedId,
-              type: "paragraph",
+              type: "textBlock",
               parentId: null,
               content: text("next"),
               plainText: "next",
@@ -1967,12 +1583,12 @@ describe("EditorImplementation active transaction", () => {
           blocks: [
             {
               id: wrapperId,
-              type: "quote",
+              type: "fixedWrapper",
               parentId: null,
             },
             {
               id: childId,
-              type: "paragraph",
+              type: "textBlock",
               parentId: wrapperId,
               content: text("inside"),
               plainText: "inside",
@@ -1997,11 +1613,11 @@ describe("EditorImplementation active transaction", () => {
   });
 
   it("executes delete, insert, and joins as one published document change", () => {
-    const left = block(1, "paragraph");
-    const divider = block(2, "divider");
-    const right = block(3, "paragraph");
+    const left = block(1, "textBlock");
+    const atomic = block(2, "atomicBlock");
+    const right = block(3, "textBlock");
     const fixture = createTestEditor({
-      blocks: [left, divider, right],
+      blocks: [left, atomic, right],
       content: new Map([
         [left.id, text("L")],
         [right.id, text("R")],
@@ -2012,7 +1628,7 @@ describe("EditorImplementation active transaction", () => {
       blocks: [
         {
           id: insertedId,
-          type: "paragraph",
+          type: "textBlock",
           parentId: null,
           content: text("I"),
           plainText: "I",
@@ -2027,7 +1643,7 @@ describe("EditorImplementation active transaction", () => {
     const result = executeStructuralEditComposition(
       fixture.editor,
       {
-        deletion: resolvedBlockRange(divider),
+        deletion: resolvedBlockRange(atomic),
         insertions: [
           {
             placement: { parentId: null, childIndex: 1 },
@@ -2046,7 +1662,7 @@ describe("EditorImplementation active transaction", () => {
           inputType: "replacement",
           finalSelection: {
             blockId: left.id,
-            blockType: "paragraph",
+            blockType: "textBlock",
             offset: 2,
           },
         },
@@ -2070,7 +1686,7 @@ describe("EditorImplementation active transaction", () => {
       inputType: "replacement",
       finalSelection: {
         blockId: left.id,
-        blockType: "paragraph",
+        blockType: "textBlock",
         offset: 2,
       },
     });
@@ -2089,9 +1705,10 @@ describe("EditorImplementation active transaction", () => {
   });
 
   it("commits open-boundary range deletion once and undoes the join atomically", () => {
-    const start = block(1, "paragraph");
-    const middle = block(2, "paragraph");
-    const end = block(3, "paragraph");
+    const start = block(1, "textBlock");
+    const middle = block(2, "textBlock");
+    const end = block(3, "textBlock");
+    const resolvedBlocks: BlockId[] = [];
     const fixture = createTestEditor({
       blocks: [start, middle, end],
       content: new Map([
@@ -2099,6 +1716,18 @@ describe("EditorImplementation active transaction", () => {
         [middle.id, text("middle")],
         [end.id, text("GHIjkl")],
       ]),
+      resolveOperationAnchors: (input) => {
+        resolvedBlocks.push(input.blockId);
+        const textOffsets = input.anchors.map((anchor) => {
+          const payload = anchor.payload as { readonly offset?: unknown };
+          return payload.offset;
+        });
+        return textOffsets.every(
+          (textOffset): textOffset is number => typeof textOffset === "number",
+        )
+          ? { ok: true, textOffsets }
+          : { ok: false };
+      },
     });
     const range: StructuralEditRange = {
       graphRevision: 1,
@@ -2142,7 +1771,7 @@ describe("EditorImplementation active transaction", () => {
     expect(fixture.editor.getRootBlockIds()).toEqual([start.id]);
     expect(fixture.editor.getBlock(start.id)).toMatchObject({
       id: start.id,
-      type: "paragraph",
+      type: "textBlock",
     });
     expect(
       extractPlainTextFromRichTextDocument(fixture.content.get(start.id)!),
@@ -2156,7 +1785,9 @@ describe("EditorImplementation active transaction", () => {
       offset: 3,
     });
 
+    resolvedBlocks.length = 0;
     expect(fixture.editor.undo()).toEqual({ status: "applied" });
+    expect(resolvedBlocks).toEqual([start.id]);
     expect(fixture.editor.getRootBlockIds()).toEqual([
       start.id,
       middle.id,
@@ -2168,7 +1799,9 @@ describe("EditorImplementation active transaction", () => {
     expect(
       extractPlainTextFromRichTextDocument(fixture.content.get(end.id)!),
     ).toBe("GHIjkl");
+    resolvedBlocks.length = 0;
     expect(fixture.editor.redo()).toEqual({ status: "applied" });
+    expect(resolvedBlocks).toEqual([start.id]);
     expect(fixture.editor.getRootBlockIds()).toEqual([start.id]);
     expect(
       extractPlainTextFromRichTextDocument(fixture.content.get(start.id)!),
@@ -2186,7 +1819,7 @@ describe("EditorImplementation active transaction", () => {
           blocks: [
             {
               id: insertedId,
-              type: "paragraph",
+              type: "textBlock",
               parentId: null,
               content: text("new"),
               plainText: "new",
@@ -2221,341 +1854,9 @@ describe("EditorImplementation active transaction", () => {
     fixture.dispose();
   });
 
-  it("records a mixed structural composition once and restores content atomically", () => {
-    const left = block(1, "paragraph");
-    const right = block(2, "paragraph");
-    const fixture = createTestEditor({
-      blocks: [left, right],
-      content: new Map([
-        [left.id, text("left")],
-        [right.id, text("right")],
-      ]),
-    });
-
-    const result = fixture.editor.transaction(() => {
-      fixture.editor.joinTextBlocks(left.id, right.id);
-    });
-
-    expect(result).toMatchObject({ ok: true, changed: true });
-    expect(fixture.editor.canUndo).toBe(true);
-    expect(fixture.editor.undo()).toEqual({ status: "applied" });
-    expect(fixture.editor.getRootBlockIds()).toEqual([left.id, right.id]);
-    expect(fixture.editor.getBlock(right.id)?.id).toBe(right.id);
-    expect(
-      extractPlainTextFromRichTextDocument(fixture.content.get(left.id)!),
-    ).toBe("left");
-    expect(
-      extractPlainTextFromRichTextDocument(fixture.content.get(right.id)!),
-    ).toBe("right");
-    expect(fixture.editor.undo()).toEqual({ status: "history-empty" });
-
-    expect(fixture.editor.redo()).toEqual({ status: "applied" });
-    expect(fixture.editor.getRootBlockIds()).toEqual([left.id]);
-    expect(
-      extractPlainTextFromRichTextDocument(fixture.content.get(left.id)!),
-    ).toBe("leftright");
-    fixture.dispose();
-  });
-
-  it.each([
-    { status: "focused" as const },
-    { status: "pending" as const },
-    { status: "rejected" as const, reason: "native-focus-failed" as const },
-  ])(
-    "settles and presents an existing previous text target when pre-removal presentation is $status",
-    (preRemovalResult) => {
-      const previous = block(1, "paragraph");
-      const empty = block(2, "paragraph");
-      const anchorRuntime = createAssociationAwareTestAnchorRuntime();
-      const commits: CanonicalEditorCommit[] = [];
-      const fixture = createTestEditor({
-        blocks: [previous, empty],
-        content: new Map([
-          [previous.id, text("Alpha")],
-          [empty.id, text("")],
-        ]),
-        materializeAppliedBlocks: true,
-        selectionAnchorRuntime: anchorRuntime,
-        selectionAnchorRequiresContentAccess: true,
-        onCanonicalCommit: (commit) => commits.push(commit),
-      });
-      expect(
-        fixture.editor.selectionController.commitCanonicalSelection(
-          anchorRuntime.selection(empty.id, 0, "backward"),
-          fixture.editor,
-          fixture.editor.getSelectionGraphRevision(),
-          { publication: { kind: "standalone-local" }, cause: "keyboard" },
-          { resolveTextAnchor: anchorRuntime.resolve },
-        ),
-      ).toMatchObject({ kind: "changed" });
-      const canonicalBefore =
-        fixture.editor.selectionController.getCanonicalSnapshot();
-      expect(canonicalBefore.kind).toBe("document");
-      if (canonicalBefore.kind !== "document") return;
-      expect(canonicalBefore.snapshot.documentSelection.focus).toMatchObject({
-        blockId: empty.id,
-        textOffset: 0,
-      });
-      expect(
-        canonicalBefore.snapshot.documentSelection.focus?.textAnchor,
-      ).not.toBeNull();
-      fixture.presentTextProjection.mockReturnValueOnce(preRemovalResult);
-
-      expect(
-        fixture.editor.executeCoreBlockKeyBehavior({
-          key: "backspace",
-          blockId: empty.id,
-          blockType: empty.type,
-          cursorOffset: 0,
-        }),
-      ).toBe(true);
-
-      expect(fixture.editor.getRootBlockIds()).toEqual([previous.id]);
-      expect(fixture.editor.getBlock(empty.id)).toBeNull();
-      expect(transactionSelectionOffsets(commits[0]!)).toEqual({
-        before: { blockId: empty.id, offset: 0 },
-        after: { blockId: previous.id, offset: 5 },
-      });
-      const canonicalAfter =
-        fixture.editor.selectionController.getCanonicalSnapshot();
-      expect(canonicalAfter.kind).toBe("document");
-      if (canonicalAfter.kind !== "document") return;
-      expect(canonicalAfter.snapshot.documentSelection.focus).toMatchObject({
-        blockId: previous.id,
-        textOffset: 5,
-      });
-      expect(
-        canonicalAfter.snapshot.documentSelection.focus?.textAnchor,
-      ).not.toBeNull();
-      expect(fixture.presentTextProjection).toHaveBeenCalledTimes(2);
-      expect(fixture.presentTextProjection).toHaveBeenNthCalledWith(
-        1,
-        previous.id,
-        expect.objectContaining({
-          offset: 5,
-          canonicalSelectionRevision: canonicalAfter.revision,
-        }),
-      );
-      expect(fixture.presentTextProjection).toHaveBeenNthCalledWith(
-        2,
-        previous.id,
-        expect.objectContaining({
-          offset: 5,
-          canonicalSelectionRevision: canonicalAfter.revision,
-        }),
-      );
-      expect(fixture.acquireTextContentAccess).toHaveBeenCalledWith(
-        previous.id,
-      );
-      expect(fixture.readTextContentAccessCount(previous.id)).toBe(0);
-      fixture.dispose();
-    },
-  );
-
-  it("joins a selected right block through core Backspace and replays its anchors without drift", () => {
-    const left = block(1, "paragraph");
-    const right = block(2, "paragraph");
-    const anchorRuntime = createAssociationAwareTestAnchorRuntime();
-    const commits: CanonicalEditorCommit[] = [];
-    const fixture = createTestEditor({
-      blocks: [left, right],
-      content: new Map([
-        [left.id, text("Alpha")],
-        [right.id, text("Bravo")],
-      ]),
-      materializeAppliedBlocks: true,
-      selectionAnchorRuntime: anchorRuntime,
-      selectionAnchorRequiresContentAccess: true,
-      onCanonicalCommit: (commit) => commits.push(commit),
-    });
-    const standaloneSelections: unknown[] = [];
-    fixture.editor.selectionController.presentation.subscribe(() => {
-      const settlement =
-        fixture.editor.selectionController.getPresentationSnapshot().settlement;
-      if (settlement?.publication.kind === "standalone-local") {
-        standaloneSelections.push(settlement);
-      }
-    });
-    expect(
-      fixture.editor.selectionController.commitCanonicalSelection(
-        anchorRuntime.selection(right.id, 0, "forward"),
-        fixture.editor,
-        fixture.editor.getSelectionGraphRevision(),
-        { publication: { kind: "standalone-local" }, cause: "keyboard" },
-        { resolveTextAnchor: anchorRuntime.resolve },
-      ),
-    ).toMatchObject({ kind: "changed" });
-
-    expect(
-      fixture.editor.executeCoreBlockKeyBehavior({
-        key: "backspace",
-        blockId: right.id,
-        blockType: right.type,
-        cursorOffset: 0,
-      }),
-    ).toBe(true);
-    expect(fixture.editor.getRootBlockIds()).toEqual([left.id]);
-    expect(readContentText(fixture, left.id)).toBe("AlphaBravo");
-    expect(fixture.editor.getBlock(right.id)).toBeNull();
-    expect(fixture.acquireTextContentAccess).toHaveBeenCalledWith(right.id);
-    expect(
-      fixture.acquireTextContentAccess.mock.calls.filter(
-        ([blockId]) => blockId === right.id,
-      ),
-    ).toHaveLength(1);
-    expect(fixture.readTextContentAccessCount(right.id)).toBe(0);
-    expect(transactionSelectionOffsets(commits[0]!)).toEqual({
-      before: { blockId: right.id, offset: 0 },
-      after: { blockId: left.id, offset: 5 },
-    });
-    expect(fixture.editor.canUndo).toBe(true);
-    expect(commits).toHaveLength(1);
-    expect(commits[0]).toMatchObject({
-      kind: "block-graph",
-      graphChanges: [{ kind: "delete", blockId: right.id }],
-      contentCommit: {
-        blocks: [
-          {
-            blockId: left.id,
-            contentOperations: [
-              {
-                kind: "insertInlineContent",
-                position: { offset: 5 },
-              },
-            ],
-          },
-        ],
-      },
-    });
-    expect(commits[0]).not.toHaveProperty("previousState");
-    expect(commits[0]).not.toHaveProperty("optimisticState");
-    expect(commits[0]).not.toHaveProperty("blockSlice");
-    expect(standaloneSelections).toHaveLength(1);
-    expect(fixture.readTextContentAccessCount(right.id)).toBe(0);
-    const recorded = (
-      fixture.editor as unknown as {
-        readonly history: readonly EditorHistoryEntry[];
-      }
-    ).history[0];
-    expect(recorded?.selectionBefore.kind).toBe("document");
-    if (recorded?.selectionBefore.kind !== "document") {
-      throw new Error("Expected selected donor history anchor");
-    }
-    expect(
-      recorded.selectionBefore.selection.focus.textAnchor?.payload.assoc,
-    ).toBe(-1);
-    expect(recorded.inverse).toMatchObject({
-      kind: "structuralTransaction",
-      contentOperations: [
-        {
-          kind: "insertInlineContent",
-          blockId: right.id,
-          position: { offset: 0 },
-          content: [{ type: "text", text: "Bravo" }],
-        },
-        {
-          kind: "deleteInlineRange",
-          blockId: left.id,
-          range: { from: { offset: 5 }, to: { offset: 10 } },
-        },
-      ],
-    });
-    expect(recorded.forward).not.toHaveProperty("payload.rootBlockIds");
-    expect(recorded.inverse).not.toHaveProperty("payload.childIdsByParentId");
-
-    for (let cycle = 0; cycle < 2; cycle += 1) {
-      expect(fixture.editor.undo()).toEqual({ status: "applied" });
-      expect(fixture.editor.getRootBlockIds()).toEqual([left.id, right.id]);
-      expect(readContentText(fixture, left.id)).toBe("Alpha");
-      expect(readContentText(fixture, right.id)).toBe("Bravo");
-      expect(readCanonicalSelection(fixture.editor)).toEqual({
-        direction: "forward",
-        anchor: 0,
-        focus: 0,
-      });
-      expect(fixture.editor.redo()).toEqual({ status: "applied" });
-      expect(fixture.editor.getRootBlockIds()).toEqual([left.id]);
-      expect(readContentText(fixture, left.id)).toBe("AlphaBravo");
-      expect(readCanonicalSelection(fixture.editor)).toEqual({
-        direction: "forward",
-        anchor: 5,
-        focus: 5,
-      });
-    }
-    expect(commits.map((commit) => commit.historyAction)).toEqual([
-      "command",
-      "undo",
-      "redo",
-      "undo",
-      "redo",
-    ]);
-    expect(standaloneSelections).toHaveLength(1);
-    expect(
-      (
-        fixture.editor as unknown as {
-          readonly history: readonly EditorHistoryEntry[];
-        }
-      ).history,
-    ).toHaveLength(1);
-    fixture.dispose();
-  });
-
-  it("validates the exact prepared join candidate before committing it", () => {
-    const left = block(1, "paragraph");
-    const right = block(2, "paragraph");
-    const observed: string[] = [];
-    type DocumentValidator = NonNullable<
-      InitializeEditorImplementationOptions["documentValidators"]
-    >[number];
-    const validator = vi.fn((candidate: Parameters<DocumentValidator>[0]) => {
-      const readContent = candidate.readContent;
-      expect(readContent).toBeDefined();
-      if (!readContent) throw new Error("validator content reader is missing");
-      const leftContent = readContent(left.id, left.type);
-      observed.push(
-        leftContent
-          ? extractPlainTextFromRichTextDocument(leftContent.content)
-          : "missing-left",
-      );
-      observed.push(
-        readContent(right.id, right.type) === null
-          ? "removed-right"
-          : "present-right",
-      );
-      return [];
-    });
-    const fixture = createTestEditor({
-      blocks: [left, right],
-      content: new Map([
-        [left.id, text("Alpha")],
-        [right.id, text("Bravo")],
-      ]),
-      materializeAppliedBlocks: true,
-      documentValidators: [validator],
-    });
-
-    expect(
-      fixture.editor.executeCoreBlockKeyBehavior({
-        key: "backspace",
-        blockId: right.id,
-        blockType: right.type,
-        cursorOffset: 0,
-      }),
-    ).toBe(true);
-    expect(observed).toEqual(["AlphaBravo", "removed-right"]);
-    expect(validator).toHaveBeenCalledOnce();
-    expect(
-      fixture.validateContentCommit.mock.invocationCallOrder[0],
-    ).toBeLessThan(validator.mock.invocationCallOrder[0]!);
-    expect(validator.mock.invocationCallOrder[0]).toBeLessThan(
-      fixture.commitContent.mock.invocationCallOrder[0]!,
-    );
-    fixture.dispose();
-  });
-
   it("undoes and redoes moves without replacing block identities", () => {
-    const first = block(1, "paragraph");
-    const second = block(2, "paragraph");
+    const first = block(1, "textBlock");
+    const second = block(2, "textBlock");
     const fixture = createTestEditor({
       blocks: [first, second],
       content: new Map([
@@ -2581,8 +1882,8 @@ describe("EditorImplementation active transaction", () => {
   });
 
   it("does not publish or record history for a no-op public move", () => {
-    const first = block(1, "paragraph");
-    const second = block(2, "paragraph");
+    const first = block(1, "textBlock");
+    const second = block(2, "textBlock");
     const fixture = createTestEditor({ blocks: [first, second] });
 
     const moved = fixture.editor.moveBlocks({
@@ -2607,10 +1908,10 @@ describe("EditorImplementation active transaction", () => {
         { parentId: null, childIndex: 1 },
         createCanonicalBlockFragment({
           blocks: [
-            { id: wrapperId, type: "callout", parentId: null },
+            { id: wrapperId, type: "containerWrapper", parentId: null },
             {
               id: childId,
-              type: "paragraph",
+              type: "textBlock",
               parentId: wrapperId,
               content: text("inside"),
               plainText: "inside",
@@ -2635,7 +1936,7 @@ describe("EditorImplementation active transaction", () => {
   });
 
   it("publishes no graph or history when content preparation fails", () => {
-    const paragraph = block(1, "paragraph");
+    const paragraph = block(1, "textBlock");
     const fixture = createTestEditor({
       blocks: [paragraph],
       content: new Map([[paragraph.id, text("abcdef")]]),
@@ -2679,7 +1980,7 @@ describe("EditorImplementation active transaction", () => {
   });
 
   it("publishes no graph, semantic change, or history when content application fails", () => {
-    const paragraph = block(1, "paragraph");
+    const paragraph = block(1, "textBlock");
     const fixture = createTestEditor({
       blocks: [paragraph],
       content: new Map([[paragraph.id, text("abcdef")]]),
@@ -2977,6 +2278,89 @@ describe("EditorImplementation content selection presentation", () => {
     fixture.dispose();
   });
 
+  it("resolves all replay boundaries for one block in one batch", () => {
+    const resolveOperationAnchors = vi.fn<
+      NonNullable<
+        InitializeEditorImplementationOptions["resolveOperationAnchors"]
+      >
+    >((input) => {
+      const textOffsets = input.anchors.map((anchor) => {
+        const payload = anchor.payload as { readonly offset?: unknown };
+        return payload.offset;
+      });
+      return textOffsets.every(
+        (textOffset): textOffset is number => typeof textOffset === "number",
+      )
+        ? { ok: true, textOffsets }
+        : { ok: false };
+    });
+    const fixture = createTestEditor({
+      materializeAppliedBlocks: true,
+      resolveOperationAnchors,
+    });
+    expect(
+      fixture.editor.acceptContentOperationProposal(
+        contentInsertionProposal(fixture.editor, 0, "x", 1, 1),
+        {
+          origin: "prosemirror-proposal",
+          selectionPresentation: "native-already-established",
+          provenance: null,
+        },
+      ).ok,
+    ).toBe(true);
+
+    expect(fixture.editor.undo()).toEqual({ status: "applied" });
+    expect(resolveOperationAnchors).toHaveBeenCalledTimes(1);
+    expect(resolveOperationAnchors.mock.calls[0]![0]).toMatchObject({
+      blockId: id(1),
+      blockType: "textBlock",
+    });
+    expect(resolveOperationAnchors.mock.calls[0]![0].anchors).toHaveLength(2);
+
+    resolveOperationAnchors.mockClear();
+    expect(fixture.editor.redo()).toEqual({ status: "applied" });
+    expect(resolveOperationAnchors).toHaveBeenCalledTimes(1);
+    expect(resolveOperationAnchors.mock.calls[0]![0].anchors).toHaveLength(1);
+    fixture.dispose();
+  });
+
+  it("keeps operation-anchor failure strict outside selection restoration", () => {
+    const fixture = createTestEditor({
+      materializeAppliedBlocks: true,
+      resolveOperationAnchors: () => ({ ok: false }),
+    });
+    expect(
+      fixture.editor.acceptContentOperationProposal(
+        contentInsertionProposal(fixture.editor, 0, "x", 1, 1),
+        {
+          origin: "prosemirror-proposal",
+          selectionPresentation: "native-already-established",
+          provenance: null,
+        },
+      ).ok,
+    ).toBe(true);
+    const access = fixture.editor as unknown as {
+      readonly history: readonly EditorHistoryEntry[];
+      readonly historyIndex: number;
+    };
+    fixture.onCanonicalCommit.mockClear();
+    fixture.publishContentCommit.mockClear();
+
+    expect(fixture.editor.undo()).toEqual({
+      status: "operation-application-failed",
+      message: "history undo operation anchors could not be resolved",
+    });
+    expect(readContentText(fixture, id(1))).toBe("xone");
+    expect(access.historyIndex).toBe(1);
+    expect(access.history[0]?.state).toBe("applied");
+    expect(fixture.editor.canUndo).toBe(true);
+    expect(fixture.editor.canRedo).toBe(false);
+    expect(fixture.onCanonicalCommit).not.toHaveBeenCalled();
+    expect(fixture.publishContentCommit).not.toHaveBeenCalled();
+    expect(fixture.markInconsistent).not.toHaveBeenCalled();
+    fixture.dispose();
+  });
+
   it("keeps public semantic content mutation canonical and focus-neutral", () => {
     const fixture = createTestEditor({ materializeAppliedBlocks: true });
     expect(
@@ -3072,13 +2456,13 @@ describe("EditorImplementation content selection presentation", () => {
   });
 
   it("settles a block-owned internal programmatic effect before publication", () => {
-    const divider = block(2, "divider");
+    const atomic = block(2, "atomicBlock");
     const fixture = createTestEditor({
-      blocks: [block(1, "paragraph"), divider],
+      blocks: [block(1, "textBlock"), atomic],
       content: new Map([[id(1), text("one")]]),
     });
-    const model = fixture.editor.readBlockSelectionModel(divider.id);
-    if (!model) throw new Error("Expected divider selection model");
+    const model = fixture.editor.readBlockSelectionModel(atomic.id);
+    if (!model) throw new Error("Expected atomic selection model");
     const payload = {
       kind: "cell-range",
       anchorCellId: "cell-a",
@@ -3087,15 +2471,15 @@ describe("EditorImplementation content selection presentation", () => {
 
     expect(
       fixture.editor.updateBlockMetadata(
-        [{ blockId: divider.id, values: { selected: true } }],
+        [{ blockId: atomic.id, values: { selected: true } }],
         {
           selectionEffect: {
             kind: "block-internal",
-            blockId: divider.id,
+            blockId: atomic.id,
             subsystem: internalSelectionSubsystem,
             coverageResult: {
-              blockId: divider.id,
-              blockType: divider.type,
+              blockId: atomic.id,
+              blockType: atomic.type,
               modelId: model.id,
               coverage: "partial",
               internal: payload,
@@ -3111,7 +2495,7 @@ describe("EditorImplementation content selection presentation", () => {
       kind: "selection",
       selection: {
         kind: "block-internal",
-        blockId: divider.id,
+        blockId: atomic.id,
         subsystem: "test.programmatic-block-selection",
         payload,
       },
@@ -3132,7 +2516,7 @@ describe("EditorImplementation content selection presentation", () => {
       kind: "selection",
       selection: {
         kind: "block-internal",
-        blockId: divider.id,
+        blockId: atomic.id,
         subsystem: "test.programmatic-block-selection",
         payload,
       },
@@ -3228,73 +2612,6 @@ describe("EditorImplementation content selection presentation", () => {
     fixture.dispose();
   });
 
-  it("orders graph-plus-content installation before receipt and publication", () => {
-    const order: string[] = [];
-    const fixture = createTestEditor({
-      content: new Map([[id(1), text("hello world")]]),
-      materializeAppliedBlocks: true,
-      onContentCommitted: () => order.push("content-committed"),
-      onContentPublished: () => order.push("content-published"),
-      onCanonicalCommit: (_commit, editor) => {
-        expect(editor.getRootBlockIds()).toHaveLength(2);
-        order.push("canonical-installed");
-        expect(editor.canUndo).toBe(true);
-        order.push("history-recorded");
-        order.push("receipt");
-      },
-    });
-    const unsubscribe = fixture.editor.subscribeManifest(() =>
-      order.push("subscriber"),
-    );
-
-    expect(
-      fixture.editor.executeCoreBlockKeyBehavior({
-        key: "enter",
-        blockId: id(1),
-        blockType: "paragraph",
-        cursorOffset: 5,
-      }),
-    ).toBe(true);
-
-    expect(order).toEqual([
-      "content-committed",
-      "canonical-installed",
-      "history-recorded",
-      "receipt",
-      "content-published",
-      "subscriber",
-    ]);
-    unsubscribe();
-    fixture.dispose();
-  });
-
-  it("isolates a graph-plus-content receipt observer failure", () => {
-    const fixture = createTestEditor({
-      content: new Map([[id(1), text("hello world")]]),
-      materializeAppliedBlocks: true,
-      onCanonicalCommit: () => {
-        throw new Error("graph receipt observer failed");
-      },
-    });
-
-    expect(
-      fixture.editor.executeCoreBlockKeyBehavior({
-        key: "enter",
-        blockId: id(1),
-        blockType: "paragraph",
-        cursorOffset: 5,
-      }),
-    ).toBe(true);
-
-    expect(fixture.editor.getRootBlockIds()).toHaveLength(2);
-    expect(fixture.editor.canUndo).toBe(true);
-    expect(fixture.onCanonicalCommit).toHaveBeenCalledOnce();
-    expect(fixture.publishContentCommit).toHaveBeenCalledOnce();
-    expect(fixture.publications).toHaveBeenCalledOnce();
-    expect(fixture.markInconsistent).not.toHaveBeenCalled();
-    fixture.dispose();
-  });
-
   it("uses the centralized inconsistent-runtime branch after content mutation", () => {
     const fixture = createTestEditor({
       materializeAppliedBlocks: true,
@@ -3325,38 +2642,65 @@ describe("EditorImplementation content selection presentation", () => {
     fixture.dispose();
   });
 
-  it("marks the runtime once when graph installation fails after content", () => {
+  it("does not record an incomplete entry when required operation-anchor capture fails", () => {
     const fixture = createTestEditor({
-      content: new Map([[id(1), text("hello world")]]),
       materializeAppliedBlocks: true,
+      failOperationAnchorCapture: true,
     });
-    const internal = fixture.editor as unknown as {
-      commitCanonicalGraphMutation: () => () => void;
-    };
-    vi.spyOn(internal, "commitCanonicalGraphMutation").mockImplementationOnce(
-      () => {
-        throw new Error("test graph installation failed");
-      },
-    );
 
     expect(() =>
-      fixture.editor.executeCoreBlockKeyBehavior({
-        key: "enter",
-        blockId: id(1),
-        blockType: "paragraph",
-        cursorOffset: 5,
-      }),
-    ).toThrow(/canonical-installation failed after live content mutation/i);
+      fixture.editor.acceptContentOperationProposal(
+        contentInsertionProposal(fixture.editor, 0, "x", 1, 1),
+        {
+          origin: "prosemirror-proposal",
+          selectionPresentation: "native-already-established",
+          provenance: null,
+        },
+      ),
+    ).toThrow(/required history operation anchors were not captured/i);
 
-    expect(fixture.commitContent).toHaveBeenCalledOnce();
-    expect(fixture.markInconsistent).toHaveBeenCalledOnce();
-    expect(fixture.editor.getRootBlockIds()).toEqual([id(1)]);
     expect(fixture.editor.canUndo).toBe(false);
-    expect(fixture.onCanonicalCommit).not.toHaveBeenCalled();
-    expect(fixture.publishContentCommit).not.toHaveBeenCalled();
-    expect(fixture.publications).not.toHaveBeenCalled();
+    expect(fixture.markInconsistent).toHaveBeenCalledOnce();
     fixture.dispose();
   });
+
+  it.each(["none", "incomplete", "malformed"] as const)(
+    "uses the fatal consistency path for a %s opposite replay capture",
+    (replayCaptureFailure) => {
+      const fixture = createTestEditor({
+        materializeAppliedBlocks: true,
+        replayCaptureFailure,
+      });
+      expect(
+        fixture.editor.acceptContentOperationProposal(
+          contentInsertionProposal(fixture.editor, 0, "x", 1, 1),
+          {
+            origin: "prosemirror-proposal",
+            selectionPresentation: "native-already-established",
+            provenance: null,
+          },
+        ).ok,
+      ).toBe(true);
+      fixture.onCanonicalCommit.mockClear();
+      fixture.publishContentCommit.mockClear();
+      fixture.markInconsistent.mockClear();
+
+      expect(() => fixture.editor.undo()).toThrow(
+        /required history operation anchors were not captured/i,
+      );
+      expect(readContentText(fixture, id(1))).toBe("one");
+      expect(fixture.markInconsistent).toHaveBeenCalledOnce();
+      expect(fixture.onCanonicalCommit).not.toHaveBeenCalled();
+      expect(fixture.publishContentCommit).not.toHaveBeenCalled();
+      const access = fixture.editor as unknown as {
+        readonly history: readonly EditorHistoryEntry[];
+        readonly historyIndex: number;
+      };
+      expect(access.historyIndex).toBe(1);
+      expect(access.history[0]?.state).toBe("applied");
+      fixture.dispose();
+    },
+  );
 
   it("keeps remote content publication after canonical installation and callback", () => {
     const order: string[] = [];
@@ -3427,7 +2771,7 @@ function contentInsertionProposal(
   return {
     base: {
       blockId: target,
-      blockType: "paragraph" as const,
+      blockType: "textBlock" as const,
       graphRevision: editor.getSelectionGraphRevision(),
       contentRevision: 0,
     },
@@ -3435,7 +2779,7 @@ function contentInsertionProposal(
       {
         kind: "insertInlineContent" as const,
         blockId: target,
-        blockType: "paragraph" as const,
+        blockType: "textBlock" as const,
         target: { kind: "text" as const },
         position: { blockId: target, offset, contentVersion: "1" },
         content,
@@ -3445,7 +2789,7 @@ function contentInsertionProposal(
       direction,
       anchor: {
         blockId: target,
-        blockType: "paragraph" as const,
+        blockType: "textBlock" as const,
         textOffset: anchorOffset,
         affinity:
           anchorOffset < focusOffset
@@ -3454,7 +2798,7 @@ function contentInsertionProposal(
       },
       focus: {
         blockId: target,
-        blockType: "paragraph" as const,
+        blockType: "textBlock" as const,
         textOffset: focusOffset,
         affinity:
           focusOffset < anchorOffset
@@ -3478,7 +2822,7 @@ function editorSelection(
     if (!anchor.ok) throw new Error(anchor.message);
     return {
       blockId: id(1),
-      blockType: "paragraph" as const,
+      blockType: "textBlock" as const,
       blockCategory: "text" as const,
       textOffset: offset,
       textAnchor: anchor.textAnchor,
@@ -3624,14 +2968,14 @@ function createAssociationAwareTestAnchorRuntime(): AssociationAwareTestAnchorRu
   ) => {
     const created = create({
       blockId,
-      blockType: "paragraph",
+      blockType: "textBlock",
       textOffset: offset,
       affinity,
     });
     if (!created.ok) throw new Error("Failed to create test selection anchor");
     const point: EditorLogicalSelectionPoint = {
       blockId,
-      blockType: "paragraph",
+      blockType: "textBlock",
       blockCategory: "text",
       textOffset: offset,
       textAnchor: created.textAnchor,
@@ -3649,28 +2993,5 @@ function createAssociationAwareTestAnchorRuntime(): AssociationAwareTestAnchorRu
     apply,
     selection,
     offset: (anchor) => anchors.get(anchor.payload.encoded)?.offset ?? null,
-  };
-}
-
-function transactionSelectionOffsets(commit: CanonicalEditorCommit): {
-  readonly before: { readonly blockId: BlockId; readonly offset: number };
-  readonly after: { readonly blockId: BlockId; readonly offset: number };
-} {
-  const point = (selection: CanonicalEditorCommit["selectionBefore"]) => {
-    if (
-      selection.kind !== "selection" ||
-      selection.selection.kind !== "document" ||
-      selection.selection.focus.kind !== "text"
-    ) {
-      throw new Error("Expected a text transaction selection");
-    }
-    return {
-      blockId: selection.selection.focus.blockId,
-      offset: selection.selection.focus.textOffset,
-    };
-  };
-  return {
-    before: point(commit.selectionBefore),
-    after: point(commit.selectionAfter),
   };
 }

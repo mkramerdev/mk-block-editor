@@ -1,5 +1,10 @@
 import { asBlockId, type BlockId } from "@repo/editor-core/kernel";
-import { createBlockRichTextContentFromPlainText } from "@repo/editor-core/content/rich-text";
+import {
+  createBlockRichTextContentFromPlainText,
+  richTextBlockInlineContent,
+  type RichTextDocumentNodeJson,
+} from "@repo/editor-core/content/rich-text";
+import type { EditorInstanceSnapshot } from "@repo/editor-core/codecs";
 import {
   createCanonicalBlockFragment,
   createCanonicalBlockRecord,
@@ -16,35 +21,29 @@ import { initializeTestEditableEditor as initializeEditableEditor } from "../tes
 import { describe, expect, it, vi } from "vitest";
 import { createFirstDraftEditorDefinition } from "../first-draft-definition.tsx";
 import { createFirstDraftSnapshot } from "../first-draft-fixture.ts";
-import { createFirstDraftBootstrapFromSnapshot } from "../read-model/bootstrap.ts";
+import { createYjsBlockContentCheckpoint } from "@repo/editor-yjs-dom";
+import { createFirstDraftBootstrapFromSnapshot } from "../bootstrap/bootstrap.ts";
 import { createFirstDraftViewStateStore } from "../blocks/view-state.tsx";
+import { planFirstDraftStructuralRangeDeletion } from "../block-operations/structural-range-deletion.ts";
 import { convertEditorTransactionToTransport } from "./editor-transaction-to-transport.ts";
-import {
-  handleTransaction,
-  type EditorTransactionWebSocket,
-} from "./handle-transaction.ts";
 import {
   decodeFirstDraftMessage,
   encodeFirstDraftMessage,
   MAX_FIRST_DRAFT_FRAME_BYTES,
   type FirstDraftMessage,
 } from "./message-protocol.ts";
-import {
-  hasSeenLiveTransaction,
-  markLiveTransactionSeen,
-  MAX_LIVE_TRANSACTION_IDS_PER_SOCKET,
-  recordSocketTransportError,
-} from "./live-transaction-ids.ts";
-import {
-  attachFirstDraftRemoteTransactions,
-  type FirstDraftRemoteTransactionSocket,
-} from "./remote-transaction-client.ts";
+import { attachFirstDraftRemoteTransactions } from "./remote-transaction-client.ts";
 import {
   attachFirstDraftPresence,
   type FirstDraftPresenceEditor,
 } from "./presence-client.ts";
 import { createFirstDraftMessageDispatcher } from "./collaboration-connection.ts";
-import { createFirstDraftFinalizedCommitObserver } from "./finalized-commit-observer.ts";
+import {
+  createFirstDraftOutboundPublisher,
+  type FirstDraftOutboundPublisher,
+  type FirstDraftOutboundSocket,
+} from "./outbound-publisher.ts";
+import { encodeFirstDraftWireFrame } from "./wire-frame.ts";
 
 const textBlockId = asBlockId("fd-paragraph-intro");
 const metadataBlockId = asBlockId("fd-check-unchecked");
@@ -109,6 +108,7 @@ describe("First Draft transaction conversion", () => {
     const donorId = asBlockId("fd-paragraph-byline");
     const start = editor.getBlock(startId)!;
     const donor = editor.getBlock(donorId)!;
+    const intervening = editor.getBlock(asBlockId("fd-code"))!;
     const startText = editor.readBlockPlainText(start.id, start.type)!;
     const donorText = editor.readBlockPlainText(donor.id, donor.type)!;
     const range: StructuralEditRange = {
@@ -123,6 +123,12 @@ describe("First Draft transaction conversion", () => {
           from: 2,
           to: startText.length,
           expectedContentVersion: start.contentVersion,
+        },
+        {
+          kind: "block",
+          blockId: intervening.id,
+          blockType: intervening.type,
+          parentId: intervening.parentId,
         },
         {
           kind: "text",
@@ -222,12 +228,17 @@ describe("First Draft transaction conversion", () => {
       end: { kind: "text", blockId: donor.id, offset: 3 },
     };
 
-    expect(
-      editor.executeStructuralRangeDeletion(range, {
-        intent: "cut",
-        provenance: null,
-      }),
-    ).toMatchObject({ ok: true });
+    const plan = planFirstDraftStructuralRangeDeletion({
+      intent: "cut",
+      range,
+      graph: editor,
+      readBlockContent: (blockId, blockType) =>
+        editor.readBlockContent(blockId, blockType),
+    });
+    if (!plan) throw new Error("Expected First Draft list-boundary plan");
+    const rangeResult = editor.executeStructuralTransaction(plan, { provenance: null });
+    if (!rangeResult.ok) throw new Error(JSON.stringify(rangeResult));
+    expect(rangeResult).toMatchObject({ ok: true });
     expect(editor.getBlock(start.id)).toMatchObject({
       id: start.id,
       type: "heading",
@@ -289,16 +300,36 @@ describe("First Draft transaction conversion", () => {
   it("does not invent a move for an Enter block when a later open fragment joins into it", () => {
     const { editor, changes } = createTestEditor();
     const rootsBeforeEnter = editor.getRootBlockIds();
-    const destinationText = editor.readBlockPlainText(textBlockId, "paragraph");
-    expect(destinationText).toBeTruthy();
+    const insertedContent = createBlockRichTextContentFromPlainText(
+      "paragraph",
+      "",
+    );
+    const inserted = createCanonicalBlockRecord({
+      type: "paragraph",
+      parentId: null,
+      content: insertedContent,
+      plainText: "",
+    });
+    const insertedFragment = createCanonicalBlockFragment({
+      blocks: [inserted],
+      rootBlockIds: [inserted.id],
+      start: { kind: "text", blockId: inserted.id },
+      end: { kind: "text", blockId: inserted.id },
+      blockDefinitions: editor.definition.blocks,
+    });
     expect(
-      editor.executeCoreBlockKeyBehavior({
-        key: "enter",
-        blockId: textBlockId,
-        blockType: "paragraph",
-        cursorOffset: destinationText!.length,
+      editor.transaction(() => {
+        editor.insertBlocks(
+          { parentId: null, childIndex: rootsBeforeEnter.length },
+          insertedFragment,
+        );
+        editor.setTransactionSelection({
+          kind: "text",
+          blockId: inserted.id,
+          offset: 0,
+        });
       }),
-    ).toBe(true);
+    ).toMatchObject({ ok: true, changed: true });
     const enterBlockId = editor
       .getRootBlockIds()
       .find((blockId) => !rootsBeforeEnter.includes(blockId));
@@ -413,6 +444,16 @@ describe("First Draft binary message protocol", () => {
         documentId: "document-a",
       },
       {
+        type: "subscribe-first-draft-document" as const,
+        documentId: "document-a",
+        knownRevision: 0,
+      },
+      {
+        type: "subscribe-first-draft-document" as const,
+        documentId: "document-a",
+        knownRevision: 17,
+      },
+      {
         type: "first-draft-document-caught-up" as const,
         documentId: "document-a",
         requestedRevision: 3,
@@ -462,6 +503,61 @@ describe("First Draft binary message protocol", () => {
         },
       );
     }
+  });
+
+  it("strictly validates revision-aware subscriptions", () => {
+    for (const knownRevision of [
+      -1,
+      1.5,
+      Number.MAX_SAFE_INTEGER + 1,
+      null,
+      "3",
+    ]) {
+      const decoded = decodeFirstDraftMessage(
+        encodeFirstDraftWireFrame({
+          type: "subscribe-first-draft-document",
+          documentId: "document-a",
+          knownRevision,
+        }),
+      );
+      expect(decoded).toEqual({
+        ok: false,
+        error: "First Draft document subscription is malformed",
+      });
+    }
+    expect(
+      decodeFirstDraftMessage(
+        encodeFirstDraftWireFrame({
+          type: "subscribe-first-draft-document",
+          documentId: "document-a",
+          knownRevision: 3,
+          unexpected: true,
+        }),
+      ),
+    ).toEqual({
+      ok: false,
+      error: "First Draft document subscription is malformed",
+    });
+  });
+
+  it("round-trips an explicit authoritative resynchronization", () => {
+    const bootstrap = createFirstDraftBootstrapFromSnapshot({
+      documentId: "document-a",
+      revision: 11,
+      snapshot: createFirstDraftSnapshot(),
+    });
+    const message = {
+      type: "first-draft-document-resynchronized" as const,
+      documentId: "document-a",
+      requestedRevision: 4,
+      revision: 11,
+      reason: "revision-unavailable" as const,
+      bootstrap,
+    };
+    expect(decodeFirstDraftMessage(encodeFirstDraftMessage(message))).toEqual({
+      ok: true,
+      message,
+    });
   });
 
   it("delivers blocks, projections, checkpoints, and revision in one initial message", () => {
@@ -709,154 +805,78 @@ describe("First Draft binary message protocol", () => {
   });
 });
 
-describe("handleTransaction", () => {
-  it("isolates finalized transaction and selection observer failures in wire order", () => {
-    const { editor, changes } = createTestEditor();
-    expect(
-      editor.insertText({ blockId: textBlockId, offset: 0, text: "X" }),
-    ).toBe(true);
-    const change = changes[0]!;
-    const attempts: string[] = [];
-    const errors = vi.fn();
-    createFirstDraftFinalizedCommitObserver({
-      publishTransaction: () => {
-        attempts.push("transaction");
-        throw new Error("conversion failed");
-      },
-      publishSelection: () => {
-        attempts.push("selection");
-      },
-      onObserverError: errors,
-    })(change);
-
-    expect(attempts).toEqual(["transaction", "selection"]);
-    expect(errors).toHaveBeenCalledWith(
-      expect.objectContaining({ message: "conversion failed" }),
-      "transaction",
-    );
-
-    const sendFailure = new Error("send failed");
-    const selectionAfterSendFailure = vi.fn();
-    const sendErrors = vi.fn();
-    createFirstDraftFinalizedCommitObserver({
-      publishTransaction: handleTransaction({
-        readyState: 1,
-        send: () => {
-          throw sendFailure;
-        },
-      }),
-      publishSelection: selectionAfterSendFailure,
-      onObserverError: sendErrors,
-    })(change);
-    expect(selectionAfterSendFailure).toHaveBeenCalledOnce();
-    expect(sendErrors).toHaveBeenCalledWith(sendFailure, "transaction");
-
-    const published = vi.fn();
-    const selectionErrors = vi.fn();
-    createFirstDraftFinalizedCommitObserver({
-      publishTransaction: published,
-      publishSelection: () => {
-        throw new Error("selection encoding failed");
-      },
-      onObserverError: selectionErrors,
-    })(change);
-    expect(published).toHaveBeenCalledOnce();
-    expect(selectionErrors).toHaveBeenCalledWith(
-      expect.objectContaining({ message: "selection encoding failed" }),
-      "selection",
-    );
-    editor.dispose();
-  });
-
-  it("publishes one finalized transaction and its selection exactly once", () => {
-    const { editor, changes } = createTestEditor();
-    expect(
-      editor.insertText({ blockId: textBlockId, offset: 0, text: "X" }),
-    ).toBe(true);
-    const transaction = vi.fn();
-    const selection = vi.fn();
-    createFirstDraftFinalizedCommitObserver({
-      publishTransaction: transaction,
-      publishSelection: selection,
-    })(changes[0]!);
-    expect(transaction).toHaveBeenCalledOnce();
-    expect(selection).toHaveBeenCalledOnce();
-    expect(selection).toHaveBeenCalledWith(
-      changes[0]!.selectionAfter,
-      changes[0]!.transactionId,
-    );
-    editor.dispose();
-  });
-
-  it("publishes committed receipts directly in deterministic order", async () => {
-    const frames: ArrayBuffer[] = [];
-    const socket = {
-      readyState: 1,
-      send: vi.fn((frame: ArrayBuffer) => frames.push(frame)),
-    };
-    const submitTransaction = handleTransaction(socket);
-    const { editor, changes } = createTestEditor();
-    expect(
-      editor.insertText({ blockId: textBlockId, offset: 0, text: "X" }),
-    ).toBe(true);
-    expect(
-      editor.insertText({ blockId: textBlockId, offset: 1, text: "Y" }),
-    ).toBe(true);
-
-    expect(submitTransaction.length).toBe(1);
-    const first = submitTransaction(changes[0]!);
-    const second = submitTransaction(changes[1]!);
-    expect(socket.send).toHaveBeenCalledTimes(2);
-    await Promise.all([first, second]);
-    expect(socket.send).toHaveBeenCalledTimes(2);
-    expect(frames).toHaveLength(2);
-    expect(decodeFirstDraftMessage(frames[0]!).ok).toBe(true);
-    expect(decodeFirstDraftMessage(frames[1]!).ok).toBe(true);
-    editor.dispose();
-  });
-
-  it.each([
-    [0, "connecting"],
-    [2, "closing"],
-    [3, "closed"],
-    [99, "invalid"],
-  ])(
-    "reports socket state %s instead of losing the edit",
-    (readyState, state) => {
+describe("First Draft outbound publisher", () => {
+  it.each([0, 2, 3, 99])(
+    "retains the sealed edit while socket state %s is unusable",
+    (readyState) => {
       const socket = { readyState, send: vi.fn() };
-      const submitTransaction = handleTransaction(socket);
+      const errors = vi.fn();
+      const publisher = createFirstDraftOutboundPublisher();
+      publisher.attachGeneration({
+        generationId: `socket-state-${readyState}`,
+        socket,
+        createTransactionId: sequentialIds("aggregate"),
+        publishSelection: vi.fn(),
+        onError: errors,
+      });
+      publisher.generationCaughtUp();
       const { editor, changes } = createTestEditor();
       expect(
         editor.insertText({ blockId: textBlockId, offset: 0, text: "X" }),
       ).toBe(true);
-      expect(() => submitTransaction(changes[0]!)).toThrow(state);
+      publisher.submitFinalized(changes[0]!);
+      publisher.flush("manual");
+      expect(errors).not.toHaveBeenCalled();
       expect(socket.send).not.toHaveBeenCalled();
+      expect(publisher.getSnapshot().outstanding).toHaveLength(1);
+      expect(publisher.getSnapshot().outstanding[0]?.state).toBe("sealed");
+      publisher.dispose();
       editor.dispose();
     },
   );
 
-  it("reports an explicit socket error state", () => {
+  it("retains an edit when its socket generation is marked unusable", () => {
     const socket = { readyState: 1, send: vi.fn() };
-    recordSocketTransportError(socket);
     const { editor, changes } = createTestEditor();
     expect(
       editor.insertText({ blockId: textBlockId, offset: 0, text: "X" }),
     ).toBe(true);
-    expect(() => handleTransaction(socket)(changes[0]!)).toThrow("error state");
+    const errors = vi.fn();
+    const publisher = createFirstDraftOutboundPublisher();
+    publisher.attachGeneration({
+      generationId: "socket-error",
+      socket,
+      createTransactionId: sequentialIds("aggregate"),
+      publishSelection: vi.fn(),
+      onError: errors,
+    });
+    publisher.generationCaughtUp();
+    publisher.markGenerationUnusable();
+    publisher.submitFinalized(changes[0]!);
+    publisher.flush("manual");
+    expect(errors).not.toHaveBeenCalled();
     expect(socket.send).not.toHaveBeenCalled();
+    expect(publisher.getSnapshot().outstanding).toHaveLength(1);
     editor.dispose();
   });
 
   it("sends undo and redo as new ordinary proposed transactions", async () => {
     const frames: ArrayBuffer[] = [];
-    const submitTransaction = handleTransaction({
-      readyState: 1,
-      send: (frame) => frames.push(frame),
+    const publisher = createFirstDraftOutboundPublisher();
+    publisher.attachGeneration({
+      generationId: "undo-redo",
+      socket: {
+        readyState: 1,
+        send: (frame: ArrayBuffer) => frames.push(frame),
+      },
+      createTransactionId: sequentialIds("aggregate"),
+      publishSelection: vi.fn(),
     });
+    publisher.generationCaughtUp();
     const editor = initializeEditableEditor({
       definition: createDefinition(),
       snapshot: createFirstDraftSnapshot(),
-      onChange: submitTransaction,
+      onChange: (change) => publisher.submitFinalized(change),
       createTransactionId: sequentialIds("history"),
     });
     expect(
@@ -866,6 +886,8 @@ describe("handleTransaction", () => {
     ).toBe(true);
     expect(editor.undo()).toEqual({ status: "applied" });
     expect(editor.redo()).toEqual({ status: "applied" });
+    publisher.flush("manual");
+    acceptSentTransportRecords(publisher);
     await vi.waitFor(() => expect(frames).toHaveLength(3));
 
     const messages = frames.map((frame) => {
@@ -882,11 +904,351 @@ describe("handleTransaction", () => {
       new Set(messages.map(({ transactionId }) => transactionId)).size,
     ).toBe(3);
     expect(messages[0]!.metadata?.updates[0]?.values.checked).toBe(true);
+    publisher.dispose();
     editor.dispose();
+  });
+
+  it.each([
+    {
+      name: "before the original insertion",
+      peerOffset: 2,
+      received: "abQcXYZdef",
+      undone: "abQcdef",
+      redone: "abQcXYZdef",
+    },
+    {
+      name: "at the inverse range start",
+      peerOffset: 3,
+      received: "abcQXYZdef",
+      undone: "abcQdef",
+      redone: "abcQXYZdef",
+    },
+    {
+      name: "at the inverse range end",
+      peerOffset: 6,
+      received: "abcXYZQdef",
+      undone: "abcQdef",
+      redone: "abcXYZQdef",
+    },
+  ])(
+    "refreshes Yjs replay plans after a causally received peer insertion $name",
+    ({ peerOffset, received, undone, redone }) => {
+      const snapshot = snapshotWithText(textBlockId, "abcdef");
+      const source = createCollaborativeTestEditor(snapshot, "source");
+      const peer = createCollaborativeTestEditor(snapshot, "peer");
+      expect(
+        source.editor.insertText({
+          blockId: textBlockId,
+          offset: 3,
+          text: "XYZ",
+        }),
+      ).toBe(true);
+      applyPeerChange(peer.editor, source.changes[0]!);
+      expect(
+        peer.editor.insertText({
+          blockId: textBlockId,
+          offset: peerOffset,
+          text: "Q",
+        }),
+      ).toBe(true);
+      applyPeerChange(source.editor, peer.changes[0]!);
+      expect(source.editor.readBlockPlainText(textBlockId, "paragraph")).toBe(
+        received,
+      );
+
+      for (let cycle = 0; cycle < 3; cycle += 1) {
+        expect(source.editor.undo()).toEqual({ status: "applied" });
+        expect(source.editor.readBlockPlainText(textBlockId, "paragraph")).toBe(
+          undone,
+        );
+        expect(source.editor.redo()).toEqual({ status: "applied" });
+        expect(source.editor.readBlockPlainText(textBlockId, "paragraph")).toBe(
+          redone,
+        );
+      }
+      source.editor.dispose();
+      peer.editor.dispose();
+    },
+  );
+
+  it("deletes only recreated content after undoing a deletion across a causally received gap insertion", () => {
+    const snapshot = snapshotWithText(textBlockId, "abcXYZdef");
+    const source = createCollaborativeTestEditor(snapshot, "delete-source");
+    const peer = createCollaborativeTestEditor(snapshot, "delete-peer");
+    expect(
+      source.editor.deleteText({
+        blockId: textBlockId,
+        range: { from: 3, to: 6 },
+      }),
+    ).toBe(true);
+    applyPeerChange(peer.editor, source.changes[0]!);
+    expect(
+      peer.editor.insertText({ blockId: textBlockId, offset: 3, text: "Q" }),
+    ).toBe(true);
+    applyPeerChange(source.editor, peer.changes[0]!);
+    expect(source.editor.readBlockPlainText(textBlockId, "paragraph")).toBe(
+      "abcQdef",
+    );
+    expect(source.editor.undo()).toEqual({ status: "applied" });
+    expect(source.editor.readBlockPlainText(textBlockId, "paragraph")).toBe(
+      "abcXYZQdef",
+    );
+    expect(source.editor.redo()).toEqual({ status: "applied" });
+    expect(source.editor.readBlockPlainText(textBlockId, "paragraph")).toBe(
+      "abcQdef",
+    );
+    source.editor.dispose();
+    peer.editor.dispose();
+  });
+
+  it("rejects a stale anchored undo without deleting duplicate Yjs content", () => {
+    const snapshot = snapshotWithText(textBlockId, "XYZabcdef");
+    const source = createCollaborativeTestEditor(snapshot, "duplicate-source");
+    const peer = createCollaborativeTestEditor(snapshot, "duplicate-peer");
+    expect(
+      source.editor.insertText({
+        blockId: textBlockId,
+        offset: 3,
+        text: "XYZ",
+      }),
+    ).toBe(true);
+    applyPeerChange(peer.editor, source.changes[0]!);
+    expect(
+      peer.editor.insertText({ blockId: textBlockId, offset: 4, text: "Q" }),
+    ).toBe(true);
+    applyPeerChange(source.editor, peer.changes[0]!);
+    expect(source.editor.readBlockPlainText(textBlockId, "paragraph")).toBe(
+      "XYZXQYZabcdef",
+    );
+    const history = source.editor as unknown as {
+      readonly history: readonly { readonly state: string }[];
+      readonly historyIndex: number;
+    };
+
+    expect(source.editor.undo()).toMatchObject({
+      status: "operation-application-failed",
+    });
+    expect(source.editor.readBlockPlainText(textBlockId, "paragraph")).toBe(
+      "XYZXQYZabcdef",
+    );
+    expect(history.historyIndex).toBe(1);
+    expect(history.history[0]?.state).toBe("applied");
+    expect(source.editor.canUndo).toBe(true);
+    expect(source.editor.canRedo).toBe(false);
+    source.editor.dispose();
+    peer.editor.dispose();
+  });
+
+  it("does not relocate a genuine replaceInlineRange undo to duplicate Yjs content", () => {
+    const snapshot = snapshotWithText(textBlockId, "XYabcdef");
+    const source = createCollaborativeTestEditor(
+      snapshot,
+      "replace-duplicate-source",
+    );
+    const peer = createCollaborativeTestEditor(
+      snapshot,
+      "replace-duplicate-peer",
+    );
+    const replaced = source.editor.acceptContentOperationProposal(
+      {
+        base: {
+          graphRevision: source.editor.getSelectionGraphRevision(),
+          blockId: textBlockId,
+          blockType: "paragraph",
+          contentRevision: 0,
+        },
+        operations: [
+          {
+            kind: "replaceInlineRange",
+            blockId: textBlockId,
+            blockType: "paragraph",
+            target: { kind: "text" },
+            range: {
+              from: { blockId: textBlockId, offset: 4 },
+              to: { blockId: textBlockId, offset: 6 },
+            },
+            content: [{ type: "text", text: "XY" }],
+            deletedContent: [{ type: "text", text: "cd" }],
+          },
+        ],
+        selectionAfter: null,
+      },
+      {
+        origin: "prosemirror-proposal",
+        selectionPresentation: "canonical-only",
+        provenance: null,
+      },
+    );
+    expect(replaced.ok).toBe(true);
+    applyPeerChange(peer.editor, source.changes[0]!);
+    expect(
+      peer.editor.insertText({ blockId: textBlockId, offset: 5, text: "Q" }),
+    ).toBe(true);
+    applyPeerChange(source.editor, peer.changes[0]!);
+    expect(source.editor.readBlockPlainText(textBlockId, "paragraph")).toBe(
+      "XYabXQYef",
+    );
+
+    expect(source.editor.undo()).toMatchObject({
+      status: "operation-application-failed",
+    });
+    expect(source.editor.readBlockPlainText(textBlockId, "paragraph")).toBe(
+      "XYabXQYef",
+    );
+    source.editor.dispose();
+    peer.editor.dispose();
+  });
+
+  it("documents the delayed causal-delivery limitation after Yjs redo creates new identities", () => {
+    const snapshot = snapshotWithText(textBlockId, "abcdef");
+    const source = createCollaborativeTestEditor(snapshot, "delay-source");
+    const peer = createCollaborativeTestEditor(snapshot, "delay-peer");
+    expect(
+      source.editor.insertText({
+        blockId: textBlockId,
+        offset: 3,
+        text: "XYZ",
+      }),
+    ).toBe(true);
+    const original = source.changes[0]!;
+    applyPeerChange(peer.editor, original);
+    expect(
+      peer.editor.insertText({ blockId: textBlockId, offset: 6, text: "Q" }),
+    ).toBe(true);
+
+    expect(source.editor.undo()).toEqual({ status: "applied" });
+    expect(source.editor.redo()).toEqual({ status: "applied" });
+    const recreated = source.changes[2]!;
+    if (
+      original.kind !== "block-content" ||
+      recreated.kind !== "block-content"
+    ) {
+      throw new Error("Expected Yjs content transactions");
+    }
+    expect(recreated.yjsUpdate.payload.equals(original.yjsUpdate.payload)).toBe(
+      false,
+    );
+    applyPeerChange(source.editor, peer.changes[0]!);
+
+    // Q was causally attached to the original XYZ identity. Local replay made
+    // a new XYZ identity before Q arrived, so intention-preserving placement
+    // relative to the recreated content is deliberately not guaranteed.
+    expect(
+      [...source.editor.readBlockPlainText(textBlockId, "paragraph")].sort(),
+    ).toEqual([..."abcXYZQdef"].sort());
+    source.editor.dispose();
+    peer.editor.dispose();
+  });
+
+  it("refreshes Yjs mark replay while excluding peer insertions at both range boundaries", () => {
+    const snapshot = snapshotWithText(textBlockId, "abcdef");
+    const source = createCollaborativeTestEditor(snapshot, "mark-source");
+    const peer = createCollaborativeTestEditor(snapshot, "mark-peer");
+    expect(
+      source.editor.updateMark({
+        blockId: textBlockId,
+        range: { from: 1, to: 4 },
+        mark: { type: "strong" },
+        enabled: true,
+      }),
+    ).toBe(true);
+    applyPeerChange(peer.editor, source.changes[0]!);
+    expect(
+      peer.editor.insertText({ blockId: textBlockId, offset: 1, text: "Q" }),
+    ).toBe(true);
+    expect(
+      peer.editor.insertText({ blockId: textBlockId, offset: 5, text: "R" }),
+    ).toBe(true);
+    applyPeerChange(source.editor, peer.changes[0]!);
+    applyPeerChange(source.editor, peer.changes[1]!);
+    expect(source.editor.readBlockPlainText(textBlockId, "paragraph")).toBe(
+      "aQbcdRef",
+    );
+    expect(readMarkedText(source.editor, "strong")).toBe("bcd");
+
+    expect(source.editor.undo()).toEqual({ status: "applied" });
+    expect(readMarkedText(source.editor, "strong")).toBe("");
+    expect(source.editor.redo()).toEqual({ status: "applied" });
+    expect(readMarkedText(source.editor, "strong")).toBe("bcd");
+    source.editor.dispose();
+    peer.editor.dispose();
+  });
+
+  it("refreshes ordered replacement replay with peer content at both boundaries", () => {
+    const snapshot = snapshotWithText(textBlockId, "abcdef");
+    const source = createCollaborativeTestEditor(snapshot, "replace-source");
+    const peer = createCollaborativeTestEditor(snapshot, "replace-peer");
+    expect(
+      source.editor.transaction(() => {
+        expect(
+          source.editor.deleteText({
+            blockId: textBlockId,
+            range: { from: 2, to: 4 },
+          }),
+        ).toBe(true);
+        expect(
+          source.editor.insertText({
+            blockId: textBlockId,
+            offset: 2,
+            text: "XY",
+          }),
+        ).toBe(true);
+      }),
+    ).toMatchObject({ ok: true, changed: true });
+    applyPeerChange(peer.editor, source.changes[0]!);
+    expect(
+      peer.editor.insertText({ blockId: textBlockId, offset: 2, text: "Q" }),
+    ).toBe(true);
+    expect(
+      peer.editor.insertText({ blockId: textBlockId, offset: 5, text: "R" }),
+    ).toBe(true);
+    applyPeerChange(source.editor, peer.changes[0]!);
+    applyPeerChange(source.editor, peer.changes[1]!);
+    expect(source.editor.readBlockPlainText(textBlockId, "paragraph")).toBe(
+      "abQXYRef",
+    );
+    expect(source.editor.undo()).toEqual({ status: "applied" });
+    expect(source.editor.readBlockPlainText(textBlockId, "paragraph")).toBe(
+      "abcdQRef",
+    );
+    expect(source.editor.redo()).toEqual({ status: "applied" });
+    expect(source.editor.readBlockPlainText(textBlockId, "paragraph")).toBe(
+      "abQXYRef",
+    );
+    source.editor.dispose();
+    peer.editor.dispose();
+  });
+
+  it("replays inline entity replacement repeatedly with freshly captured Yjs anchors", () => {
+    const snapshot = snapshotWithText(textBlockId, "abc");
+    const source = createCollaborativeTestEditor(snapshot, "entity");
+    expect(
+      source.editor.updateInlineAtom({
+        blockId: textBlockId,
+        range: { from: 1, to: 2 },
+        atom: { type: "mention", metadata: { id: "person-001" } },
+      }),
+    ).toBe(true);
+    expect(
+      JSON.stringify(source.editor.readBlockContent(textBlockId, "paragraph")),
+    ).toContain('"type":"mention"');
+    for (let cycle = 0; cycle < 3; cycle += 1) {
+      expect(source.editor.undo()).toEqual({ status: "applied" });
+      expect(source.editor.readBlockPlainText(textBlockId, "paragraph")).toBe(
+        "abc",
+      );
+      expect(source.editor.redo()).toEqual({ status: "applied" });
+      expect(
+        JSON.stringify(
+          source.editor.readBlockContent(textBlockId, "paragraph"),
+        ),
+      ).toContain('"type":"mention"');
+    }
+    source.editor.dispose();
   });
 });
 
-describe("live transaction identity", () => {
+describe("First Draft outbox acceptance and replay identity", () => {
   it("processes consecutive frames in order through its sole message listener", () => {
     const socket = new TestSocket();
     const connection = createFirstDraftMessageDispatcher(socket);
@@ -917,18 +1279,40 @@ describe("live transaction identity", () => {
     expect(socket.messageListenerCount).toBe(0);
   });
 
-  it("observes acceptance and failure without applying or resending content", () => {
+  it("accepts only an outstanding publication and retains retryable failures", () => {
     const socket = new TestSocket();
     const connection = createFirstDraftMessageDispatcher(socket);
+    const { editor, changes } = createTestEditor();
+    expect(
+      editor.insertText({ blockId: textBlockId, offset: 0, text: "X" }),
+    ).toBe(true);
+    const outbox = createFirstDraftOutboundPublisher();
+    outbox.attachGeneration({
+      generationId: "acceptance",
+      socket,
+      createTransactionId: sequentialIds("aggregate"),
+      publishSelection: vi.fn(),
+    });
+    outbox.generationCaughtUp();
+    outbox.submitFinalized(changes[0]!);
+    outbox.flush("manual");
+    const proposed = decodeFirstDraftMessage(socket.frames[0]!);
+    if (!proposed.ok || proposed.message.type !== "proposed-editor-transaction") {
+      throw new Error("Expected proposed transaction");
+    }
+    const transactionId = proposed.message.transaction.transactionId;
     const applyRemoteTransaction = vi.fn();
     const accepted = vi.fn();
     const failed = vi.fn();
+    const protocolError = vi.fn();
     const dispose = attachFirstDraftRemoteTransactions(
       connection,
       { applyRemoteTransaction },
       {
         documentId: "document-a",
         initialRevision: 2,
+        outbox,
+        onProtocolError: protocolError,
         onAccepted: accepted,
         onPersistenceFailed: failed,
       },
@@ -937,7 +1321,7 @@ describe("live transaction identity", () => {
       encodeFirstDraftMessage({
         type: "editor-transaction-accepted",
         documentId: "document-a",
-        transactionId: "transaction-a",
+        transactionId,
         baseRevision: 2,
         revision: 3,
         acceptedAt: 10,
@@ -947,36 +1331,23 @@ describe("live transaction identity", () => {
       encodeFirstDraftMessage({
         type: "editor-transaction-persistence-failed",
         documentId: "document-a",
-        transactionId: "transaction-b",
+        transactionId,
         reason: "unavailable",
         retryable: true,
         message: "Persistence unavailable",
       }),
     );
     expect(accepted).toHaveBeenCalledTimes(1);
-    expect(failed).toHaveBeenCalledTimes(1);
+    expect(failed).not.toHaveBeenCalled();
+    expect(protocolError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining("active outbox head") }),
+    );
     expect(applyRemoteTransaction).not.toHaveBeenCalled();
-    expect(socket.frames).toHaveLength(0);
+    expect(outbox.getSnapshot().outstanding).toHaveLength(0);
     dispose();
+    outbox.dispose();
     connection.dispose();
-  });
-
-  it("bounds recent-ID tracking without storing transaction payloads", () => {
-    const socket = {};
-    for (
-      let index = 0;
-      index <= MAX_LIVE_TRANSACTION_IDS_PER_SOCKET;
-      index += 1
-    ) {
-      markLiveTransactionSeen(socket, `bounded:${index}`);
-    }
-    expect(hasSeenLiveTransaction(socket, "bounded:0")).toBe(false);
-    expect(
-      hasSeenLiveTransaction(
-        socket,
-        `bounded:${MAX_LIVE_TRANSACTION_IDS_PER_SOCKET}`,
-      ),
-    ).toBe(true);
+    editor.dispose();
   });
 
   it("does not collapse distinct IDs that share local revision numbers", () => {
@@ -992,9 +1363,16 @@ describe("live transaction identity", () => {
       changedBlockIds: [textBlockId],
       authorSelection: { status: "ignored-no-author" as const },
     }));
-    const dispose = attachFirstDraftRemoteTransactions(connection, {
-      applyRemoteTransaction,
-    });
+    const outbox = createFirstDraftOutboundPublisher();
+    const dispose = attachFirstDraftRemoteTransactions(
+      connection,
+      { applyRemoteTransaction },
+      {
+        documentId: "document-one",
+        initialRevision: 0,
+        outbox,
+      },
+    );
     socket.receive(
       encodeFirstDraftMessage({
         type: "first-draft-accepted-transaction-replay",
@@ -1019,11 +1397,12 @@ describe("live transaction identity", () => {
     );
     expect(applyRemoteTransaction).toHaveBeenCalledTimes(2);
     dispose();
+    outbox.dispose();
     connection.dispose();
     editor.dispose();
   });
 
-  it("ignores sender echoes and duplicate frames by stable transaction ID", async () => {
+  it("resolves a canonical sender replay and ignores its exact duplicate acceptance", async () => {
     const socket = new TestSocket();
     const connection = createFirstDraftMessageDispatcher(socket);
     const applyRemoteTransaction = vi.fn(() => ({
@@ -1032,16 +1411,32 @@ describe("live transaction identity", () => {
       authorSelection: { status: "ignored-no-author" as const },
     }));
     const duplicate = vi.fn();
-    const dispose = attachFirstDraftRemoteTransactions(
-      connection,
-      { applyRemoteTransaction },
-      { onDuplicate: duplicate },
-    );
+    const revisionAdvanced = vi.fn();
     const { editor, changes } = createTestEditor();
     expect(
       editor.insertText({ blockId: textBlockId, offset: 0, text: "X" }),
     ).toBe(true);
-    await handleTransaction(socket)(changes[0]!);
+    const publisher = createFirstDraftOutboundPublisher();
+    publisher.attachGeneration({
+      generationId: "sender-echo",
+      socket,
+      createTransactionId: sequentialIds("aggregate"),
+      publishSelection: vi.fn(),
+    });
+    publisher.generationCaughtUp();
+    const dispose = attachFirstDraftRemoteTransactions(
+      connection,
+      { applyRemoteTransaction },
+      {
+        documentId: "document-one",
+        initialRevision: 0,
+        outbox: publisher,
+        onDuplicate: duplicate,
+        onRevisionAdvanced: revisionAdvanced,
+      },
+    );
+    publisher.submitFinalized(changes[0]!);
+    publisher.flush("manual");
     const proposed = decodeFirstDraftMessage(socket.frames[0]!);
     expect(proposed.ok && proposed.message.type).toBe(
       "proposed-editor-transaction",
@@ -1052,6 +1447,16 @@ describe("live transaction identity", () => {
     ) {
       throw new Error("Expected proposed transaction");
     }
+    const canonicalTransaction = {
+      ...proposed.message.transaction,
+      content: proposed.message.transaction.content.map((entry) => ({
+        ...entry,
+        readProjection: createBlockRichTextContentFromPlainText(
+          entry.blockType,
+          "server canonical projection",
+        ),
+      })),
+    };
     const echo = encodeFirstDraftMessage({
       type: "first-draft-accepted-transaction-replay",
       documentId: "document-one",
@@ -1059,13 +1464,26 @@ describe("live transaction identity", () => {
       baseRevision: 0,
       revision: 1,
       acceptedAt: 1,
-      transaction: proposed.message.transaction,
+      transaction: canonicalTransaction,
     });
     socket.receive(echo);
     socket.receive(echo);
+    socket.receive(
+      encodeFirstDraftMessage({
+        type: "editor-transaction-accepted",
+        documentId: "document-one",
+        transactionId: proposed.message.transaction.transactionId,
+        baseRevision: 0,
+        revision: 1,
+        acceptedAt: 1,
+      }),
+    );
 
     expect(applyRemoteTransaction).not.toHaveBeenCalled();
-    expect(duplicate).toHaveBeenCalledTimes(2);
+    expect(duplicate).toHaveBeenCalledTimes(3);
+    expect(revisionAdvanced).toHaveBeenCalledOnce();
+    expect(revisionAdvanced).toHaveBeenCalledWith(1, "remote-replay");
+    publisher.dispose();
     dispose();
     connection.dispose();
     editor.dispose();
@@ -1095,6 +1513,82 @@ describe("First Draft ephemeral presence", () => {
       },
     },
   };
+
+  it("publishes reconnect presence only after all retained transactions are republished in order", () => {
+    const { editor, changes } = createTestEditor();
+    expect(editor.insertText({ blockId: textBlockId, offset: 0, text: "A" })).toBe(true);
+    expect(editor.insertText({ blockId: textBlockId, offset: 1, text: "B" })).toBe(true);
+    const publisher = createFirstDraftOutboundPublisher();
+    const oldSocket = new TestSocket();
+    publisher.attachGeneration({
+      generationId: "presence-old",
+      socket: oldSocket,
+      createTransactionId: sequentialIds("presence-old-aggregate"),
+      publishSelection: vi.fn(),
+    });
+    publisher.generationCaughtUp();
+    for (const change of changes) {
+      publisher.beginAtomicOperation();
+      publisher.submitFinalized(change);
+    }
+    expect(oldSocket.frames.map(decodedMessageType)).toEqual([
+      "proposed-editor-transaction",
+    ]);
+    publisher.detachGeneration({ attemptSend: false });
+
+    const replacement = new TestSocket();
+    const connection = createFirstDraftMessageDispatcher(replacement);
+    const revisions = { presence: 0, selection: 0 };
+    const presence = attachFirstDraftPresence(
+      connection,
+      editor,
+      presenceSession(subject),
+      {
+        revisions,
+        beforeStandaloneSelectionPublication: () =>
+          publisher.beforeStandaloneSelectionPublication(),
+      },
+    );
+    publisher.attachGeneration({
+      generationId: "presence-replacement",
+      socket: replacement,
+      createTransactionId: sequentialIds("presence-replacement-aggregate"),
+      publishSelection: (committed, transactionId) =>
+        presence.publishSelection(committed, transactionId),
+      onRetainedPublished: (committed) =>
+        presence.publishCurrentSelection(committed ?? undefined),
+    });
+    publisher.generationCaughtUp();
+    expect(replacement.frames.map(decodedMessageType)).toEqual([
+      "first-draft-participant-update",
+      "proposed-editor-transaction",
+      "first-draft-selection-update",
+    ]);
+
+    publisher.acceptLocal(
+      {
+        type: "editor-transaction-accepted",
+        documentId: "document-one",
+        transactionId: changes[0]!.transactionId,
+        baseRevision: 0,
+        revision: 1,
+        acceptedAt: 1,
+      },
+      0,
+    );
+    expect(replacement.frames.map(decodedMessageType)).toEqual([
+      "first-draft-participant-update",
+      "proposed-editor-transaction",
+      "first-draft-selection-update",
+      "proposed-editor-transaction",
+      "first-draft-selection-update",
+    ]);
+    expect(revisions.selection).toBe(2);
+    presence.dispose();
+    connection.dispose();
+    publisher.dispose();
+    editor.dispose();
+  });
 
   it("round-trips distinct participant and semantic selection variants", () => {
     const participant = {
@@ -1187,7 +1681,12 @@ describe("First Draft ephemeral presence", () => {
       connection,
       presenceEditor(setSelections),
       presenceSession(subject),
+      {
+        revisions: { presence: 0, selection: 0 },
+        beforeStandaloneSelectionPublication: vi.fn(),
+      },
     );
+    dispose.publishCurrentSelection();
     const outboundBeforeSnapshots = socket.frames.length;
 
     socket.receive(
@@ -1246,6 +1745,7 @@ describe("First Draft ephemeral presence", () => {
     let localListener: (() => void) | null = null;
     const setSelections = vi.fn<FirstDraftPresenceEditor["setSelections"]>();
     const onParticipants = vi.fn();
+    const beforeStandaloneSelectionPublication = vi.fn();
     const dispose = attachFirstDraftPresence(
       connection,
       {
@@ -1265,14 +1765,20 @@ describe("First Draft ephemeral presence", () => {
         subject,
         metadata: { displayName: "Ada", color: "#123abc" },
       },
-      { onParticipants },
+      {
+        revisions: { presence: 0, selection: 0 },
+        beforeStandaloneSelectionPublication,
+        onParticipants,
+      },
     );
+    dispose.publishCurrentSelection();
     expect(socket.frames.map((frame) => decodedMessageType(frame))).toEqual([
       "first-draft-participant-update",
       "first-draft-selection-update",
     ]);
     const framesBeforeSettlement = socket.frames.length;
     invokeListener(localListener);
+    expect(beforeStandaloneSelectionPublication).toHaveBeenCalledOnce();
     expect(socket.frames).toHaveLength(framesBeforeSettlement + 1);
     expect(decodeFirstDraftMessage(socket.frames.at(-1)!)).toMatchObject({
       ok: true,
@@ -1285,7 +1791,7 @@ describe("First Draft ephemeral presence", () => {
       version: 1 as const,
       payload: { encoded: "AQ==", assoc: 1 as const },
     };
-    dispose.publishCommittedTransactionSelection({
+    dispose.publishSelection({
       kind: "selection",
       selection: {
         kind: "document",
@@ -1382,15 +1888,135 @@ describe("First Draft ephemeral presence", () => {
     connection.dispose();
   });
 
+  it("keeps publication revisions monotonic when presence attaches to a replacement generation", () => {
+    const revisions = { presence: 0, selection: 0 };
+    const firstSocket = new TestSocket();
+    const firstConnection = createFirstDraftMessageDispatcher(firstSocket);
+    const first = attachFirstDraftPresence(
+      firstConnection,
+      presenceEditor(vi.fn()),
+      presenceSession(subject),
+      {
+        revisions,
+        beforeStandaloneSelectionPublication: vi.fn(),
+      },
+    );
+    first.publishCurrentSelection();
+    first.publishSelection({ kind: "none" }, "aggregate-one");
+    expect(decodeFirstDraftMessage(firstSocket.frames[0]!)).toMatchObject({
+      ok: true,
+      message: { type: "first-draft-participant-update", presenceRevision: 0 },
+    });
+    expect(decodeFirstDraftMessage(firstSocket.frames[2]!)).toMatchObject({
+      ok: true,
+      message: { type: "first-draft-selection-update", selectionRevision: 1 },
+    });
+    first.dispose();
+    firstConnection.dispose();
+
+    const secondSocket = new TestSocket();
+    const secondConnection = createFirstDraftMessageDispatcher(secondSocket);
+    const second = attachFirstDraftPresence(
+      secondConnection,
+      presenceEditor(vi.fn()),
+      presenceSession(subject),
+      {
+        revisions,
+        beforeStandaloneSelectionPublication: vi.fn(),
+      },
+    );
+    second.publishCurrentSelection();
+    expect(decodeFirstDraftMessage(secondSocket.frames[0]!)).toMatchObject({
+      ok: true,
+      message: { type: "first-draft-participant-update", presenceRevision: 1 },
+    });
+    expect(decodeFirstDraftMessage(secondSocket.frames[1]!)).toMatchObject({
+      ok: true,
+      message: { type: "first-draft-selection-update", selectionRevision: 2 },
+    });
+    second.dispose();
+    secondConnection.dispose();
+  });
+
+  it("flushes a pending transaction and its committed selection before standalone selection", () => {
+    const socket = new TestSocket();
+    const connection = createFirstDraftMessageDispatcher(socket);
+    let settleStandalone: (() => void) | null = null;
+    const presenceOwner: FirstDraftPresenceEditor = {
+      selection: {
+        getSnapshot: () => ({ kind: "none", revision: 0 }),
+      },
+      subscribeStandaloneSelectionSettlements(listener) {
+        settleStandalone = () => listener({ kind: "none" });
+        return () => {
+          settleStandalone = null;
+        };
+      },
+      setSelections: vi.fn(),
+    };
+    const publisher = createFirstDraftOutboundPublisher();
+    const presence = attachFirstDraftPresence(
+      connection,
+      presenceOwner,
+      presenceSession(subject),
+      {
+        revisions: { presence: 0, selection: 0 },
+        beforeStandaloneSelectionPublication:
+          publisher.beforeStandaloneSelectionPublication,
+      },
+    );
+    publisher.attachGeneration({
+      generationId: "presence-ordering",
+      socket,
+      createTransactionId: sequentialIds("aggregate"),
+      publishSelection: (selection, transactionId) =>
+        presence.publishSelection(selection, transactionId),
+    });
+    publisher.generationCaughtUp();
+    const { editor, changes } = createTestEditor();
+    editor.insertText({ blockId: textBlockId, offset: 0, text: "X" });
+    publisher.submitFinalized(changes[0]!);
+    const beforeSettlement = socket.frames.length;
+
+    invokeListener(settleStandalone);
+    expect(
+      socket.frames.slice(beforeSettlement).map((frame) => decodedMessageType(frame)),
+    ).toEqual([
+      "proposed-editor-transaction",
+      "first-draft-selection-update",
+      "first-draft-selection-update",
+    ]);
+    expect(decodeFirstDraftMessage(socket.frames[beforeSettlement + 1]!)).toMatchObject({
+      ok: true,
+      message: { selectionRevision: 0 },
+    });
+    expect(decodeFirstDraftMessage(socket.frames[beforeSettlement + 2]!)).toMatchObject({
+      ok: true,
+      message: { selectionRevision: 1 },
+    });
+    publisher.dispose();
+    presence.dispose();
+    connection.dispose();
+    editor.dispose();
+  });
+
   it("installs and clears remote document and table selections without feedback", () => {
     const socket = new TestSocket();
     const connection = createFirstDraftMessageDispatcher(socket);
     const { editor, changes } = createTestEditor();
-    const dispose = attachFirstDraftPresence(connection, editor, {
-      documentId: "document-one",
-      subject,
-      metadata: { displayName: "Ada", color: "#123abc" },
-    });
+    const dispose = attachFirstDraftPresence(
+      connection,
+      editor,
+      {
+        documentId: "document-one",
+        subject,
+        metadata: { displayName: "Ada", color: "#123abc" },
+      },
+      {
+        revisions: { presence: 0, selection: 0 },
+        beforeStandaloneSelectionPublication: vi.fn(),
+      },
+    );
     const peer = {
       actorId: "actor-b",
       clientId: "client-b",
@@ -1503,6 +2129,77 @@ function createTestEditor() {
   return { editor, changes };
 }
 
+function createCollaborativeTestEditor(
+  snapshot: EditorInstanceSnapshot,
+  idPrefix: string,
+) {
+  const changes: EditorSemanticChange[] = [];
+  const editor = initializeEditableEditor({
+    definition: createDefinition(),
+    snapshot,
+    onChange: (change) => {
+      changes.push(change);
+    },
+    createTransactionId: sequentialIds(idPrefix),
+  });
+  return { editor, changes };
+}
+
+function applyPeerChange(
+  editor: ReturnType<typeof createCollaborativeTestEditor>["editor"],
+  change: EditorSemanticChange,
+): void {
+  expect(
+    editor.applyRemoteTransaction({
+      transaction: convertEditorTransactionToTransport(change),
+      authorSelection: { kind: "no-author-selection" },
+    }),
+  ).toMatchObject({ status: "applied" });
+}
+
+function readMarkedText(
+  editor: ReturnType<typeof createCollaborativeTestEditor>["editor"],
+  markType: string,
+): string {
+  const content = editor.readBlockContent(textBlockId, "paragraph");
+  if (!content) throw new Error("Expected collaborative rich text content");
+  return richTextBlockInlineContent(content)
+    .filter(
+      (node) =>
+        node.type === "text" &&
+        node.marks?.some((mark) => mark.type === markType),
+    )
+    .map((node) => (node.type === "text" ? node.text : ""))
+    .join("");
+}
+
+function snapshotWithText(
+  blockId: BlockId,
+  text: string,
+): EditorInstanceSnapshot {
+  const snapshot = createFirstDraftSnapshot();
+  const content = createBlockRichTextContentFromPlainText(
+    "paragraph",
+    text,
+  ) as RichTextDocumentNodeJson;
+  const checkpoint = createYjsBlockContentCheckpoint(blockId, content);
+  return {
+    ...snapshot,
+    content: { ...snapshot.content, [blockId]: content },
+    opaqueContentCheckpoints: {
+      ...snapshot.opaqueContentCheckpoints,
+      [blockId]: {
+        kind: "checkpoint",
+        format: checkpoint.format,
+        version: checkpoint.version,
+        payloadBase64: Buffer.from(checkpoint.payload.copy()).toString(
+          "base64",
+        ),
+      },
+    },
+  };
+}
+
 function createDefinition() {
   return createFirstDraftEditorDefinition(createFirstDraftViewStateStore());
 }
@@ -1607,9 +2304,26 @@ function addMetadataPropertyAtRoot(
   return result;
 }
 
-class TestSocket
-  implements FirstDraftRemoteTransactionSocket, EditorTransactionWebSocket
-{
+function acceptSentTransportRecords(publisher: FirstDraftOutboundPublisher): void {
+  let revision = publisher.getSnapshot().acceptedLocalTransactionIds.length;
+  while (publisher.getSnapshot().outstanding[0]?.state === "sent") {
+    const transactionId = publisher.getSnapshot().outstanding[0]!.transactionId;
+    publisher.acceptLocal(
+      {
+        type: "editor-transaction-accepted",
+        documentId: "document-one",
+        transactionId,
+        baseRevision: revision,
+        revision: revision + 1,
+        acceptedAt: revision + 1,
+      },
+      revision,
+    );
+    revision += 1;
+  }
+}
+
+class TestSocket implements FirstDraftOutboundSocket {
   readyState = 1;
   binaryType: BinaryType = "blob";
   readonly frames: ArrayBuffer[] = [];

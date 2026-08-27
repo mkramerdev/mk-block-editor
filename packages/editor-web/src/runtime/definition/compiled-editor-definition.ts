@@ -7,7 +7,6 @@ import {
 import type {
   EditorBlockInternalSelectionSubsystemDefinition,
   EditableEditorDefinition,
-  EditorDefinition,
 } from "./contracts.ts";
 import {
   compileEditorInlineAtoms,
@@ -26,7 +25,7 @@ import {
 import { createImmutableMap } from "./immutable-map.ts";
 
 export interface CompiledCanonicalEditorDefinition<
-  TDefinition extends EditorDefinition = EditorDefinition,
+  TDefinition extends EditableEditorDefinition = EditableEditorDefinition,
 > {
   readonly definition: TDefinition;
   readonly inlineAtomRegistry: CompiledEditorInlineAtoms;
@@ -49,7 +48,9 @@ export function compileCanonicalEditorDefinition<
     Object.fromEntries(
       Object.entries(definition.blocks).map(([type, block]) => {
         const canonical = { ...block };
-        delete canonical.shellElement;
+        Reflect.deleteProperty(canonical, "shellElement");
+        Reflect.deleteProperty(canonical, "rootLayout");
+        Reflect.deleteProperty(canonical, "renderer");
         return [type, canonical];
       }),
     ),
@@ -58,13 +59,9 @@ export function compileCanonicalEditorDefinition<
   assertValidBlockRenderers(definition);
   assertValidInlineMarkDefinitions(definition.inlineMarks);
   const ownedDefinition = captureCompiledDefinition(definition);
-  const editable =
-    "commands" in ownedDefinition || "keybindings" in ownedDefinition;
-  const commands = editable
-    ? compileRegisteredEditorCommands(
-        "commands" in ownedDefinition ? (ownedDefinition.commands ?? []) : [],
-      )
-    : createImmutableMap(new Map<string, EditorCommandDefinition>());
+  const commands = compileRegisteredEditorCommands(
+    ownedDefinition.commands ?? [],
+  );
   const compiled = Object.freeze({
     definition: ownedDefinition,
     inlineAtomRegistry: compileEditorInlineAtoms(ownedDefinition),
@@ -76,9 +73,7 @@ export function compileCanonicalEditorDefinition<
     ),
     commands,
     keybindings: compileEditorKeybindings(
-      editable && "keybindings" in ownedDefinition
-        ? (ownedDefinition.keybindings ?? [])
-        : [],
+      ownedDefinition.keybindings ?? [],
       commands,
     ),
   });
@@ -91,7 +86,7 @@ export function compileCanonicalEditorDefinition<
  * or records. Functions, renderers, class instances, and React elements remain
  * intentional identity references.
  */
-export function captureCompiledDefinition<TDefinition extends EditorDefinition>(
+export function captureCompiledDefinition<TDefinition extends EditableEditorDefinition>(
   definition: TDefinition,
 ): TDefinition {
   return captureDefinitionValue(
@@ -135,7 +130,7 @@ function assertValidInlineMarkDefinitions(
 ): void {
   if (!Array.isArray(inlineMarks)) {
     throw new Error(
-      "EditorDefinition.inlineMarks must be an array of inline mark definitions.",
+      "EditableEditorDefinition.inlineMarks must be an array of inline mark definitions.",
     );
   }
   const definitionNames = new Set<string>();
@@ -173,17 +168,17 @@ function assertValidInlineMarkDefinitions(
   }
 }
 
-function assertValidContentIntegration(definition: EditorDefinition): void {
+function assertValidContentIntegration(definition: EditableEditorDefinition): void {
   const defaultRootDefinition = definition.blocks[definition.defaultRoot];
   if (!defaultRootDefinition || defaultRootDefinition.kind !== "text") {
-    throw new Error("EditorDefinition.defaultRoot must name a text block");
+    throw new Error("EditableEditorDefinition.defaultRoot must name a text block");
   }
   if (definition.contentImport !== undefined) {
     const importDefinition =
       definition.blocks[definition.contentImport.plainTextBlockType];
     if (!importDefinition || importDefinition.kind !== "text") {
       throw new Error(
-        "EditorDefinition.contentImport.plainTextBlockType must name a text block",
+        "EditableEditorDefinition.contentImport.plainTextBlockType must name a text block",
       );
     }
   }
@@ -194,7 +189,7 @@ function assertValidContentIntegration(definition: EditorDefinition): void {
       typeof definition.content.createRuntime !== "function")
   ) {
     throw new Error(
-      "EditorDefinition.content must provide one content runtime factory",
+      "EditableEditorDefinition.content must provide one content runtime factory",
     );
   }
 }
@@ -215,7 +210,7 @@ const allowedEditorDefinitionFields = new Set([
   "keybindings",
 ]);
 
-function assertValidBlockRenderers(definition: EditorDefinition): void {
+function assertValidBlockRenderers(definition: EditableEditorDefinition): void {
   for (const [type, blockDefinition] of Object.entries(definition.blocks)) {
     if (!Object.prototype.hasOwnProperty.call(blockDefinition, "renderer")) {
       throw new Error(`Block definition ${type} must provide a renderer.`);
@@ -226,7 +221,7 @@ function assertValidBlockRenderers(definition: EditorDefinition): void {
   }
 }
 
-function assertValidBlockShellElements(definition: EditorDefinition): void {
+function assertValidBlockShellElements(definition: EditableEditorDefinition): void {
   const allowed = new Set(["div", "ol", "ul", "li"]);
   for (const [type, blockDefinition] of Object.entries(definition.blocks)) {
     if (
@@ -241,17 +236,17 @@ function assertValidBlockShellElements(definition: EditorDefinition): void {
 }
 
 function assertNoUnexpectedEditorDefinitionFields(
-  definition: EditorDefinition,
+  definition: EditableEditorDefinition,
 ): void {
   if (!definition || typeof definition !== "object") {
-    throw new Error("EditorDefinition must be an object.");
+    throw new Error("EditableEditorDefinition must be an object.");
   }
   const unexpectedFields = Object.keys(definition).filter(
     (field) => !allowedEditorDefinitionFields.has(field),
   );
   if (unexpectedFields.length > 0) {
     throw new Error(
-      `EditorDefinition contains unsupported fields: ${unexpectedFields.join(", ")}.`,
+      `EditableEditorDefinition contains unsupported fields: ${unexpectedFields.join(", ")}.`,
     );
   }
   if (
@@ -261,28 +256,34 @@ function assertNoUnexpectedEditorDefinitionFields(
         (validator) => typeof validator !== "function",
       ))
   ) {
-    throw new Error("EditorDefinition documentValidators must be functions.");
+    throw new Error("EditableEditorDefinition documentValidators must be functions.");
   }
   if (
     definition.selectionFragment !== undefined &&
     (typeof definition.selectionFragment !== "object" ||
       definition.selectionFragment === null ||
       typeof definition.selectionFragment.resolveVisibleChildBlockIds !==
-        "function")
+        "function" ||
+      (definition.selectionFragment.resolveStructuralEditRange !== undefined &&
+        typeof definition.selectionFragment.resolveStructuralEditRange !==
+          "function") ||
+      (definition.selectionFragment.planStructuralRangeDeletion !== undefined &&
+        typeof definition.selectionFragment.planStructuralRangeDeletion !==
+          "function"))
   ) {
     throw new Error(
-      "EditorDefinition selectionFragment must resolve visible child block ids.",
+      "EditableEditorDefinition selectionFragment must resolve visible child block ids.",
     );
   }
 }
 
 function compileBlockInternalSelectionSubsystems(
-  definition: EditorDefinition,
+  definition: EditableEditorDefinition,
 ): ReadonlyMap<string, EditorBlockInternalSelectionSubsystemDefinition> {
   const definitions = definition.blockInternalSelectionSubsystems ?? [];
   if (!Array.isArray(definitions)) {
     throw new Error(
-      "EditorDefinition.blockInternalSelectionSubsystems must be an array.",
+      "EditableEditorDefinition.blockInternalSelectionSubsystems must be an array.",
     );
   }
   const compiled = new Map<

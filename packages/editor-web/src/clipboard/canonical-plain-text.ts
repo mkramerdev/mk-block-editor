@@ -26,6 +26,11 @@ import {
   resolveEditorClipboardImportLimits,
   utf8ByteLength,
 } from "./limits.ts";
+import {
+  readValidatedClipboardFragment,
+  validateClipboardFragment,
+  type ValidatedClipboardFragment,
+} from "./validated-fragment.ts";
 
 export interface CanonicalPlainTextCodecOptions {
   readonly blockDefinitions: Readonly<Record<BlockType, BlockDefinition>>;
@@ -82,6 +87,18 @@ export function exportCanonicalFragmentPlainText(
   fragment: CanonicalBlockFragment,
   options: CanonicalPlainTextCodecOptions,
 ): string {
+  return exportValidatedCanonicalFragmentPlainText(
+    validateClipboardFragment(fragment, options.blockDefinitions),
+    options,
+  );
+}
+
+/** Package-internal exporter for a fragment validated in this operation. */
+export function exportValidatedCanonicalFragmentPlainText(
+  validated: ValidatedClipboardFragment,
+  options: CanonicalPlainTextCodecOptions,
+): string {
+  const fragment = readValidatedClipboardFragment(validated);
   const childrenByParentId = new Map<BlockId, CanonicalBlockRecord[]>();
   const blockById = new Map(fragment.blocks.map((block) => [block.id, block]));
   for (const block of fragment.blocks) {

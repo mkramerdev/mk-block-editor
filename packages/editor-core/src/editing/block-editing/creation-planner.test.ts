@@ -8,24 +8,22 @@ import {
 } from "../../selection/block-selection.ts";
 import { planBlockTreeCreation } from "./creation-planner.ts";
 
-const renderer = () => null;
-
 describe("canonical block-tree creation planner", () => {
   it.each([
-    ["quote", ["quote", "paragraph"]],
-    ["checklistItem", ["checklistItem", "paragraph"]],
-    ["callout", ["callout", "paragraph"]],
+    ["wrapperBlock", ["wrapperBlock", "textBlock"]],
+    ["fixedWrapper", ["fixedWrapper", "textBlock"]],
+    ["containerWrapper", ["containerWrapper", "textBlock"]],
     [
-      "toggleHeading",
-      ["toggleHeading", "heading", "toggleHeadingBody", "placeholder"],
+      "expandableTitleWrapper",
+      ["expandableTitleWrapper", "alternateTextBlock", "childWrapper", "defaultAtomicBlock"],
     ],
     [
-      "toggleListItem",
-      ["toggleListItem", "paragraph", "toggleListItemBody", "placeholder"],
+      "expandableItemWrapper",
+      ["expandableItemWrapper", "textBlock", "alternateChildWrapper", "defaultAtomicBlock"],
     ],
-    ["columns", ["columns", "column", "paragraph"]],
-    ["tabs", ["tabs", "tabPane", "placeholder"]],
-    ["placeholder", ["placeholder"]],
+    ["parallelWrapper", ["parallelWrapper", "laneWrapper", "textBlock"]],
+    ["switchWrapper", ["switchWrapper", "branchWrapper", "defaultAtomicBlock"]],
+    ["defaultAtomicBlock", ["defaultAtomicBlock"]],
   ])("creates the complete %s subtree", (type, expectedTypes) => {
     const ids = idSequence();
     const plan = planBlockTreeCreation({
@@ -48,9 +46,9 @@ describe("canonical block-tree creation planner", () => {
     expect(plan.selectionBlockId).toBe(
       plan.nodes.find(
         (node) =>
-          node.type === "paragraph" ||
-          node.type === "heading" ||
-          node.type === "placeholder",
+          node.type === "textBlock" ||
+          node.type === "alternateTextBlock" ||
+          node.type === "defaultAtomicBlock",
       )?.id ?? null,
     );
   });
@@ -58,7 +56,7 @@ describe("canonical block-tree creation planner", () => {
   it("applies requested metadata only to the requested root", () => {
     const plan = planBlockTreeCreation({
       blockDefinitions: createTestBlockDefinitions(),
-      type: "checklistItem",
+      type: "fixedWrapper",
       metadata: { checked: true },
       createBlockId: idSequence(),
     });
@@ -69,7 +67,7 @@ describe("canonical block-tree creation planner", () => {
   it("materializes definition metadata defaults and lets explicit metadata replace them", () => {
     const implicit = planBlockTreeCreation({
       blockDefinitions: createTestBlockDefinitions(),
-      type: "column",
+      type: "laneWrapper",
       createBlockId: idSequence(),
     });
     expect(implicit.nodes[0]?.metadata).toStrictEqual({
@@ -78,7 +76,7 @@ describe("canonical block-tree creation planner", () => {
 
     const explicit = planBlockTreeCreation({
       blockDefinitions: createTestBlockDefinitions(),
-      type: "column",
+      type: "laneWrapper",
       metadata: { layoutWeight: 250_000, unrelated: true },
       createBlockId: idSequence(),
     });
@@ -91,11 +89,11 @@ describe("canonical block-tree creation planner", () => {
   it("repeats only definition-owned default content to an exact requested count", () => {
     const plan = planBlockTreeCreation({
       blockDefinitions: createTestBlockDefinitions(),
-      type: "columns",
+      type: "parallelWrapper",
       defaultContentCount: 5,
       createBlockId: idSequence(),
     });
-    const columns = plan.nodes.filter((node) => node.type === "column");
+    const columns = plan.nodes.filter((node) => node.type === "laneWrapper");
     expect(columns).toHaveLength(5);
     expect(
       columns.map((column) => ({
@@ -108,7 +106,7 @@ describe("canonical block-tree creation planner", () => {
         metadata: { layoutWeight: 1_000_000 },
       })),
     );
-    expect(plan.nodes.filter((node) => node.type === "paragraph")).toHaveLength(
+    expect(plan.nodes.filter((node) => node.type === "textBlock")).toHaveLength(
       5,
     );
   });
@@ -118,7 +116,7 @@ describe("canonical block-tree creation planner", () => {
       expect(() =>
         planBlockTreeCreation({
           blockDefinitions: createTestBlockDefinitions(),
-          type: "columns",
+          type: "parallelWrapper",
           defaultContentCount,
           createBlockId: idSequence(),
         }),
@@ -127,7 +125,7 @@ describe("canonical block-tree creation planner", () => {
     expect(() =>
       planBlockTreeCreation({
         blockDefinitions: createTestBlockDefinitions(),
-        type: "quote",
+        type: "wrapperBlock",
         defaultContentCount: 2,
         createBlockId: idSequence(),
       }),
@@ -139,7 +137,7 @@ describe("canonical block-tree creation planner", () => {
     expect(() =>
       planBlockTreeCreation({
         blockDefinitions: createTestBlockDefinitions(),
-        type: "quote",
+        type: "wrapperBlock",
         createBlockId: () => collision,
         reservedBlockIds: new Set([collision]),
       }),
@@ -152,7 +150,7 @@ describe("canonical block-tree creation planner", () => {
     expect(() =>
       planBlockTreeCreation({
         blockDefinitions: createTestBlockDefinitions(),
-        type: "quote",
+        type: "wrapperBlock",
         createBlockId: next,
         isBlockIdReserved: (blockId) => blockId === collision,
       }),
@@ -165,8 +163,6 @@ describe("canonical block-tree creation planner", () => {
       selectableWrapper: {
         kind: "wrapper" as const,
         type: "selectableWrapper",
-        rootLayout: "normal" as const,
-        renderer,
         selection: wholeSelection(),
         content: { required: [] },
         contentBoundary: false,
@@ -189,10 +185,8 @@ describe("canonical block-tree creation planner", () => {
       selectableWrapper: {
         kind: "wrapper" as const,
         type: "selectableWrapper",
-        rootLayout: "normal" as const,
-        renderer,
         selection: wholeSelection(),
-        content: { required: ["paragraph"] },
+        content: { required: ["textBlock"] },
         contentBoundary: false,
       },
     };
@@ -205,7 +199,7 @@ describe("canonical block-tree creation planner", () => {
 
     expect(plan.nodes[0]?.type).toBe("selectableWrapper");
     expect(plan.selectionBlockId).toBe(
-      plan.nodes.find(({ type }) => type === "paragraph")?.id,
+      plan.nodes.find(({ type }) => type === "textBlock")?.id,
     );
   });
 
@@ -215,8 +209,6 @@ describe("canonical block-tree creation planner", () => {
       passiveWrapper: {
         kind: "wrapper" as const,
         type: "passiveWrapper",
-        rootLayout: "normal" as const,
-        renderer,
         selection: wrapperSelection(),
         content: { required: [] },
         contentBoundary: false,
@@ -237,114 +229,88 @@ function createTestBlockDefinitions(): Readonly<
   Record<BlockType, BlockDefinition>
 > {
   return {
-    paragraph: {
+    textBlock: {
       kind: "text",
-      rootLayout: "normal",
-      type: "paragraph",
-      renderer,
+      type: "textBlock",
     },
-    heading: { kind: "text", rootLayout: "normal", type: "heading", renderer },
-    placeholder: {
+    alternateTextBlock: { kind: "text", type: "alternateTextBlock" },
+    defaultAtomicBlock: {
       kind: "atomic",
-      rootLayout: "normal",
-      type: "placeholder",
-      renderer,
+      type: "defaultAtomicBlock",
     },
-    quote: {
+    wrapperBlock: {
       kind: "wrapper",
-      rootLayout: "normal",
-      type: "quote",
-      renderer,
-      content: { required: ["paragraph"] },
+      type: "wrapperBlock",
+      content: { required: ["textBlock"] },
       contentBoundary: false,
     },
-    checklistItem: {
+    fixedWrapper: {
       kind: "wrapper",
-      rootLayout: "normal",
-      type: "checklistItem",
-      renderer,
-      content: { required: ["paragraph"] },
+      type: "fixedWrapper",
+      content: { required: ["textBlock"] },
       contentBoundary: false,
     },
-    callout: {
+    containerWrapper: {
       kind: "wrapper",
-      rootLayout: "normal",
-      type: "callout",
-      renderer,
+      type: "containerWrapper",
       content: { required: ["block"], additional: "block" },
       contentBoundary: false,
-      defaultContent: "paragraph",
+      defaultContent: "textBlock",
     },
-    toggleHeading: {
+    expandableTitleWrapper: {
       kind: "wrapper",
-      rootLayout: "normal",
-      type: "toggleHeading",
-      renderer,
-      content: { required: ["heading", "toggleHeadingBody"] },
+      type: "expandableTitleWrapper",
+      content: { required: ["alternateTextBlock", "childWrapper"] },
       contentBoundary: false,
     },
-    toggleHeadingBody: {
+    childWrapper: {
       kind: "wrapper",
-      rootLayout: "normal",
-      type: "toggleHeadingBody",
-      renderer,
+      type: "childWrapper",
       content: { required: ["block"], additional: "block" },
       contentBoundary: false,
-      defaultContent: "placeholder",
+      defaultContent: "defaultAtomicBlock",
     },
-    toggleListItem: {
+    expandableItemWrapper: {
       kind: "wrapper",
-      rootLayout: "normal",
-      type: "toggleListItem",
-      renderer,
-      content: { required: ["paragraph", "toggleListItemBody"] },
+      type: "expandableItemWrapper",
+      content: { required: ["textBlock", "alternateChildWrapper"] },
       contentBoundary: false,
     },
-    toggleListItemBody: {
+    alternateChildWrapper: {
       kind: "wrapper",
-      rootLayout: "normal",
-      type: "toggleListItemBody",
-      renderer,
+      type: "alternateChildWrapper",
       content: { required: ["block"], additional: "block" },
       contentBoundary: false,
-      defaultContent: "placeholder",
+      defaultContent: "defaultAtomicBlock",
     },
-    columns: {
+    parallelWrapper: {
       kind: "wrapper",
-      rootLayout: "normal",
-      type: "columns",
-      renderer,
-      content: { required: ["column"], additional: "column" },
+      type: "parallelWrapper",
+      content: { required: ["laneWrapper"], additional: "laneWrapper" },
       contentBoundary: false,
-      defaultContent: "column",
+      defaultContent: "laneWrapper",
     },
-    column: {
+    laneWrapper: {
       kind: "wrapper",
-      rootLayout: "normal",
-      type: "column",
-      renderer,
+      type: "laneWrapper",
       content: { required: ["block"], additional: "block" },
       contentBoundary: true,
-      defaultContent: "paragraph",
+      defaultContent: "textBlock",
       defaultMetadata: { layoutWeight: 1_000_000 },
     },
-    tabs: {
+    switchWrapper: {
       kind: "wrapper",
-      rootLayout: "normal",
-      type: "tabs",
-      renderer,
-      content: { required: ["tabPane"], additional: "tabPane" },
+      type: "switchWrapper",
+      content: { required: ["branchWrapper"], additional: "branchWrapper" },
       contentBoundary: false,
-      defaultContent: "tabPane",
+      defaultContent: "branchWrapper",
     },
-    tabPane: {
+    branchWrapper: {
       kind: "wrapper",
-      rootLayout: "normal",
-      type: "tabPane",
-      renderer,
+      type: "branchWrapper",
       content: { required: ["block"], additional: "block" },
       contentBoundary: false,
-      defaultContent: "placeholder",
+      defaultContent: "defaultAtomicBlock",
     },
   };
 }

@@ -6,6 +6,7 @@ import { pointerEventPreservesEditorSelection } from "./interactive-targets.ts";
 
 export interface DocumentInteractionOwner {
   readonly list: HTMLElement;
+  readonly revokeNativeSelectionOwnership: () => void;
   readonly releaseInteraction: () => void;
   readonly pointerdown: (event: PointerEvent) => void;
   readonly pointermove: (event: PointerEvent) => void;
@@ -60,10 +61,18 @@ function createRouter(doc: Document): DocumentInteractionRouter {
       resolveTargetOwner(router, event.target) ??
       (pointerEventPreservesEditorSelection(event) ? router.activeOwner : null);
     if (owner) {
+      for (const mountedOwner of router.owners) {
+        if (mountedOwner !== owner) {
+          mountedOwner.revokeNativeSelectionOwnership();
+        }
+      }
       activateOwner(router, owner);
       router.pointerOwners.set(event.pointerId, owner);
       owner.pointerdown(event);
       return;
+    }
+    for (const mountedOwner of router.owners) {
+      mountedOwner.revokeNativeSelectionOwnership();
     }
     deactivateOwner(router);
   };

@@ -5,29 +5,33 @@
   "type": "module",
   "description": "Platform-agnostic React hooks and utilities for editors — shared by editor-web (React DOM) and editor-mobile (React Native). No DOM dependency.",
   "main": "./dist/api/index.js",
-  "types": "./src/api/index.ts",
+  "types": "./dist/api/index.d.ts",
   "exports": {
     ".": {
-      "types": "./src/api/index.ts",
+      "types": "./dist/api/index.d.ts",
       "import": "./dist/api/index.js"
     },
     "./store": {
-      "types": "./src/api/store.ts",
+      "types": "./dist/api/store.d.ts",
       "import": "./dist/api/store.js"
     },
     "./selection": {
-      "types": "./src/api/selection.ts",
+      "types": "./dist/api/selection.d.ts",
       "import": "./dist/api/selection.js"
     },
     "./selection-model": {
-      "types": "./src/selection/model/types.ts",
+      "types": "./dist/selection/model/types.d.ts",
       "import": "./dist/selection/model/types.js"
     },
     "./editor": {
-      "types": "./src/api/editor.ts",
+      "types": "./dist/api/editor.d.ts",
       "import": "./dist/api/editor.js"
     }
   },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "pnpm run clean && tsc -p tsconfig.build.json",
     "dev:compiler": "tsc -p tsconfig.build.json --watch",
@@ -49,7 +53,7 @@
     "@repo/typescript-config": "workspace:*",
     "@vitest/coverage-v8": "^4.0.15",
     "@types/node": "^22.15.3",
-    "@types/react": "19.2.2",
+    "@types/react": "19.2.18",
     "eslint": "^9.39.1",
     "react": "^19.2.0",
     "typescript": "5.9.2",

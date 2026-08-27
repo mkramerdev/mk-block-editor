@@ -9,10 +9,7 @@ import {
   getSubtreeBlockIds,
   getSubtreeOrderBounds,
 } from "@repo/editor-core/document";
-import {
-  resolveRestorativeDefault,
-  type BlockDefinition,
-} from "@repo/editor-core/definitions";
+import type { BlockDefinition } from "@repo/editor-core/definitions";
 import {
   applyBlockGraphOperation,
   applyBlockGraphPatch,
@@ -22,10 +19,6 @@ import {
   applyStructuralTransaction,
   assertValidCanonicalBlockFragment,
   materializeCanonicalBlockCreation,
-  planBlockBoundaryBackspace,
-  planBlockBoundaryDelete,
-  planStructuralRangeDeletion,
-  planGenericEnter,
   deleteRange as createDeleteRangeOperation,
   insertBlocks as createInsertBlocksOperation,
   moveBlocks as createMoveBlocksOperation,
@@ -65,15 +58,22 @@ import {
   resolveInlineMarkCommandAttrs,
   validateInlineMarkCommandAttrs,
 } from "@repo/editor-core/content/marks";
-import { validateBlockGraphOperationBody } from "@repo/editor-core/operations";
+import {
+  operationAnchorRequirement,
+  validateBlockGraphOperationBody,
+} from "@repo/editor-core/operations";
 import type {
   EditorBlockContentOperationBatch,
   EditorBlockGraphOperationBody,
+  EditorContentOperationReplayStep,
+  EditorOperationAnchor,
+  EditorOperationReplayBoundary,
   TransformBlocksPayload,
 } from "@repo/editor-core/operations";
 import type {
   BlockMetadataDeletion,
   BlockMetadataUpdate,
+  EditorLogicalBlockGraphOperation,
   EditorLogicalBlockMetadataOperation,
   EditorLogicalContentOperation,
   UpdateBlockMetadataOperation,
@@ -167,9 +167,11 @@ import type {
 } from "../api/contracts.ts";
 import type {
   EditorHistoryEntry,
+  EditorHistoryReplayPlan,
   EditorHistoryResult,
   EditorHistorySelection,
   EditorOperation,
+  EditorStructuralHistoryOperation,
 } from "../history.ts";
 import type {
   EditorSelection,
@@ -251,7 +253,7 @@ interface PreparedContentEditorTransaction {
   readonly origin: PreparedContentEditorTransactionOrigin;
   readonly selectionPresentation: ContentSelectionPresentation;
   readonly releaseAfterProposedStateInstalled?: boolean;
-  readonly history: "record" | "ignore";
+  readonly history: "record" | "refresh" | "ignore";
   readonly historyAction: "command" | "undo" | "redo";
   readonly editorSuggestion?: EditorOperationSuggestion | null;
   readonly provenance: EditorLocalMutationProvenance | null;
@@ -300,10 +302,19 @@ type PreparedContentEditorTransactionResult =
       readonly message: string;
     };
 
-type PreparedCanonicalHistoryOperations = Pick<
-  EditorHistoryEntry,
-  "forward" | "inverse"
->;
+interface PreparedCanonicalHistoryOperations {
+  readonly forward: EditorOperation;
+  readonly inverse: EditorOperation;
+}
+
+interface ActiveHistoryReplayTransition {
+  readonly direction: "undo" | "redo";
+  readonly entryIndex: number;
+  readonly entry: EditorHistoryEntry;
+  readonly previousCanUndo: boolean;
+  readonly previousCanRedo: boolean;
+  readonly finalized: boolean;
+}
 
 type PreparedGraphCommitReceipt =
   | {
@@ -382,6 +393,15 @@ type PreparedCanonicalCommitResult =
 
 class ActiveEditorMutationFailure extends Error {}
 
+class FatalHistoryReplayConsistencyFailure extends Error {
+  constructor(error: unknown) {
+    super(error instanceof Error ? error.message : String(error), {
+      cause: error,
+    });
+    this.name = "FatalHistoryReplayConsistencyFailure";
+  }
+}
+
 type EditorStructuralPlanResult =
   | Extract<StructuralTransactionResult, { readonly ok: false }>
   | (Extract<StructuralTransactionResult, { readonly ok: true }> & {
@@ -436,6 +456,8 @@ export class EditorImplementation {
     },
   );
   private historyReplayInProgress = false;
+  private activeHistoryReplayTransition: ActiveHistoryReplayTransition | null =
+    null;
   private activeTransaction: ActiveEditorTransaction | null = null;
   private editableDocumentLeaseActive = false;
 
@@ -513,6 +535,16 @@ export class EditorImplementation {
     return this.historyIndex < this.history.length;
   }
 
+  clearHistoryForContentReconciliation(): void {
+    if (this.history.length === 0) return;
+    const previousCanUndo = this.canUndo;
+    const previousCanRedo = this.canRedo;
+    this.history = [];
+    this.historyIndex = 0;
+    this.historyRevision += 1;
+    this.notifyCommandAvailabilityIfChanged(previousCanUndo, previousCanRedo);
+  }
+
   undo(): EditorHistoryResult {
     if (this.historyReplayInProgress) {
       return {
@@ -521,25 +553,34 @@ export class EditorImplementation {
       };
     }
     if (!this.canUndo) return { status: "history-empty" };
-    const entry = this.history[this.historyIndex - 1]!;
-    const previousCanUndo = this.canUndo;
-    const previousCanRedo = this.canRedo;
+    const entryIndex = this.historyIndex - 1;
+    const entry = this.history[entryIndex]!;
+    if (entry.state !== "applied") {
+      return {
+        status: "operation-application-failed",
+        message: "history undo entry is not applied",
+      };
+    }
+    this.activeHistoryReplayTransition = {
+      direction: "undo",
+      entryIndex,
+      entry,
+      previousCanUndo: this.canUndo,
+      previousCanRedo: this.canRedo,
+      finalized: false,
+    };
     this.historyReplayInProgress = true;
-    let result: EditorHistoryResult;
     try {
-      result = this.applyHistoryOperation(
-        entry.inverse,
+      const result = this.applyHistoryOperation(
+        entry.nextUndo,
         "undo",
         entry.selectionBefore,
       );
+      return result;
     } finally {
+      this.activeHistoryReplayTransition = null;
       this.historyReplayInProgress = false;
     }
-    if (result.status !== "applied") return result;
-    this.historyIndex -= 1;
-    this.historyRevision += 1;
-    this.notifyCommandAvailabilityIfChanged(previousCanUndo, previousCanRedo);
-    return result;
   }
 
   redo(): EditorHistoryResult {
@@ -550,25 +591,34 @@ export class EditorImplementation {
       };
     }
     if (!this.canRedo) return { status: "history-empty" };
-    const entry = this.history[this.historyIndex]!;
-    const previousCanUndo = this.canUndo;
-    const previousCanRedo = this.canRedo;
+    const entryIndex = this.historyIndex;
+    const entry = this.history[entryIndex]!;
+    if (entry.state !== "undone") {
+      return {
+        status: "operation-application-failed",
+        message: "history redo entry is not undone",
+      };
+    }
+    this.activeHistoryReplayTransition = {
+      direction: "redo",
+      entryIndex,
+      entry,
+      previousCanUndo: this.canUndo,
+      previousCanRedo: this.canRedo,
+      finalized: false,
+    };
     this.historyReplayInProgress = true;
-    let result: EditorHistoryResult;
     try {
-      result = this.applyHistoryOperation(
-        entry.forward,
+      const result = this.applyHistoryOperation(
+        entry.nextRedo,
         "redo",
         entry.selectionAfter,
       );
+      return result;
     } finally {
+      this.activeHistoryReplayTransition = null;
       this.historyReplayInProgress = false;
     }
-    if (result.status !== "applied") return result;
-    this.historyIndex += 1;
-    this.historyRevision += 1;
-    this.notifyCommandAvailabilityIfChanged(previousCanUndo, previousCanRedo);
-    return result;
   }
 
   private subscribeCommandAvailability(listener: () => void): () => void {
@@ -593,6 +643,212 @@ export class EditorImplementation {
     this.notifyCommandAvailabilityIfChanged(previousCanUndo, previousCanRedo);
   }
 
+  private resolveHistoryReplayPlan(
+    plan: EditorHistoryReplayPlan,
+  ): EditorOperation | null {
+    const resolve = this.options.resolveOperationAnchors;
+    const operations: EditorOperation[] = [];
+    const introducedBlockIds = new Set<BlockId>();
+    const replayOutputs = new Map<
+      number,
+      {
+        readonly blockId: BlockId;
+        readonly start: number;
+        readonly end: number;
+      }
+    >();
+    const priorContentOperations = new Map<
+      BlockId,
+      EditorLogicalContentOperation[]
+    >();
+    const anchorGroups = new Map<
+      BlockId,
+      {
+        readonly blockType: BlockType;
+        readonly anchors: EditorOperationAnchor[];
+      }
+    >();
+    for (const step of plan.steps) {
+      if (step.kind !== "content") continue;
+      const boundaries =
+        step.anchors.kind === "position"
+          ? [step.anchors.position]
+          : [step.anchors.start, step.anchors.end];
+      for (const boundary of boundaries) {
+        if (!("codec" in boundary)) continue;
+        const existing = anchorGroups.get(step.blockId);
+        if (existing && existing.blockType !== step.blockType) return null;
+        if (existing) {
+          existing.anchors.push(boundary);
+        } else {
+          anchorGroups.set(step.blockId, {
+            blockType: step.blockType,
+            anchors: [boundary],
+          });
+        }
+      }
+    }
+    const resolvedAnchorOffsets = new Map<EditorOperationAnchor, number>();
+    if (anchorGroups.size > 0 && !resolve) return null;
+    for (const [blockId, group] of anchorGroups) {
+      const result = resolve!({
+        blockId,
+        blockType: group.blockType,
+        anchors: group.anchors,
+      });
+      if (!result.ok || result.textOffsets.length !== group.anchors.length) {
+        return null;
+      }
+      for (const [index, anchor] of group.anchors.entries()) {
+        const textOffset = result.textOffsets[index];
+        if (
+          typeof textOffset !== "number" ||
+          !Number.isSafeInteger(textOffset) ||
+          textOffset < 0
+        )
+          return null;
+        resolvedAnchorOffsets.set(anchor, textOffset);
+      }
+    }
+    const resolveBoundary = (
+      step: EditorContentOperationReplayStep,
+      boundary: EditorOperationReplayBoundary,
+      stepIndex: number,
+    ): number | null => {
+      if (!("codec" in boundary)) {
+        if (boundary.kind === "block-start") {
+          return boundary.blockId === step.blockId &&
+            introducedBlockIds.has(step.blockId)
+            ? 0
+            : null;
+        }
+        const output = replayOutputs.get(boundary.stepIndex);
+        return boundary.stepIndex < stepIndex &&
+          output?.blockId === step.blockId &&
+          Number.isInteger(boundary.offset) &&
+          boundary.offset >= 0 &&
+          boundary.offset <= output.end - output.start
+          ? output.start + boundary.offset
+          : null;
+      }
+      const textOffset = resolvedAnchorOffsets.get(boundary);
+      return textOffset === undefined
+        ? null
+        : mapReplayInputBoundary(
+            textOffset,
+            boundary.association,
+            priorContentOperations.get(step.blockId) ?? [],
+          );
+    };
+    for (const [stepIndex, step] of plan.steps.entries()) {
+      if (step.kind === "anchor-free") {
+        operations.push(step.operation);
+        for (const blockId of replayIntroducedBlockIds(step.operation)) {
+          introducedBlockIds.add(blockId);
+        }
+        continue;
+      }
+      if (step.anchors.kind === "position") {
+        const position = resolveBoundary(
+          step,
+          step.anchors.position,
+          stepIndex,
+        );
+        if (position === null) {
+          throw new Error(
+            `Operation insertion boundary did not resolve for ${step.blockId}`,
+          );
+        }
+        if (step.operation.kind !== "insertInlineContent") return null;
+        const operation = {
+          ...step.operation,
+          position: {
+            ...step.operation.position,
+            offset: position,
+          },
+        };
+        operations.push(operation);
+        replayOutputs.set(stepIndex, {
+          blockId: step.blockId,
+          start: position,
+          end: position + richInlineContentSize(operation.content),
+        });
+        const prior = priorContentOperations.get(step.blockId) ?? [];
+        prior.push(operation);
+        priorContentOperations.set(step.blockId, prior);
+        continue;
+      }
+      const start = resolveBoundary(step, step.anchors.start, stepIndex);
+      const end = resolveBoundary(step, step.anchors.end, stepIndex);
+      if (start === null || end === null || start > end) {
+        throw new Error(
+          `Operation range boundaries did not resolve in order for ${step.blockId} (${String(start)}/${String(end)})`,
+        );
+      }
+      if (step.operation.kind === "insertInlineContent") return null;
+      const operation = {
+        ...step.operation,
+        range: {
+          from: { ...step.operation.range.from, offset: start },
+          to: { ...step.operation.range.to, offset: end },
+        },
+      };
+      operations.push(operation);
+      const outputSize = replayContentOperationOutputSize(operation);
+      if (outputSize !== null) {
+        replayOutputs.set(stepIndex, {
+          blockId: step.blockId,
+          start,
+          end: start + outputSize,
+        });
+      }
+      const prior = priorContentOperations.get(step.blockId) ?? [];
+      prior.push(operation);
+      priorContentOperations.set(step.blockId, prior);
+    }
+    const structural = operations.find(
+      (operation): operation is EditorStructuralHistoryOperation =>
+        operation.kind === "structuralTransaction",
+    );
+    if (structural) {
+      const contentOperations = operations.filter(
+        (operation): operation is EditorLogicalContentOperation =>
+          operation.kind !== "composite" &&
+          operation.kind !== "structuralTransaction" &&
+          operation.kind !== "blockGraph" &&
+          operation.kind !== "updateBlockMetadata",
+      );
+      if (operations.length === contentOperations.length + 1) {
+        return { ...structural, contentOperations };
+      }
+    }
+    const graph = operations.find(
+      (operation): operation is EditorLogicalBlockGraphOperation =>
+        operation.kind === "blockGraph",
+    );
+    if (graph) {
+      const contentOperations = operations.filter(
+        (operation): operation is EditorLogicalContentOperation =>
+          operation.kind !== "composite" &&
+          operation.kind !== "structuralTransaction" &&
+          operation.kind !== "blockGraph" &&
+          operation.kind !== "updateBlockMetadata",
+      );
+      if (operations.length === contentOperations.length + 1) {
+        return {
+          ...graph,
+          payload: {
+            ...graph.payload,
+            contentOperations: groupContentOperations(contentOperations),
+          },
+        };
+      }
+    }
+    return operations.length === 1
+      ? operations[0]!
+      : { kind: "composite", operations };
+  }
+
   private notifyCommandAvailabilityIfChanged(
     previousCanUndo: boolean,
     previousCanRedo: boolean,
@@ -608,7 +864,7 @@ export class EditorImplementation {
   }
 
   private applyHistoryOperation(
-    operation: EditorOperation,
+    replayPlan: EditorHistoryReplayPlan,
     direction: "undo" | "redo",
     selection: EditorHistorySelection,
   ): EditorHistoryResult {
@@ -618,37 +874,19 @@ export class EditorImplementation {
         message: "editor is disposed",
       };
     }
+    let releasedActiveProjection = false;
+    const restoreActiveTextProjection = this.hasActiveCanonicalTextProjection();
     try {
-      const restoreActiveTextProjection =
-        this.hasActiveCanonicalTextProjection();
-      const materializedSelection = this.materializeHistorySelectionEffect(
-        selection,
-        this,
-        operation,
-      );
-      if (
-        !materializedSelection &&
-        operation.kind !== "blockGraph" &&
-        operation.kind !== "structuralTransaction"
-      ) {
+      releasedActiveProjection =
+        this.releaseActiveTextProjectionForMultiBlockReplay(replayPlan);
+      const operation = this.resolveHistoryReplayPlan(replayPlan);
+      if (!operation) {
         return {
           status: "operation-application-failed",
-          message: `history ${direction} selection could not be resolved`,
+          message: `history ${direction} operation anchors could not be resolved`,
         };
       }
-      const replayOperation = materializedSelection
-        ? rebaseHistoryOperationFromSelection(
-            operation,
-            selection,
-            materializedSelection,
-          )
-        : operation;
-      if (!replayOperation) {
-        return {
-          status: "operation-application-failed",
-          message: `history ${direction} operation could not be rebased`,
-        };
-      }
+      const replayOperation = operation;
       if (replayOperation.kind === "structuralTransaction") {
         const contentOperations = replayOperation.contentOperations.map(
           (contentOperation): StructuralTransactionOperation => ({
@@ -699,15 +937,29 @@ export class EditorImplementation {
           []) {
           delete requestedBlocks[removedBlockId];
         }
+        const requestedNextState = {
+          ...current,
+          blocks: requestedBlocks,
+          rootBlockIds: mutation.rootBlockIds,
+          childIdsByParentId: mutation.childIdsByParentId,
+        };
+        const operationPair = createBlockGraphOperationPair({
+          previousState: current,
+          requestedNextState,
+          contentOperations: mutation.contentOperations,
+          candidateBlockIds: blockGraphPatchCandidateIds(mutation.patch),
+          targetId: `${direction}:block-graph`,
+        });
+        if (!operationPair) {
+          return {
+            status: "operation-application-failed",
+            message: `block graph ${direction} produced no reversible change`,
+          };
+        }
         const result = this.applyPreparedGraphTransaction(
           {
             reason: "runtime-mutation",
-            nextState: {
-              ...current,
-              blocks: requestedBlocks,
-              rootBlockIds: mutation.rootBlockIds,
-              childIdsByParentId: mutation.childIdsByParentId,
-            },
+            nextState: requestedNextState,
             contentOperations: mutation.contentOperations,
             candidateBlockIds: blockGraphPatchCandidateIds(mutation.patch),
             operationTargetId: `${direction}:block-graph`,
@@ -718,6 +970,11 @@ export class EditorImplementation {
           },
           {
             structuralDraftAlreadyValidated: false,
+            historyOperations: {
+              forward: operationPair.forward,
+              inverse: operationPair.inverse,
+            },
+            preparedBlockGraphOperation: operationPair.preparedOperation,
             selectionPresentation: restoreActiveTextProjection
               ? "native-before-removal"
               : "canonical-only",
@@ -731,12 +988,6 @@ export class EditorImplementation {
                 result.reason ?? `block graph ${direction} operation failed`,
             };
       }
-      if (!materializedSelection) {
-        return {
-          status: "operation-application-failed",
-          message: `history ${direction} selection could not be resolved`,
-        };
-      }
       if (replayOperation.kind === "composite") {
         return this.applyCompositeHistoryOperation(
           replayOperation,
@@ -745,12 +996,22 @@ export class EditorImplementation {
         );
       }
       if (replayOperation.kind === "updateBlockMetadata") {
+        const inverse = createInverseBlockMetadataOperation(
+          replayOperation,
+          this.manifestState.blocks,
+        );
+        if (!inverse) {
+          return {
+            status: "operation-application-failed",
+            message: `metadata ${direction} operation has no current inverse`,
+          };
+        }
         return this.executeBlockMetadataUpdateInternal(
           replayOperation,
           {},
           direction,
-          undefined,
-          materializedSelection,
+          { forward: replayOperation, inverse },
+          this.historySelectionEffect(selection),
         )
           ? { status: "applied" }
           : {
@@ -777,6 +1038,7 @@ export class EditorImplementation {
       }
       return { status: "applied" };
     } catch (error) {
+      if (error instanceof FatalHistoryReplayConsistencyFailure) throw error;
       return {
         status: "operation-application-failed",
         message:
@@ -784,6 +1046,10 @@ export class EditorImplementation {
             ? error.message
             : `editor ${direction} operation failed`,
       };
+    } finally {
+      if (releasedActiveProjection && restoreActiveTextProjection) {
+        this.presentCanonicalTextSelection();
+      }
     }
   }
 
@@ -879,7 +1145,7 @@ export class EditorImplementation {
       selectionEffect,
       origin: direction,
       selectionPresentation: "canonical-only",
-      history: "ignore",
+      history: "refresh",
       historyAction: direction,
       provenance: null,
     });
@@ -1628,7 +1894,7 @@ export class EditorImplementation {
     operation: UpdateBlockMetadataOperation,
     options: EditorBlockMetadataUpdateOptions,
     origin: "local-command" | "undo" | "redo",
-    historyOperations?: Pick<EditorHistoryEntry, "forward" | "inverse">,
+    historyOperations?: PreparedCanonicalHistoryOperations,
     selectionEffect?: EditorCanonicalSelectionEffect,
   ): boolean {
     const now = Date.now();
@@ -1923,6 +2189,7 @@ export class EditorImplementation {
     if (manifestDataMatchesCurrentState(current, data)) {
       return current;
     }
+    this.clearHistoryForContentReconciliation();
     const nextBlocks = { ...data.blocks } as Record<BlockId, VersionedBlock>;
     const nextState = this.commitInitialBootstrap(
       {
@@ -1986,7 +2253,10 @@ export class EditorImplementation {
     let appliedContent: AppliedContentCommit | null = null;
     try {
       appliedContent = input.validatedContent
-        ? this.options.contentCommit!.commitContent(input.validatedContent)
+        ? this.options.contentCommit!.commitContent(
+            input.validatedContent,
+            "none",
+          )
         : null;
       const notify = this.commitCanonicalGraphMutation(
         input.nextState,
@@ -2360,57 +2630,34 @@ export class EditorImplementation {
         | "native-final-selection";
     },
   ): EditorStructuralTransactionResult {
-    const current = this.getCommandState();
-    const planned = planStructuralRangeDeletion({
-      intent: options.intent,
-      range,
-      graphRevision: current.blockGraphVersion,
-      blocks: current.blocks,
-      rootBlockIds: current.rootBlockIds,
-      childIdsByParentId: current.childIdsByParentId,
-      blockDefinitions: this.blockDefinitions,
-      readContent: (blockId, blockType) => {
-        const block = current.blocks[blockId];
-        const content = this.readBlockContent(blockId, blockType);
-        return block && !block.tombstone && isRichTextDocument(content)
-          ? {
-              content,
-              plainText: this.readBlockPlainText(blockId, blockType),
-              version: block.contentVersion,
-            }
-          : null;
-      },
-      validateContent: (blockType, content) =>
-        this.options.validateBlockContent?.(blockType, content) ??
-        this.defaultContentValidation(blockType, content),
-      ...(options.resolveVisibleChildBlockIds
-        ? {
-            resolveVisibleChildBlockIds: options.resolveVisibleChildBlockIds,
-          }
-        : {}),
-    });
-    if (!planned.ok) {
-      return {
-        ok: false,
-        phase: "planning",
-        failure: {
-          ok: false,
-          operationIndex: null,
-          failureKind:
-            planned.reason === "stale-range"
-              ? "stale-precondition"
-              : "invalid-plan",
-          message: planned.message,
-        },
-      };
+    const first = range.blocks[0];
+    const last = range.blocks.at(-1);
+    const operations: StructuralTransactionOperation[] = [
+      createDeleteRangeOperation(range),
+    ];
+    if (
+      first?.kind === "text" &&
+      last?.kind === "text" &&
+      first.blockId !== last.blockId &&
+      first.parentId === last.parentId
+    ) {
+      operations.push(
+        createJoinTextBlocksOperation(first.blockId, last.blockId),
+      );
     }
-    const result = this.executeStructuralTransaction(planned.plan, {
+    const result = this.executeStructuralTransaction(
+      {
+        origin: `structural-range-${options.intent}`,
+        operations,
+      },
+      {
       provenance: options.provenance ?? null,
       selectionPresentation:
         options.selectionPresentation === "native-final-selection"
           ? "native-before-removal"
           : "canonical-only",
-    });
+      },
+    );
     if (
       result.ok &&
       options.selectionPresentation === "native-final-selection" &&
@@ -2439,45 +2686,15 @@ export class EditorImplementation {
         error instanceof Error ? error.message : String(error),
       );
     }
-    const active = this.requireActiveTransaction();
-    const current = active.preview
-      ? {
-          blocks: active.preview.blocks,
-          rootBlockIds: active.preview.rootBlockIds,
-          childIdsByParentId: active.preview.childIdsByParentId,
-        }
-      : active.baseState;
     const roots = new Set(fragment.rootBlockIds);
-    const incomingTypes = fragment.rootBlockIds.map((rootId) => {
-      const root = fragment.blocks.find((record) => record.id === rootId)!;
-      return root.type;
-    });
-    const restorativeDefault = restorativeDefaultReplacementAtPlacement({
-      placement,
-      incomingTypes,
-      ...current,
-      blockDefinitions: this.blockDefinitions,
-    });
-    if (restorativeDefault) {
-      this.appendActiveTransactionOperation(
-        createRemoveBlocksOperation({
-          blockIds: [restorativeDefault.block.id],
-          includeDescendants: true,
-          expectedParents: {
-            [restorativeDefault.block.id]: restorativeDefault.block.parentId,
-          },
-        }),
-      );
-    }
-    const effectivePlacement = restorativeDefault?.placement ?? placement;
     const records = fragment.blocks.map((record) =>
       roots.has(record.id)
-        ? { ...record, parentId: effectivePlacement.parentId }
+        ? { ...record, parentId: placement.parentId }
         : record,
     );
     this.appendActiveTransactionOperation(
       createInsertBlocksOperation({
-        placement: effectivePlacement,
+        placement,
         blocks: records,
       }),
     );
@@ -2564,47 +2781,6 @@ export class EditorImplementation {
           : {}),
       }),
     );
-    const reservedBlockIds = new Set(Object.keys(current.blocks) as BlockId[]);
-    const restorativeParents = new Set<BlockId>();
-    for (const deletedBlockId of deleted) {
-      const parentId = current.blocks[deletedBlockId]?.parentId;
-      if (parentId && !deleted.has(parentId)) restorativeParents.add(parentId);
-    }
-    for (const parentId of restorativeParents) {
-      const parent = current.blocks[parentId];
-      const definition = parent
-        ? this.blockDefinitions[parent.type]
-        : undefined;
-      const relationship = definition
-        ? resolveRestorativeDefault(this.blockDefinitions, definition)
-        : null;
-      const childIds = current.childIdsByParentId[parentId] ?? EMPTY_BLOCK_IDS;
-      if (
-        !relationship ||
-        childIds.length === 0 ||
-        childIds.some((childId) => !deleted.has(childId))
-      ) {
-        continue;
-      }
-      const creation = materializeCanonicalBlockCreation({
-        blockDefinitions: this.blockDefinitions,
-        type: relationship.defaultType,
-        reservedBlockIds,
-      });
-      for (const record of creation.fragment.blocks) {
-        reservedBlockIds.add(record.id);
-      }
-      const creationRoots = new Set(creation.fragment.rootBlockIds);
-      const records = creation.fragment.blocks.map((record) =>
-        creationRoots.has(record.id) ? { ...record, parentId } : record,
-      );
-      this.appendActiveTransactionOperation(
-        createInsertBlocksOperation({
-          placement: { parentId, childIndex: 0 },
-          blocks: records,
-        }),
-      );
-    }
     return { deletedBlockIds: [...deleted] };
   }
 
@@ -2732,23 +2908,6 @@ export class EditorImplementation {
         return { ok: true, changed: false };
       }
     }
-    const restorativeDefault = restorativeDefaultReplacementAtPlacement({
-      placement: destination,
-      incomingTypes: roots.map((block) => block.type),
-      ...current,
-      blockDefinitions: this.blockDefinitions,
-    });
-    if (restorativeDefault) {
-      this.appendActiveTransactionOperation(
-        createRemoveBlocksOperation({
-          blockIds: [restorativeDefault.block.id],
-          includeDescendants: true,
-          expectedParents: {
-            [restorativeDefault.block.id]: restorativeDefault.block.parentId,
-          },
-        }),
-      );
-    }
     this.appendActiveTransactionOperation(
       createMoveBlocksOperation({
         blockIds,
@@ -2756,40 +2915,9 @@ export class EditorImplementation {
           parentId: sourceParentId,
           childIndex: sourceIndex,
         },
-        destinationPlacement: restorativeDefault?.placement ?? destination,
+        destinationPlacement: destination,
       }),
     );
-    if (
-      sourceParentId !== null &&
-      sourceParentId !== destination.parentId &&
-      blockIds.length === sourceSiblings.length
-    ) {
-      const sourceParent = current.blocks[sourceParentId];
-      const sourceDefinition = sourceParent
-        ? this.blockDefinitions[sourceParent.type]
-        : undefined;
-      const sourceRestorativeDefault = sourceDefinition
-        ? resolveRestorativeDefault(this.blockDefinitions, sourceDefinition)
-        : null;
-      if (sourceRestorativeDefault) {
-        const creation = materializeCanonicalBlockCreation({
-          blockDefinitions: this.blockDefinitions,
-          type: sourceRestorativeDefault.defaultType,
-          reservedBlockIds: new Set(Object.keys(current.blocks) as BlockId[]),
-        });
-        const creationRoots = new Set(creation.fragment.rootBlockIds);
-        this.appendActiveTransactionOperation(
-          createInsertBlocksOperation({
-            placement: { parentId: sourceParentId, childIndex: 0 },
-            blocks: creation.fragment.blocks.map((record) =>
-              creationRoots.has(record.id)
-                ? { ...record, parentId: sourceParentId }
-                : record,
-            ),
-          }),
-        );
-      }
-    }
     return { ok: true, changed: false };
   }
 
@@ -2861,92 +2989,6 @@ export class EditorImplementation {
       survivorBlockId: leftBlockId,
       joinOffset,
     };
-  }
-
-  executeCoreBlockKeyBehavior(input: {
-    readonly blockId: BlockId;
-    readonly blockType: BlockType;
-    readonly key: "enter" | "backspace" | "delete";
-    readonly cursorOffset: number;
-    readonly selectionRange?: {
-      readonly from: number;
-      readonly to: number;
-    };
-  }): boolean {
-    const current = this.getCommandState();
-    const block = current.blocks[input.blockId];
-    const definition = block ? this.blockDefinitions[block.type] : undefined;
-    if (
-      !block ||
-      block.tombstone ||
-      block.type !== input.blockType ||
-      definition?.kind !== "text"
-    ) {
-      return false;
-    }
-    const content = this.readBlockContent(block.id, block.type);
-    if (!isRichTextDocument(content)) return false;
-    const selection = input.selectionRange ?? {
-      from: input.cursorOffset,
-      to: input.cursorOffset,
-    };
-    const contentSnapshot = {
-      content,
-      plainText:
-        input.key === "enter"
-          ? this.readBlockPlainText(block.id, block.type)
-          : "",
-      version: block.contentVersion,
-    };
-    const graph = {
-      blocks: current.blocks,
-      rootBlockIds: current.rootBlockIds,
-      childIdsByParentId: current.childIdsByParentId,
-      blockDefinitions: this.blockDefinitions,
-    };
-    const plannerInput = {
-      selectionBlockId: block.id,
-      selection,
-      content: contentSnapshot,
-      ...graph,
-      readContent: (blockId: BlockId, blockType: BlockType) => {
-        const target = current.blocks[blockId];
-        const targetContent = this.readBlockContent(blockId, blockType);
-        if (!target || target.tombstone || !isRichTextDocument(targetContent)) {
-          return null;
-        }
-        return {
-          content: targetContent,
-          plainText: "",
-          version: target.contentVersion,
-        };
-      },
-    };
-    const planned =
-      input.key === "enter"
-        ? planGenericEnter({
-            selectionBlockId: block.id,
-            selection,
-            content: contentSnapshot,
-            ...graph,
-          })
-        : input.key === "backspace"
-          ? planBlockBoundaryBackspace(plannerInput)
-          : planBlockBoundaryDelete(plannerInput);
-    if (!planned.ok) return "handled" in planned && planned.handled === true;
-    if ("handled" in planned && !planned.handled) return false;
-    const result = this.executeStructuralTransaction(planned.plan, {
-      selectionPresentation: "native-before-removal",
-    });
-    if (!result.ok) return false;
-    const target = result.transaction.selection;
-    if (target.kind !== "none") {
-      const block = this.getBlock(target.blockId);
-      const kind = block ? this.blockDefinitions[block.type]?.kind : undefined;
-      if (kind === "text") this.presentCanonicalTextSelection(target.blockId);
-      else if (kind === "atomic") this.presentAtomicStructuralSelection(target);
-    }
-    return true;
   }
 
   executeStructuralTransaction(
@@ -3079,7 +3121,8 @@ export class EditorImplementation {
         ? createIncrementalTextJoinHistory(plan, current, transaction)
         : null;
     const operationPair =
-      origin === "local-command" && !incrementalJoinHistory
+      (origin === "local-command" || this.historyReplayInProgress) &&
+      !incrementalJoinHistory
         ? createBlockGraphOperationPair(operationInput)
         : null;
     const update = this.classifyDocumentUpdate(current, requestedNextState, {
@@ -3302,7 +3345,7 @@ export class EditorImplementation {
       };
     }
     const historyOperations =
-      input.history === "record"
+      input.history !== "ignore"
         ? {
             forward: composePreparedContentOperations(
               prepared.blocks,
@@ -3349,6 +3392,9 @@ export class EditorImplementation {
   private commitPreparedCanonicalTransaction(
     prepared: PreparedCanonicalCommit,
   ): PreparedCanonicalCommitResult {
+    const activeReplay = this.activeHistoryReplayTransition;
+    const recordingHistoryEntry =
+      prepared.historyOperations !== null && activeReplay === null;
     const baseDocumentRevision = this.documentRevision;
     const canonicalSelectionBefore =
       this.selectionController.getCanonicalSnapshot();
@@ -3381,7 +3427,7 @@ export class EditorImplementation {
       readonly ok: true;
       readonly selection: EditorHistorySelection;
     } | null = null;
-    if (prepared.historyOperations) {
+    if (recordingHistoryEntry && prepared.historyOperations) {
       try {
         const graph =
           prepared.kind === "graph"
@@ -3390,7 +3436,7 @@ export class EditorImplementation {
                 this.blockDefinitions,
               )
             : this;
-        const result = this.prepareReplayHistorySelection(
+        const result = this.prepareDurableHistorySelection(
           readHistorySelectionBefore(),
           prepared.historyOperations.inverse,
           "replay-result",
@@ -3410,10 +3456,93 @@ export class EditorImplementation {
       try {
         appliedContent = this.options.contentCommit!.commitContent(
           prepared.validatedContent,
+          prepared.historyOperations || this.historyReplayInProgress
+            ? "inverse"
+            : "none",
         );
       } catch (error) {
         return failure("content-commit", error);
       }
+    }
+
+    let nextHistoryReplayPlan: EditorHistoryReplayPlan | null = null;
+    let replayHistoryEntry: EditorHistoryEntry | null = null;
+    try {
+      if (prepared.historyOperations) {
+        const capturedSteps =
+          appliedContent?.replayCapture.kind === "inverse"
+            ? appliedContent.replayCapture.steps
+            : [];
+        const inverseOperation =
+          activeReplay?.direction === "undo"
+            ? restoreMissingReplayContentOperations(
+                prepared.historyOperations.inverse,
+                activeReplay.entry.semanticForward,
+              )
+            : prepared.historyOperations.inverse;
+        nextHistoryReplayPlan = createHistoryReplayPlan(
+          inverseOperation,
+          capturedSteps,
+          historyReplayIntroducedBlockIds(prepared),
+        );
+        if (!nextHistoryReplayPlan) {
+          throw new Error(
+            `Required history operation anchors were not captured (${capturedSteps.length}/${historySelectionReplayContentOperations(prepared.historyOperations.inverse).length})`,
+          );
+        }
+      }
+
+      if (activeReplay) {
+        const activeEntry = this.history[activeReplay.entryIndex];
+        const expectedIndex =
+          activeReplay.direction === "undo"
+            ? activeReplay.entryIndex + 1
+            : activeReplay.entryIndex;
+        const activeStateMatches =
+          activeReplay.direction === "undo"
+            ? activeReplay.entry.state === "applied"
+            : activeReplay.entry.state === "undone";
+        if (
+          !this.historyReplayInProgress ||
+          activeReplay.finalized ||
+          prepared.historyAction !== activeReplay.direction ||
+          activeEntry !== activeReplay.entry ||
+          this.historyIndex !== expectedIndex ||
+          !activeStateMatches ||
+          !prepared.historyOperations ||
+          !nextHistoryReplayPlan
+        ) {
+          throw new Error(
+            "Active history replay transition no longer matches the canonical commit",
+          );
+        }
+        replayHistoryEntry = cloneAndFreezeHistoryEntry(
+          activeReplay.direction === "undo"
+            ? {
+                semanticForward: restoreMissingReplayContentOperations(
+                  prepared.historyOperations.inverse,
+                  activeReplay.entry.semanticForward,
+                ),
+                semanticInverse: activeReplay.entry.semanticInverse,
+                selectionBefore: activeReplay.entry.selectionBefore,
+                selectionAfter: activeReplay.entry.selectionAfter,
+                state: "undone",
+                nextRedo: nextHistoryReplayPlan,
+              }
+            : {
+                semanticForward: activeReplay.entry.semanticForward,
+                semanticInverse: prepared.historyOperations.inverse,
+                selectionBefore: activeReplay.entry.selectionBefore,
+                selectionAfter: activeReplay.entry.selectionAfter,
+                state: "applied",
+                nextUndo: nextHistoryReplayPlan,
+              },
+        );
+      } else if (this.historyReplayInProgress) {
+        throw new Error("History replay has no active transition context");
+      }
+    } catch (error) {
+      return failure("canonical-installation", error, appliedContent);
     }
 
     let resolvedSelection: ReturnType<
@@ -3440,7 +3569,7 @@ export class EditorImplementation {
       readonly ok: true;
       readonly selection: EditorHistorySelection;
     } | null = null;
-    if (prepared.historyOperations) {
+    if (recordingHistoryEntry && prepared.historyOperations) {
       try {
         const graph =
           prepared.kind === "graph"
@@ -3453,7 +3582,7 @@ export class EditorImplementation {
           resolvedSelection.effect.kind === "preserve"
             ? readHistorySelectionBefore()
             : this.captureHistorySelectionEffect(resolvedSelection.effect);
-        const result = this.prepareReplayHistorySelection(
+        const result = this.prepareDurableHistorySelection(
           selection,
           prepared.historyOperations.forward,
           "replay-result",
@@ -3499,15 +3628,32 @@ export class EditorImplementation {
           },
         );
       }
-      if (
+      if (activeReplay && replayHistoryEntry) {
+        this.history[activeReplay.entryIndex] = replayHistoryEntry;
+        this.historyIndex += activeReplay.direction === "undo" ? -1 : 1;
+        this.historyRevision += 1;
+        this.activeHistoryReplayTransition = {
+          ...activeReplay,
+          finalized: true,
+        };
+        this.notifyCommandAvailabilityIfChanged(
+          activeReplay.previousCanUndo,
+          activeReplay.previousCanRedo,
+        );
+      } else if (
+        recordingHistoryEntry &&
         prepared.historyOperations &&
         preparedHistorySelectionBefore &&
-        preparedHistorySelectionAfter
+        preparedHistorySelectionAfter &&
+        nextHistoryReplayPlan
       ) {
         this.recordHistoryEntry({
-          ...prepared.historyOperations,
+          semanticForward: prepared.historyOperations.forward,
+          semanticInverse: prepared.historyOperations.inverse,
           selectionBefore: preparedHistorySelectionBefore.selection,
           selectionAfter: preparedHistorySelectionAfter.selection,
+          state: "applied",
+          nextUndo: nextHistoryReplayPlan,
         });
       }
     } catch (error) {
@@ -3611,25 +3757,9 @@ export class EditorImplementation {
             prepared.editorSuggestion,
             prepared.nextState.blocks,
           );
-    let effect: EditorCanonicalSelectionEffect =
+    const effect: EditorCanonicalSelectionEffect =
       prepared.requestedSelectionEffect ??
         suggestedSelectionEffect ?? { kind: "preserve" };
-    if (effect.kind === "history-selection") {
-      const materialized = this.materializeHistorySelectionEffect(
-        effect.selection,
-        selectionGraphReaderForCommandState(
-          prepared.nextState,
-          this.blockDefinitions,
-        ),
-      );
-      if (!materialized) {
-        return {
-          ok: false,
-          message: `history ${prepared.origin ?? "command"} selection could not be resolved`,
-        };
-      }
-      effect = materialized;
-    }
     return { ok: true, effect };
   }
 
@@ -3650,9 +3780,16 @@ export class EditorImplementation {
     error: unknown,
   ): never {
     const message = error instanceof Error ? error.message : String(error);
-    return this.options.contentCommit!.markInconsistent(
-      `${context}: ${message}`,
-    );
+    try {
+      return this.options.contentCommit!.markInconsistent(
+        `${context}: ${message}`,
+      );
+    } catch (inconsistentError) {
+      if (this.activeHistoryReplayTransition) {
+        throw new FatalHistoryReplayConsistencyFailure(inconsistentError);
+      }
+      throw inconsistentError;
+    }
   }
 
   private createPreparedCanonicalCommitReceipt(input: {
@@ -3699,7 +3836,14 @@ export class EditorImplementation {
           kind: "block-metadata",
           operation: input.prepared.receipt.operation,
         };
-      case "prepared-graph":
+      case "prepared-graph": {
+        const metadataOperation = createCanonicalMetadataChangesFromStates(
+          input.prepared.previousState,
+          input.prepared.nextState,
+          blockGraphPatchCandidateIds(
+            input.prepared.receipt.operation.body.payload,
+          ),
+        );
         return {
           ...receiptBase,
           kind: "block-graph",
@@ -3708,10 +3852,12 @@ export class EditorImplementation {
             input.prepared.receipt.operation.body.payload,
             input.prepared.historyAction,
           ),
+          ...(metadataOperation ? { metadataOperation } : {}),
           ...(input.appliedContent
             ? { contentCommit: input.appliedContent }
             : {}),
         };
+      }
       case "structural-state": {
         const metadataOperation = createCanonicalMetadataChangesFromStates(
           input.prepared.previousState,
@@ -3821,7 +3967,7 @@ export class EditorImplementation {
     });
   }
 
-  private prepareReplayHistorySelection(
+  private prepareDurableHistorySelection(
     selection: EditorHistorySelection,
     replayOperation: EditorOperation,
     currentContentSide: "replay-input" | "replay-result",
@@ -3830,7 +3976,8 @@ export class EditorImplementation {
     | { readonly ok: true; readonly selection: EditorHistorySelection }
     | { readonly ok: false; readonly message: string } {
     if (selection.kind !== "document") return { ok: true, selection };
-    const contentOperations = historyReplayContentOperations(replayOperation);
+    const contentOperations =
+      historySelectionReplayContentOperations(replayOperation);
     if (contentOperations.length === 0) return { ok: true, selection };
     const points = sameLogicalSelectionPoint(
       selection.selection.anchor,
@@ -3845,7 +3992,7 @@ export class EditorImplementation {
         if (!point.textAnchor || contentAccessBlockIds.has(point.blockId)) {
           continue;
         }
-        const replayMapping = historyReplayPointMapping(
+        const replayMapping = historySelectionReplayPointMapping(
           point,
           contentOperations,
         );
@@ -3876,7 +4023,7 @@ export class EditorImplementation {
         | { readonly ok: true; readonly point: EditorLogicalSelectionPoint }
         | { readonly ok: false; readonly message: string } => {
         if (!point.textAnchor) return { ok: true, point };
-        const replayMapping = historyReplayPointMapping(
+        const replayMapping = historySelectionReplayPointMapping(
           point,
           contentOperations,
         );
@@ -4052,10 +4199,7 @@ export class EditorImplementation {
     previousState: EditorCommandState,
     update: EditorDocumentUpdate,
     options: {
-      readonly historyOperations?: Pick<
-        EditorHistoryEntry,
-        "forward" | "inverse"
-      >;
+      readonly historyOperations?: PreparedCanonicalHistoryOperations;
       readonly selectionEffect?: EditorCanonicalSelectionEffect;
       readonly selectionPresentation:
         | "canonical-only"
@@ -4224,10 +4368,7 @@ export class EditorImplementation {
     request: EditorOperationRequest,
     options: {
       readonly structuralDraftAlreadyValidated?: boolean;
-      readonly historyOperations?: Pick<
-        EditorHistoryEntry,
-        "forward" | "inverse"
-      >;
+      readonly historyOperations?: PreparedCanonicalHistoryOperations;
       readonly preparedBlockGraphOperation?: PreparedEditorBlockGraphOperation;
       readonly selectionEffect?: EditorCanonicalSelectionEffect;
       readonly selectionPresentation?:
@@ -4819,6 +4960,30 @@ export class EditorImplementation {
     );
   }
 
+  private releaseActiveTextProjectionForMultiBlockReplay(
+    plan: EditorHistoryReplayPlan,
+  ): boolean {
+    const contentBlockIds = new Set(
+      plan.steps.flatMap((step) =>
+        step.kind === "content" ? [step.blockId] : [],
+      ),
+    );
+    if (contentBlockIds.size < 2) return false;
+    const canonical = this.selectionController.getCanonicalSnapshot();
+    const focus =
+      canonical.kind === "document"
+        ? canonical.snapshot.documentSelection.focus
+        : null;
+    if (
+      !focus?.textAnchor ||
+      !this.options.hasActiveTextProjection?.(focus.blockId)
+    ) {
+      return false;
+    }
+    this.options.releaseNativeFocus?.(focus.blockId, "text");
+    return true;
+  }
+
   private settleCapturedGraphSelection(
     capture: GraphSelectionSettlementCapture,
     context: import("../../../selection/model/types.ts").SelectionSettlementContext,
@@ -4876,27 +5041,67 @@ export class EditorImplementation {
     },
   ): void {
     if (!effect || effect.kind === "preserve") return;
+    if (effect.kind === "history-selection") {
+      this.restoreHistorySelectionBestEffort(
+        effect.selection,
+        this,
+        presentation,
+        context,
+      );
+      return;
+    }
     try {
-      const materialized =
-        effect.kind === "history-selection"
-          ? this.materializeHistorySelectionEffect(effect.selection)
-          : effect;
-      const settlement = materialized
-        ? this.settleCanonicalSelectionEffect(materialized, context)
-        : {
-            kind: "rejected" as const,
-            retainedSelection: this.selectionController.getCanonicalSnapshot(),
-          };
+      const settlement = this.settleCanonicalSelectionEffect(effect, context);
       this.projectSettledSelection(settlement, presentation);
     } catch {
       // Selection restoration is best effort and never rolls back the graph.
     }
   }
 
+  private restoreHistorySelectionBestEffort(
+    historySelection: EditorHistorySelection,
+    graph: EditorSelectionGraphReader,
+    presentation: CanonicalSelectionPresentation,
+    context: import("../../../selection/model/types.ts").SelectionSettlementContext,
+  ): Exclude<
+    EditorCanonicalSelectionEffect,
+    { readonly kind: "preserve" } | { readonly kind: "history-selection" }
+  > {
+    let materialized: Exclude<
+      EditorCanonicalSelectionEffect,
+      { readonly kind: "preserve" } | { readonly kind: "history-selection" }
+    > = { kind: "clear" };
+    try {
+      materialized =
+        this.materializeHistorySelectionEffect(historySelection, graph) ??
+        materialized;
+      const settlement = this.settleCanonicalSelectionEffect(
+        materialized,
+        context,
+      );
+      if (settlement.kind !== "rejected" || materialized.kind === "clear") {
+        this.projectSettledSelection(settlement, presentation);
+        return materialized;
+      }
+    } catch {
+      // Fall through to deterministic clearing below.
+    }
+    materialized = { kind: "clear" };
+    try {
+      const settlement = this.settleCanonicalSelectionEffect(
+        materialized,
+        context,
+      );
+      this.projectSettledSelection(settlement, presentation);
+    } catch {
+      // Presentation is best effort; history content and state stay installed.
+    }
+    return materialized;
+  }
+
   private materializeHistorySelectionEffect(
     historySelection: EditorHistorySelection,
     graph: EditorSelectionGraphReader = this,
-    replayInputOperation?: EditorOperation,
   ): Exclude<
     EditorCanonicalSelectionEffect,
     { readonly kind: "preserve" } | { readonly kind: "history-selection" }
@@ -4933,9 +5138,14 @@ export class EditorImplementation {
       if (textDescendant) {
         const descendant = graph.getBlock(textDescendant);
         const model = graph.readBlockSelectionModel(textDescendant);
-        const releaseContentAccess = descendant
-          ? (this.options.acquireTextContentAccess?.(descendant.id) ?? null)
-          : null;
+        const acquireTextContentAccess = this.options.acquireTextContentAccess;
+        const releaseContentAccess =
+          descendant && acquireTextContentAccess
+            ? acquireTextContentAccess(descendant.id)
+            : null;
+        if (descendant && acquireTextContentAccess && !releaseContentAccess) {
+          return null;
+        }
         let created: ReturnType<
           NonNullable<
             InitializeEditorImplementationOptions["createSelectionTextAnchor"]
@@ -4970,11 +5180,18 @@ export class EditorImplementation {
       }
     }
 
+    const contentAccessAttemptedBlockIds = new Set<BlockId>();
     const contentAccessReleases = new Map<BlockId, () => void>();
-    const acquireHistoryContentAccess = (blockId: BlockId): void => {
-      if (contentAccessReleases.has(blockId)) return;
-      const release = this.options.acquireTextContentAccess?.(blockId);
-      if (release) contentAccessReleases.set(blockId, release);
+    const acquireHistoryContentAccess = (blockId: BlockId): boolean => {
+      if (contentAccessReleases.has(blockId)) return true;
+      const acquire = this.options.acquireTextContentAccess;
+      if (!acquire) return true;
+      if (contentAccessAttemptedBlockIds.has(blockId)) return false;
+      contentAccessAttemptedBlockIds.add(blockId);
+      const release = acquire(blockId);
+      if (!release) return false;
+      contentAccessReleases.set(blockId, release);
+      return true;
     };
     const materializePoint = (
       point: EditorLogicalSelectionPoint,
@@ -4991,7 +5208,7 @@ export class EditorImplementation {
           textAnchor: null,
         };
       }
-      acquireHistoryContentAccess(block.id);
+      if (!acquireHistoryContentAccess(block.id)) return null;
       if (point.textAnchor && this.options.resolveSelectionTextAnchor) {
         const resolved = resolveEditorSelectionTextAnchorPoint(
           {
@@ -5014,16 +5231,10 @@ export class EditorImplementation {
         }
       }
 
-      const replayInputOffset = replayInputOperation
-        ? historyReplayPointMapping(
-            point,
-            historyReplayContentOperations(replayInputOperation),
-          ).inputOffset
-        : point.textOffset;
       const created = this.options.createSelectionTextAnchor?.({
         blockId: block.id,
         blockType: block.type,
-        textOffset: replayInputOffset,
+        textOffset: point.textOffset,
         affinity: point.affinity,
       });
       return created?.ok
@@ -5037,22 +5248,43 @@ export class EditorImplementation {
         : null;
     };
 
+    let materialized: Exclude<
+      EditorCanonicalSelectionEffect,
+      { readonly kind: "preserve" } | { readonly kind: "history-selection" }
+    > | null = null;
+    let materializationFailed = false;
+    let materializationError: unknown;
     try {
       const anchor = materializePoint(historySelection.selection.anchor);
       const focus = materializePoint(historySelection.selection.focus);
-      return anchor && focus
-        ? {
-            kind: "selection",
-            selection: {
-              direction: historySelection.selection.direction,
-              anchor,
-              focus,
-            },
-          }
-        : null;
-    } finally {
-      for (const release of contentAccessReleases.values()) release();
+      materialized =
+        anchor && focus
+          ? {
+              kind: "selection",
+              selection: {
+                direction: historySelection.selection.direction,
+                anchor,
+                focus,
+              },
+            }
+          : null;
+    } catch (error) {
+      materializationFailed = true;
+      materializationError = error;
     }
+    let releaseFailed = false;
+    let releaseError: unknown;
+    for (const release of contentAccessReleases.values()) {
+      try {
+        release();
+      } catch (error) {
+        if (!releaseFailed) releaseError = error;
+        releaseFailed = true;
+      }
+    }
+    if (materializationFailed) throw materializationError;
+    if (releaseFailed) throw releaseError;
+    return materialized;
   }
 
   private validatePreparedContentSelection(
@@ -5251,11 +5483,13 @@ export class EditorImplementation {
                   : settled.retainedSelection,
             };
     }
-    let settled: CanonicalSelectionSettlementResult;
+    let settled: CanonicalSelectionSettlementResult | null = null;
     // A freshly created stable text anchor still has to be resolved during
     // canonical normalization. Inactive text projections need to remain
     // hydrated until that resolution has completed.
     const releases: Array<() => void> = [];
+    let settlementFailed = false;
+    let settlementError: unknown;
     try {
       if (effect.kind === "selection") {
         const blockIds = new Set<BlockId>();
@@ -5279,9 +5513,24 @@ export class EditorImplementation {
           ? { resolveTextAnchor: this.options.resolveSelectionTextAnchor }
           : null,
       );
-    } finally {
-      for (const release of releases.reverse()) release();
+    } catch (error) {
+      settlementFailed = true;
+      settlementError = error;
     }
+    let releaseFailed = false;
+    let releaseError: unknown;
+    for (const release of releases.reverse()) {
+      try {
+        release();
+      } catch (error) {
+        if (!releaseFailed) releaseError = error;
+        releaseFailed = true;
+      }
+    }
+    if (settlementFailed) throw settlementError;
+    if (releaseFailed) throw releaseError;
+    if (!settled)
+      throw new Error("Canonical selection settlement was not produced");
     if (settled.kind === "changed") {
       return settled.selection
         ? { kind: "settled", selection: settled.selection }
@@ -5882,52 +6131,6 @@ function validateEditorMetadataGraph(input: {
   return errors;
 }
 
-function restorativeDefaultReplacementAtPlacement(input: {
-  readonly placement: BlockPlacement;
-  readonly incomingTypes: readonly BlockType[];
-  readonly blocks: Readonly<Record<BlockId, VersionedBlock>>;
-  readonly childIdsByParentId: Readonly<
-    Partial<Record<BlockId, readonly BlockId[]>>
-  >;
-  readonly blockDefinitions: Readonly<Record<BlockType, BlockDefinition>>;
-}): {
-  readonly block: VersionedBlock;
-  readonly placement: BlockPlacement;
-} | null {
-  const parentId = input.placement.parentId;
-  if (parentId === null) return null;
-  const parent = input.blocks[parentId];
-  const definition = parent ? input.blockDefinitions[parent.type] : undefined;
-  const relationship = definition
-    ? resolveRestorativeDefault(input.blockDefinitions, definition)
-    : null;
-  if (
-    !parent ||
-    parent.tombstone ||
-    !relationship ||
-    input.incomingTypes.some((type) => type === relationship.defaultType)
-  ) {
-    return null;
-  }
-  const children = (input.childIdsByParentId[parentId] ?? EMPTY_BLOCK_IDS)
-    .map((blockId) => input.blocks[blockId])
-    .filter((block): block is VersionedBlock =>
-      Boolean(block && !block.tombstone),
-    );
-  const defaultBlock = children[0];
-  if (
-    children.length !== 1 ||
-    !defaultBlock ||
-    defaultBlock.type !== relationship.defaultType
-  ) {
-    return null;
-  }
-  return {
-    block: defaultBlock,
-    placement: { parentId, childIndex: 0 },
-  };
-}
-
 const EMPTY_BLOCK_IDS = Object.freeze([]) as readonly BlockId[];
 
 function blockGraphPatchCandidateIds(
@@ -6027,7 +6230,7 @@ function createIncrementalTextJoinHistory(
   plan: StructuralTransactionPlan,
   previousState: EditorCommandState,
   transaction: AppliedStructuralTransaction,
-): Pick<EditorHistoryEntry, "forward" | "inverse"> | null {
+): PreparedCanonicalHistoryOperations | null {
   if (
     !plan.operations.some(
       (operation) => operation.kind === "appendTextBlockContent",
@@ -6197,10 +6400,251 @@ function groupContentOperations(
   }));
 }
 
+function historyReplayIntroducedBlockIds(
+  prepared: PreparedCanonicalCommit,
+): ReadonlySet<BlockId> {
+  if (prepared.kind === "content-only") return new Set();
+  return new Set(
+    (Object.keys(prepared.previousState.blocks) as BlockId[]).filter(
+      (blockId) =>
+        prepared.previousState.blocks[blockId] !== undefined &&
+        prepared.nextState.blocks[blockId] === undefined,
+    ),
+  );
+}
+
+function replayIntroducedBlockIds(
+  operation: EditorOperation,
+): readonly BlockId[] {
+  if (operation.kind === "blockGraph") {
+    return operation.payload.upsertedBlocks.map((block) => block.id);
+  }
+  if (operation.kind !== "structuralTransaction") return [];
+  return operation.graphOperations.flatMap((graphOperation) => {
+    if (graphOperation.kind === "restoreBlocks") {
+      return graphOperation.blocks.map((record) => record.block.id);
+    }
+    if (graphOperation.kind === "insertBlocks") {
+      return graphOperation.blocks.map((record) => record.id);
+    }
+    return [];
+  });
+}
+
+function withBlockStartDependency(
+  step: EditorContentOperationReplayStep,
+  introducedBlockIds: ReadonlySet<BlockId>,
+): EditorContentOperationReplayStep {
+  if (step.operation.kind !== "insertInlineContent") {
+    return step;
+  }
+  if (
+    step.operation.position.offset !== 0 ||
+    !introducedBlockIds.has(step.blockId)
+  ) {
+    return step;
+  }
+  return {
+    kind: "content",
+    blockId: step.blockId,
+    blockType: step.blockType,
+    operation: step.operation,
+    anchors: {
+      kind: "position",
+      position: { kind: "block-start", blockId: step.blockId },
+    },
+  };
+}
+
+function replayContentOperationOutputSize(
+  operation: EditorLogicalContentOperation,
+): number | null {
+  if (operation.kind === "insertInlineContent") {
+    return richInlineContentSize(operation.content);
+  }
+  if (operation.kind === "replaceInlineRange") {
+    return richInlineContentSize(operation.content);
+  }
+  if (operation.kind === "setInlineEntity") {
+    return richInlineContentSize([operation.entity]);
+  }
+  return null;
+}
+
+function mapReplayInputBoundary(
+  initialOffset: number,
+  association: -1 | 1,
+  operations: readonly EditorLogicalContentOperation[],
+): number {
+  let offset = initialOffset;
+  for (const operation of operations) {
+    if (
+      operation.kind === "addInlineMark" ||
+      operation.kind === "removeInlineMark"
+    ) {
+      continue;
+    }
+    if (operation.kind === "insertInlineContent") {
+      offset = mapReplayBoundaryAcrossReplacement(
+        offset,
+        association,
+        operation.position.offset,
+        operation.position.offset,
+        richInlineContentSize(operation.content),
+      );
+      continue;
+    }
+    offset = mapReplayBoundaryAcrossReplacement(
+      offset,
+      association,
+      operation.range.from.offset,
+      operation.range.to.offset,
+      replayContentOperationOutputSize(operation) ?? 0,
+    );
+  }
+  return offset;
+}
+
+function mapReplayBoundaryAcrossReplacement(
+  offset: number,
+  association: -1 | 1,
+  from: number,
+  to: number,
+  insertedSize: number,
+): number {
+  if (offset < from) return offset;
+  if (offset > to) return offset + insertedSize - (to - from);
+  return association < 0 ? from : from + insertedSize;
+}
+
+interface ReplayOutputSpan {
+  readonly stepIndex: number;
+  readonly blockId: BlockId;
+  readonly start: number;
+  readonly end: number;
+}
+
+function createOrderedReplayDependencies(
+  steps: EditorHistoryReplayPlan["steps"],
+): EditorHistoryReplayPlan["steps"] {
+  const outputs: ReplayOutputSpan[] = [];
+  return steps.map((step, stepIndex) => {
+    if (step.kind !== "content") return step;
+    const dependencyFor = (
+      offset: number,
+      original: EditorOperationReplayBoundary,
+    ): EditorOperationReplayBoundary => {
+      for (let index = outputs.length - 1; index >= 0; index -= 1) {
+        const output = outputs[index]!;
+        if (
+          output.blockId === step.blockId &&
+          offset >= output.start &&
+          offset <= output.end
+        ) {
+          return {
+            kind: "step-output",
+            stepIndex: output.stepIndex,
+            offset: offset - output.start,
+          };
+        }
+      }
+      return original;
+    };
+    let dependentStep: EditorContentOperationReplayStep = step;
+    if (
+      step.operation.kind === "insertInlineContent" &&
+      step.anchors.kind === "position"
+    ) {
+      dependentStep = {
+        kind: "content",
+        blockId: step.blockId,
+        blockType: step.blockType,
+        operation: step.operation,
+        anchors: {
+          kind: "position",
+          position: dependencyFor(
+            step.operation.position.offset,
+            step.anchors.position,
+          ),
+        },
+      };
+    } else if (
+      step.operation.kind !== "insertInlineContent" &&
+      step.anchors.kind === "range"
+    ) {
+      dependentStep = {
+        kind: "content",
+        blockId: step.blockId,
+        blockType: step.blockType,
+        operation: step.operation,
+        anchors: {
+          kind: "range",
+          start: dependencyFor(
+            step.operation.range.from.offset,
+            step.anchors.start,
+          ),
+          end: dependencyFor(step.operation.range.to.offset, step.anchors.end),
+        },
+      };
+    }
+
+    const operation = step.operation;
+    if (operation.kind === "insertInlineContent") {
+      const position = operation.position.offset;
+      const size = richInlineContentSize(operation.content);
+      for (let index = 0; index < outputs.length; index += 1) {
+        const output = outputs[index]!;
+        if (output.blockId !== step.blockId) continue;
+        if (position < output.start) {
+          outputs[index] = {
+            ...output,
+            start: output.start + size,
+            end: output.end + size,
+          };
+        } else if (position <= output.end) {
+          outputs[index] = { ...output, end: output.end + size };
+        }
+      }
+    } else {
+      const from = operation.range.from.offset;
+      const to = operation.range.to.offset;
+      const inserted = replayContentOperationOutputSize(operation) ?? 0;
+      const delta = inserted - (to - from);
+      for (let index = outputs.length - 1; index >= 0; index -= 1) {
+        const output = outputs[index]!;
+        if (output.blockId !== step.blockId) continue;
+        if (to <= output.start) {
+          outputs[index] = {
+            ...output,
+            start: output.start + delta,
+            end: output.end + delta,
+          };
+        } else if (from < output.end && to > output.start) {
+          outputs.splice(index, 1);
+        }
+      }
+    }
+    const outputSize = replayContentOperationOutputSize(operation);
+    if (outputSize !== null) {
+      const start =
+        operation.kind === "insertInlineContent"
+          ? operation.position.offset
+          : operation.range.from.offset;
+      outputs.push({
+        stepIndex,
+        blockId: step.blockId,
+        start,
+        end: start + outputSize,
+      });
+    }
+    return dependentStep;
+  });
+}
+
 function historyOperationsFromPreparedContent(
-  operations: Pick<EditorHistoryEntry, "forward" | "inverse">,
+  operations: PreparedCanonicalHistoryOperations,
   prepared: ValidatedContentCommit,
-): Pick<EditorHistoryEntry, "forward" | "inverse"> | null {
+): PreparedCanonicalHistoryOperations | null {
   if (
     operations.forward.kind === "structuralTransaction" &&
     operations.inverse.kind === "structuralTransaction"
@@ -6241,6 +6685,193 @@ function historyOperationsFromPreparedContent(
       "inverse",
     ),
   };
+}
+
+function restoreMissingReplayContentOperations(
+  computed: EditorOperation,
+  original: EditorOperation,
+): EditorOperation {
+  if (computed.kind === "blockGraph" && original.kind === "blockGraph") {
+    const computedBatches = computed.payload.contentOperations ?? [];
+    const occupiedIds = new Set(
+      computedBatches
+        .filter((batch) => batch.operations.length > 0)
+        .map((batch) => batch.blockId),
+    );
+    const restoredIds = new Set(
+      computed.payload.upsertedBlocks.map((block) => block.id),
+    );
+    const restoredContent = (original.payload.contentOperations ?? []).filter(
+      (batch) =>
+        restoredIds.has(batch.blockId) && !occupiedIds.has(batch.blockId),
+    );
+    return restoredContent.length === 0
+      ? computed
+      : {
+          ...computed,
+          payload: {
+            ...computed.payload,
+            contentOperations: [...computedBatches, ...restoredContent],
+          },
+        };
+  }
+  if (
+    computed.kind === "structuralTransaction" &&
+    original.kind === "structuralTransaction"
+  ) {
+    const occupiedIds = new Set(
+      computed.contentOperations.map((operation) => operation.blockId),
+    );
+    const restoredIds = new Set(
+      computed.graphOperations.flatMap((operation) =>
+        operation.kind === "restoreBlocks"
+          ? operation.blocks.map((record) => record.block.id)
+          : operation.kind === "insertBlocks"
+            ? operation.blocks.map((record) => record.id)
+            : [],
+      ),
+    );
+    const restoredContent = original.contentOperations.filter(
+      (operation) =>
+        restoredIds.has(operation.blockId) &&
+        !occupiedIds.has(operation.blockId),
+    );
+    return restoredContent.length === 0
+      ? computed
+      : {
+          ...computed,
+          contentOperations: [
+            ...computed.contentOperations,
+            ...restoredContent,
+          ],
+        };
+  }
+  return computed;
+}
+
+function createHistoryReplayPlan(
+  operation: EditorOperation,
+  capturedContentSteps: readonly EditorContentOperationReplayStep[],
+  introducedBlockIds: ReadonlySet<BlockId> = new Set(),
+): EditorHistoryReplayPlan | null {
+  let capturedIndex = 0;
+  const consumedCaptured = new Set<number>();
+  const takeCaptured = (
+    contentOperation: EditorLogicalContentOperation,
+  ): EditorContentOperationReplayStep | null => {
+    while (capturedIndex < capturedContentSteps.length) {
+      const index = capturedIndex++;
+      const candidate = capturedContentSteps[index]!;
+      if (
+        !consumedCaptured.has(index) &&
+        capturedReplayStepMatchesOperation(candidate, contentOperation)
+      ) {
+        consumedCaptured.add(index);
+        return candidate;
+      }
+    }
+    for (const [index, candidate] of capturedContentSteps.entries()) {
+      if (
+        !consumedCaptured.has(index) &&
+        capturedReplayStepMatchesOperation(candidate, contentOperation)
+      ) {
+        consumedCaptured.add(index);
+        return candidate;
+      }
+    }
+    return null;
+  };
+  const collect = (
+    current: EditorOperation,
+  ): EditorHistoryReplayPlan["steps"] | null => {
+    if (current.kind === "composite") {
+      const steps: EditorHistoryReplayPlan["steps"][number][] = [];
+      for (const child of current.operations) {
+        const childSteps = collect(child);
+        if (!childSteps) return null;
+        steps.push(...childSteps);
+      }
+      return steps;
+    }
+    if (current.kind === "structuralTransaction") {
+      const contentSteps: EditorContentOperationReplayStep[] = [];
+      for (const contentOperation of current.contentOperations) {
+        const step = takeCaptured(contentOperation);
+        if (!step) return null;
+        contentSteps.push(
+          current.contentOrder === "after-graph"
+            ? withBlockStartDependency(step, introducedBlockIds)
+            : step,
+        );
+      }
+      const graphStep = {
+        kind: "anchor-free" as const,
+        operation: { ...current, contentOperations: Object.freeze([]) },
+      };
+      return current.contentOrder === "before-graph"
+        ? [...contentSteps, graphStep]
+        : [graphStep, ...contentSteps];
+    }
+    if (current.kind === "blockGraph") {
+      const contentOperations = (
+        current.payload.contentOperations ?? []
+      ).flatMap((batch) => batch.operations);
+      const contentSteps: EditorContentOperationReplayStep[] = [];
+      for (const contentOperation of contentOperations) {
+        const step = takeCaptured(contentOperation);
+        if (!step) return null;
+        contentSteps.push(withBlockStartDependency(step, introducedBlockIds));
+      }
+      const { contentOperations: _contentOperations, ...payload } =
+        current.payload;
+      void _contentOperations;
+      return [
+        {
+          kind: "anchor-free",
+          operation: { ...current, payload },
+        },
+        ...contentSteps,
+      ];
+    }
+    if (current.kind === "updateBlockMetadata") {
+      return [{ kind: "anchor-free", operation: current }];
+    }
+    const step = takeCaptured(current);
+    return step ? [step] : null;
+  };
+  const steps = collect(operation);
+  return steps ? { steps: createOrderedReplayDependencies(steps) } : null;
+}
+
+function capturedReplayStepMatchesOperation(
+  step: EditorContentOperationReplayStep,
+  operation: EditorLogicalContentOperation,
+): boolean {
+  if (
+    step.blockId !== operation.blockId ||
+    step.blockType !== operation.blockType ||
+    !jsonValuesEqual(step.operation, operation)
+  ) {
+    return false;
+  }
+  const requirement = operationAnchorRequirement(operation);
+  if (requirement.kind === "position") {
+    return (
+      step.anchors.kind === "position" &&
+      "codec" in step.anchors.position &&
+      step.anchors.position.codec.length > 0 &&
+      step.anchors.position.association === requirement.association
+    );
+  }
+  return (
+    step.anchors.kind === "range" &&
+    "codec" in step.anchors.start &&
+    "codec" in step.anchors.end &&
+    step.anchors.start.codec.length > 0 &&
+    step.anchors.end.codec.length > 0 &&
+    step.anchors.start.association === requirement.startAssociation &&
+    step.anchors.end.association === requirement.endAssociation
+  );
 }
 
 function graphOperationFromPreparedContent(
@@ -6344,127 +6975,13 @@ function selectionGraphReaderForCommandState(
   };
 }
 
-function rebaseHistoryOperationFromSelection(
-  operation: EditorOperation,
-  storedSelection: EditorHistorySelection,
-  resolvedEffect: Exclude<
-    EditorCanonicalSelectionEffect,
-    { readonly kind: "preserve" } | { readonly kind: "history-selection" }
-  >,
-): EditorOperation | null {
-  if (
-    storedSelection.kind !== "document" ||
-    resolvedEffect.kind !== "selection"
-  )
-    return operation;
-  const replayContentOperations = historyReplayContentOperations(operation);
-  const deltas = new Map<BlockId, number>();
-  for (const [stored, resolved] of [
-    [storedSelection.selection.anchor, resolvedEffect.selection.anchor],
-    [storedSelection.selection.focus, resolvedEffect.selection.focus],
-  ] as const) {
-    if (
-      !stored.textAnchor ||
-      !resolved.textAnchor ||
-      stored.blockId !== resolved.blockId
-    )
-      continue;
-    const expectedInputOffset = historyReplayPointMapping(
-      stored,
-      replayContentOperations,
-    ).inputOffset;
-    const delta = resolved.textOffset - expectedInputOffset;
-    const current = deltas.get(stored.blockId);
-    if (current !== undefined && current !== delta) {
-      deltas.delete(stored.blockId);
-      continue;
-    }
-    deltas.set(stored.blockId, delta);
-  }
-  if (deltas.size === 0 || [...deltas.values()].every((delta) => delta === 0))
-    return operation;
-  return shiftHistoryOperation(operation, deltas);
-}
-
-function shiftHistoryOperation(
-  operation: EditorOperation,
-  deltas: ReadonlyMap<BlockId, number>,
-): EditorOperation | null {
-  if (operation.kind === "composite") {
-    const operations: EditorOperation[] = [];
-    for (const child of operation.operations) {
-      const shifted = shiftHistoryOperation(child, deltas);
-      if (!shifted) return null;
-      operations.push(shifted);
-    }
-    return { kind: "composite", operations };
-  }
-  if (operation.kind === "blockGraph") {
-    const contentOperations: EditorBlockContentOperationBatch[] = [];
-    for (const batch of operation.payload.contentOperations ?? []) {
-      const shiftedOperations: EditorLogicalContentOperation[] = [];
-      for (const child of batch.operations) {
-        const shifted = shiftHistoryContentOperation(child, deltas);
-        if (!shifted) return null;
-        shiftedOperations.push(shifted);
-      }
-      contentOperations.push({
-        blockId: batch.blockId,
-        operations: shiftedOperations,
-      });
-    }
-    return {
-      ...operation,
-      payload: { ...operation.payload, contentOperations },
-    };
-  }
-  if (operation.kind === "structuralTransaction") {
-    const contentOperations: EditorLogicalContentOperation[] = [];
-    for (const child of operation.contentOperations) {
-      const shifted = shiftHistoryContentOperation(child, deltas);
-      if (!shifted) return null;
-      contentOperations.push(shifted);
-    }
-    return { ...operation, contentOperations };
-  }
-  if (operation.kind === "updateBlockMetadata") return operation;
-  return shiftHistoryContentOperation(operation, deltas);
-}
-
-function shiftHistoryContentOperation(
-  operation: EditorLogicalContentOperation,
-  deltas: ReadonlyMap<BlockId, number>,
-): EditorLogicalContentOperation | null {
-  const delta = deltas.get(operation.blockId) ?? 0;
-  if (delta === 0) return operation;
-  const shift = (offset: number): number | null => {
-    const shifted = offset + delta;
-    return Number.isSafeInteger(shifted) && shifted >= 0 ? shifted : null;
-  };
-  if (operation.kind === "insertInlineContent") {
-    const offset = shift(operation.position.offset);
-    return offset === null
-      ? null
-      : { ...operation, position: { ...operation.position, offset } };
-  }
-  const from = shift(operation.range.from.offset);
-  const to = shift(operation.range.to.offset);
-  return from === null || to === null
-    ? null
-    : {
-        ...operation,
-        range: {
-          from: { ...operation.range.from, offset: from },
-          to: { ...operation.range.to, offset: to },
-        },
-      };
-}
-
-function historyReplayContentOperations(
+function historySelectionReplayContentOperations(
   operation: EditorOperation,
 ): readonly EditorLogicalContentOperation[] {
   if (operation.kind === "composite") {
-    return operation.operations.flatMap(historyReplayContentOperations);
+    return operation.operations.flatMap(
+      historySelectionReplayContentOperations,
+    );
   }
   if (operation.kind === "blockGraph") {
     return (operation.payload.contentOperations ?? []).flatMap(
@@ -6477,7 +6994,7 @@ function historyReplayContentOperations(
   return operation.kind === "updateBlockMetadata" ? [] : [operation];
 }
 
-function historyReplayPointMapping(
+function historySelectionReplayPointMapping(
   point: EditorLogicalSelectionPoint,
   operations: readonly EditorLogicalContentOperation[],
 ): {

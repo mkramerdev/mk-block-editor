@@ -44,6 +44,9 @@ export type SemanticDomVisualRowMapping =
 /** Projection-neutral browser layout for a mounted canonical text root. */
 export interface SemanticDomTextLayout {
   readonly length: number;
+  canonicalRangeForNode(
+    node: Node,
+  ): { readonly from: number; readonly to: number } | null;
   pointFromCanonicalOffset(
     offset: number,
     affinity?: SemanticDomAffinity,
@@ -112,6 +115,25 @@ export function createSemanticDomTextLayout(
     collectSemanticVisualRows(length, caretRect);
   return {
     length,
+    canonicalRangeForNode(node) {
+      if (node !== root && !root.contains(node)) return null;
+      const contained = segments.filter(
+        (segment) => segment.node === node || node.contains(segment.node),
+      );
+      if (contained.length > 0) {
+        return {
+          from: contained[0]!.start,
+          to: contained.at(-1)!.end,
+        };
+      }
+      const endDomOffset =
+        node.nodeType === Node.TEXT_NODE
+          ? (node as Text).length
+          : node.childNodes.length;
+      const from = canonicalOffsetFromPoint(node, 0, "forward");
+      const to = canonicalOffsetFromPoint(node, endDomOffset, "backward");
+      return from === null || to === null ? null : { from, to };
+    },
     pointFromCanonicalOffset,
     canonicalOffsetFromPoint,
     hitTest(clientX: number, clientY: number): SemanticDomPointHit | null {
@@ -997,7 +1019,7 @@ function isLayoutSentinel(node: Element): boolean {
   return (
     node.tagName === "BR" &&
     (node.classList.contains("ProseMirror-trailingBreak") ||
-      node.matches('[data-editor-read-trailing-break="true"]'))
+      node.matches('[data-editor-canonical-trailing-break="true"]'))
   );
 }
 

@@ -2,7 +2,6 @@ import type { RichTextDocumentNodeJson } from "@repo/editor-core/content/rich-te
 import type { BlockType } from "@repo/editor-core/document";
 import type { BlockDefinition } from "@repo/editor-core/definitions";
 import {
-  assertValidCanonicalBlockFragment,
   createCanonicalBlockFragment,
   createCanonicalBlockRecord,
   type CanonicalBlockFragment,
@@ -18,6 +17,11 @@ import {
   resolveEditorClipboardImportLimits,
   utf8ByteLength,
 } from "./limits.ts";
+import {
+  readValidatedClipboardFragment,
+  validateClipboardFragment,
+  type ValidatedClipboardFragment,
+} from "./validated-fragment.ts";
 
 function hasInvalidClipboardText(value: string): boolean {
   for (let index = 0; index < value.length; index += 1) {
@@ -62,7 +66,18 @@ export function serializeCanonicalBlockFragmentWirePayload(
   fragment: CanonicalBlockFragment,
   options: CanonicalBlockWireCodecOptions,
 ): string {
-  assertValidCanonicalBlockFragment(fragment, options);
+  return serializeValidatedCanonicalBlockFragmentWirePayload(
+    validateClipboardFragment(fragment, options.blockDefinitions),
+    options,
+  );
+}
+
+/** Package-internal encoder for a fragment validated in this operation. */
+export function serializeValidatedCanonicalBlockFragmentWirePayload(
+  validated: ValidatedClipboardFragment,
+  options: CanonicalBlockWireCodecOptions,
+): string {
+  const fragment = readValidatedClipboardFragment(validated);
   const limits = resolveEditorClipboardImportLimits(options.limits);
   if (fragment.blocks.length > limits.maxFragmentBlocks) {
     throw new Error("Canonical fragment exceeds the clipboard block limit.");

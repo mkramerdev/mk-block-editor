@@ -11,11 +11,11 @@ import {
   normalizeRichTextDocument,
   validateRichTextInlineNodeJson,
 } from "../../content/rich-text/rich-inline-content.ts";
-import { rebaseLogicalContentOperationByExpectedContent } from "../../content/rich-text/content-rebase.ts";
 import type { BlockType } from "../../document/model/block.ts";
 import type { EditorContentOperationUpdate } from "../../kernel/content/encoded-content.ts";
 import type { BlockId } from "../../kernel/identity/ids.ts";
 import type { EditorLogicalContentOperation } from "../language/logical-operations.ts";
+import type { EditorContentOperationReplayStep } from "./operation-replay.ts";
 import {
   cloneJsonValue,
   jsonValuesEqual,
@@ -103,7 +103,7 @@ export interface AppliedContentBlock {
   readonly inverseContentOperations: readonly EditorLogicalContentOperation[];
 }
 
-export interface AppliedContentCommit {
+interface AppliedContentCommitBase {
   readonly kind: "applied-content-commit";
   readonly baseGraphRevision: number;
   readonly graphRevision: number;
@@ -111,6 +111,19 @@ export interface AppliedContentCommit {
   readonly blocks: readonly AppliedContentBlock[];
   readonly origin?: unknown;
 }
+
+export type AppliedContentCommit = AppliedContentCommitBase &
+  (
+    | { readonly replayCapture: { readonly kind: "none" } }
+    | {
+        readonly replayCapture: {
+          readonly kind: "inverse";
+          readonly steps: readonly EditorContentOperationReplayStep[];
+        };
+      }
+  );
+
+export type EditorContentReplayCapturePolicy = "none" | "inverse";
 
 export interface EditorRemoteContentUpdateProposal {
   readonly base: EditorContentBaseToken;
@@ -149,7 +162,10 @@ export interface EditorContentCommitPort {
     blockId: BlockId,
     blockType: BlockType,
   ): RichTextDocumentNodeJson | null;
-  commitContent(validated: ValidatedContentCommit): AppliedContentCommit;
+  commitContent(
+    validated: ValidatedContentCommit,
+    replayCapture: EditorContentReplayCapturePolicy,
+  ): AppliedContentCommit;
   publishContentCommit(applied: AppliedContentCommit): void;
   markInconsistent(message: string): never;
 }
@@ -410,30 +426,7 @@ export function prepareLogicalContentOperations(input: {
         };
       }
     }
-    const effectiveOperation =
-      input.origin === "undo" || input.origin === "redo"
-        ? rebaseLogicalContentOperationByExpectedContent(
-            requestedOperation.blockType,
-            content,
-            requestedOperation,
-          )
-        : requestedOperation;
-    if (!effectiveOperation) {
-      return { ok: false, message: "Logical content operation is stale" };
-    }
-    if (
-      !input.options.validatedOperations ||
-      effectiveOperation !== requestedOperation
-    ) {
-      const effectiveValidation =
-        validateLogicalContentOperation(effectiveOperation);
-      if (!effectiveValidation.valid) {
-        return {
-          ok: false,
-          message: `Effective logical content operation is invalid: ${effectiveValidation.errors.join(", ")}`,
-        };
-      }
-    }
+    const effectiveOperation = requestedOperation;
     const affectedContentFailure = validateAffectedInlineContent(
       effectiveOperation,
       input.options.normalization,

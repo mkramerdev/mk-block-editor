@@ -36,6 +36,7 @@ export interface EditorViewportRect {
 export interface EditorDocumentGeometryReader {
   getRevision(): number;
   readBlockShellRect(blockId: BlockId): EditorDocumentRect | null;
+  readViewportBlockShellRect(blockId: BlockId): EditorViewportRect | null;
   readBlockSelectionRect(
     blockId: BlockId,
     target?: string | null,
@@ -59,6 +60,10 @@ export interface EditorDocumentGeometryReader {
     blockId: BlockId,
     range: InlineMarkCommandRange,
   ): readonly EditorDocumentRect[];
+  readTextNodeRange(
+    blockId: BlockId,
+    node: Node,
+  ): InlineMarkCommandRange | null;
   readTextCanonicalLength(blockId: BlockId): number | null;
   readTextVisualRowBoundary(
     blockId: BlockId,
@@ -247,6 +252,9 @@ export function createEditorDocumentGeometryOwner(): EditorDocumentGeometryOwner
     readBlockShellRect(blockId) {
       return readDocumentElementRect(resolveBlockShell(blockId));
     },
+    readViewportBlockShellRect(blockId) {
+      return readViewportElementRect(resolveBlockShell(blockId));
+    },
     readBlockSelectionRect(blockId, target = null) {
       return readDocumentElementRect(resolveSelectionBounds(blockId, target));
     },
@@ -285,6 +293,26 @@ export function createEditorDocumentGeometryOwner(): EditorDocumentGeometryOwner
         .map((rect) => projectViewportRectToDocument(rect, projection))
         .filter((rect): rect is EditorDocumentRect => rect !== null);
       return projected.length === 0 ? emptyDocumentRects : projected;
+    },
+    readTextNodeRange(blockId, node) {
+      const textRoot = resolveTextRoot(blockId);
+      if (
+        !textRoot ||
+        !node.isConnected ||
+        (node !== textRoot && !textRoot.contains(node))
+      ) {
+        return null;
+      }
+      const layout = readTextLayout(textRoot);
+      const mapped = layout.canonicalRangeForNode(node);
+      if (!mapped) return null;
+      const range = {
+        from: Math.min(mapped.from, mapped.to),
+        to: Math.max(mapped.from, mapped.to),
+      };
+      return validRange(range, layout.length) && range.from !== range.to
+        ? Object.freeze(range)
+        : null;
     },
     readTextCanonicalLength(blockId) {
       return readCanonicalLength(resolveTextRoot(blockId));
@@ -624,7 +652,7 @@ function freezeDocumentRect(
 function freezeViewportRect(
   rect: GeometryRect | null,
 ): EditorViewportRect | null {
-  return rect ? { ...rect } : null;
+  return rect ? Object.freeze({ ...rect }) : null;
 }
 
 function readClippingAncestorRects(

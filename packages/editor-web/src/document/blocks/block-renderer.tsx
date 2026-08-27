@@ -3,33 +3,33 @@
 import { createElement, type ReactNode } from "react";
 import type { VersionedBlock } from "@repo/editor-core/document";
 import type { SelectionController } from "@repo/editor-react/selection";
-import type { Editor } from "../../runtime/document/contracts.ts";
-import type {
-  AnyEditorRuntimePort,
-  EditorRenderPort,
-} from "../../runtime/document/render-port.ts";
+import type { EditableEditorRuntimePort } from "../../runtime/document/render-port.ts";
 export type {
   BlockRendererProps,
   EditorWebBlockRenderer,
 } from "./block-renderer-contracts.ts";
 import type { EditorWebBlockRenderer } from "./block-renderer-contracts.ts";
-export { ReadTextBlockPrimitive } from "./read-text-block-primitive.tsx";
+export { InactiveTextBlockPrimitive } from "./inactive-text-block-primitive.tsx";
 export { useDirectChildBlocks } from "./use-direct-child-blocks.ts";
-export {
-  blockHeadingLevel,
-  normalizeHeadingLevel,
-} from "./block-heading-level.ts";
 export { editorSelectionBoundsDataAttributes } from "../selection/bounds/selection-bounds.ts";
 export {
   textOffsetFromPoint,
   textPointFromPoint,
   type EditorTextPointHit,
 } from "../selection/hit-testing/text-hit-testing.ts";
+export { useEditorTextGestureBoundary } from "../selection/controller/text-gesture-arbitration.tsx";
+export type {
+  EditorTextGestureBoundary,
+  EditorTextGestureBoundarySession,
+  EditorTextGesturePointer,
+  EditorTextGestureStart,
+  EditorTransferredPointerGesture,
+} from "../selection/controller/text-gesture-arbitration.tsx";
 export { fixedPopoverPositionForAnchor } from "../../overlays/fixed-popover.ts";
 export type { EditorWebContentRuntime } from "../../runtime/content/content-runtime.ts";
 interface InternalBlockRendererProps {
   readonly block: VersionedBlock;
-  readonly editor: AnyEditorRuntimePort;
+  readonly editor: EditableEditorRuntimePort;
   readonly selectionController: SelectionController;
   readonly children?: ReactNode;
 }
@@ -50,7 +50,7 @@ export function BlockRenderer({
     renderer as EditorWebBlockRenderer,
     {
       block,
-      editor: editor as EditorRenderPort<Editor>,
+      editor,
       selectionController,
     },
     children,

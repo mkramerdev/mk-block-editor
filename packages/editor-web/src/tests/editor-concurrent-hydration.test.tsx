@@ -24,7 +24,7 @@ describe("concurrent editor hydration", () => {
     const serverGate = createHydrationGate(true);
     const clientGate = createHydrationGate(false);
     const snapshot = createTestEditorSnapshot([
-      { id: blockId, type: "paragraph", text: "hydration" },
+      { id: blockId, type: "textBlock", text: "hydration" },
     ]);
     const consoleErrors: unknown[][] = [];
     const consoleError = vi
@@ -95,7 +95,7 @@ describe("concurrent editor hydration", () => {
       expect(committedEditor).toBeNull();
       expect(autofocusCount).toBe(0);
       for (const editor of distinctEditors(clientEditors)) {
-        expect(editor.getBlock(blockId)?.type).toBe("paragraph");
+        expect(editor.getBlock(blockId)?.type).toBe("textBlock");
         expect("selectionController" in editor).toBe(true);
       }
 
@@ -107,7 +107,7 @@ describe("concurrent editor hydration", () => {
 
       const committed = requireCommittedEditor(committedEditor);
       expect(committed).not.toBeNull();
-      expect(committed.getBlock(blockId)?.type).toBe("paragraph");
+      expect(committed.getBlock(blockId)?.type).toBe("textBlock");
       expect("selectionController" in committed).toBe(true);
       const activeRoot = container.querySelector<HTMLElement>(
         '.editor-web-text[contenteditable="true"][data-editor-input-owner="true"]',
@@ -150,7 +150,7 @@ describe("concurrent editor hydration", () => {
         root?.unmount();
       });
       root = null;
-      expect(committed.getBlock(blockId)?.type).toBe("paragraph");
+      expect(committed.getBlock(blockId)?.type).toBe("textBlock");
       container.remove();
     } finally {
       if (root !== null) {

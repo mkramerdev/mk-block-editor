@@ -16,47 +16,38 @@ import { serializeBlockRichTextContentHtml } from "./serialize/prosemirror-html.
 const markSchema = createBlockLocalProseMirrorSchema({
   inlineMarks: [boldMarkDefinition, linkMarkDefinition],
 });
-const renderer = () => null;
 const definitions: Readonly<Record<string, BlockDefinition>> = {
-  paragraph: {
+  textBlock: {
     kind: "text",
-    type: "paragraph",
-    renderer,
-    rootLayout: "normal",
+    type: "textBlock",
   },
   collection: {
     kind: "wrapper",
     type: "collection",
-    renderer,
-    rootLayout: "full",
     contentBoundary: true,
     content: { required: ["collectionGroup"], additional: "collectionGroup" },
   },
   collectionGroup: {
     kind: "wrapper",
     type: "collectionGroup",
-    renderer,
-    rootLayout: "normal",
     contentBoundary: true,
     content: { required: ["collectionText"], additional: "collectionText" },
   },
   collectionText: {
     kind: "text",
     type: "collectionText",
-    renderer,
-    rootLayout: "normal",
   },
 };
 const paragraphHtmlParser = createTextHtmlImportHandler({
   id: "test.paragraph",
-  blockType: "paragraph",
+  blockType: "textBlock",
   tags: ["p"],
 });
 
 describe("editor-dom clipboard adapters", () => {
-  it("parses plain text directly into canonical paragraph records", () => {
+  it("parses plain text directly into canonical text-block records", () => {
     const fragment = parsePlainTextCanonicalFragment("Alpha\nBeta", {
-      blockType: "paragraph",
+      blockType: "textBlock",
       blockDefinitions: definitions,
     });
     expect(fragment?.blocks.map((block) => block.plainText)).toEqual([
@@ -65,7 +56,7 @@ describe("editor-dom clipboard adapters", () => {
     ]);
     expect(
       parsePlainTextCanonicalFragment("", {
-        blockType: "paragraph",
+        blockType: "textBlock",
         blockDefinitions: definitions,
       }),
     ).toBeNull();
@@ -84,7 +75,7 @@ describe("editor-dom clipboard adapters", () => {
 
     expect(fragment?.blocks).toHaveLength(1);
     expect(fragment?.blocks[0]).toMatchObject({
-      type: "paragraph",
+      type: "textBlock",
       plainText: "Hello Ada",
       content: {
         type: "doc",
@@ -148,7 +139,7 @@ describe("editor-dom clipboard adapters", () => {
           },
         ],
       },
-      "paragraph",
+      "textBlock",
       { schema: markSchema },
     );
 

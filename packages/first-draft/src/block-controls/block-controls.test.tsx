@@ -6,9 +6,14 @@ import {
   render,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { DragProvider } from "@mk-drag-and-drop/react";
 import type { BlockId } from "@repo/editor-core/kernel";
+import type { FirstDraftEditor } from "../first-draft-editor-contracts.ts";
+import {
+  createFirstDraftBlockActionMenuStore,
+  FirstDraftBlockActionMenuProvider,
+} from "../block-action-menu/index.ts";
 import { FirstDraftBlockControlHoverZone } from "./block-control-hover-zone.tsx";
-import type { EditorBlockOperationResult } from "@repo/editor-web/block-operations";
 import {
   FIRST_DRAFT_BLOCK_CONTROL_OFFSETS,
   FirstDraftBlockControls,
@@ -23,100 +28,71 @@ afterEach(() => {
 });
 
 describe("FirstDraftBlockControls", () => {
-  it("defines a typed inset for every normalized heading level", () => {
-    expect(Object.keys(FIRST_DRAFT_BLOCK_CONTROL_OFFSETS.heading)).toEqual([
-      "1",
-      "2",
-      "3",
-      "4",
-      "5",
-      "6",
-    ]);
+  it("defines typed heading and toggle-heading insets for every supported level", () => {
+    const levels = ["1", "2", "3"];
+    expect(Object.keys(FIRST_DRAFT_BLOCK_CONTROL_OFFSETS.heading)).toEqual(levels);
+    expect(Object.keys(FIRST_DRAFT_BLOCK_CONTROL_OFFSETS.toggleHeading)).toEqual(
+      levels,
+    );
   });
 
-  it("renders the accessible insertion control and inert visible grip", () => {
-    const insertBlock = vi.fn(successfulInsertion);
-    const { container, getByRole } = render(
-      <FirstDraftBlockControls blockId={blockId} editor={{ insertBlock }} />,
-    );
+  it("renders accessible insertion and draggable handle buttons", () => {
+    const { container, getByRole } = renderControls();
 
     expect(getByRole("button", { name: "Add block below" })).toBeTruthy();
     const grip = container.querySelector<HTMLElement>(
       ".first-draft-block-drag-handle",
     );
-    expect(grip?.tagName).toBe("SPAN");
-    expect(grip?.getAttribute("aria-hidden")).toBe("true");
+    expect(grip?.tagName).toBe("BUTTON");
+    expect(grip?.getAttribute("aria-label")).toBe(
+      "Drag block or open block actions",
+    );
+    expect(grip?.getAttribute("aria-haspopup")).toBe("menu");
+    expect(grip?.getAttribute("aria-expanded")).toBe("false");
+    expect(grip?.hasAttribute("aria-controls")).toBe(false);
     expect(grip?.getAttribute("draggable")).toBe("false");
-    expect(grip?.hasAttribute("role")).toBe(false);
-    expect(grip?.hasAttribute("tabindex")).toBe(false);
-    expect(grip?.hasAttribute("aria-label")).toBe(false);
-    expect(grip?.hasAttribute("data-editor-drag-and-drop-handle")).toBe(false);
-    expect(
-      grip
-        ? grip.getAttributeNames().filter((name) => name.startsWith("data-"))
-        : [],
-    ).toEqual([]);
+    expect(grip?.getAttribute("tabindex")).toBe("0");
+    expect(grip?.getAttribute("data-first-draft-draggable-block-id")).toBe(
+      blockId,
+    );
   });
 
-  it("prevents mousedown focus theft and inserts exactly once on click", () => {
-    const insertBlock = vi.fn(successfulInsertion);
-    const { getByRole } = render(
-      <FirstDraftBlockControls blockId={blockId} editor={{ insertBlock }} />,
-    );
+  it("prevents the add button from stealing focus on mousedown", () => {
+    const { getByRole } = renderControls();
     const button = getByRole("button", { name: "Add block below" });
     const mouseDown = createEvent.mouseDown(button);
     fireEvent(button, mouseDown);
     expect(mouseDown.defaultPrevented).toBe(true);
 
-    fireEvent.click(button);
-    expect(insertBlock).toHaveBeenCalledOnce();
-    expect(insertBlock).toHaveBeenCalledWith({
-      blockId,
-      blockType: "paragraph",
-      selection: true,
-    });
   });
 
-  it("stops click only when insertion reports handled", () => {
-    const insertBlock = vi.fn(
-      () =>
-        ({
-          ok: false,
-          handled: false,
-          reason: "invalid-input",
-        }) satisfies EditorBlockOperationResult,
+  it("toggles the block action session on an ordinary handle click", () => {
+    const { container, menuStore } = renderControls();
+    const grip = container.querySelector<HTMLButtonElement>(
+      ".first-draft-block-drag-handle",
     );
-    const { getByRole } = render(
-      <FirstDraftBlockControls blockId={blockId} editor={{ insertBlock }} />,
-    );
-    const click = createEvent.click(
-      getByRole("button", { name: "Add block below" }),
-    );
-    fireEvent(getByRole("button", { name: "Add block below" }), click);
-    expect(click.defaultPrevented).toBe(false);
+    expect(grip).not.toBeNull();
+
+    fireEvent.click(grip!);
+    expect(menuStore.getSnapshot()).toMatchObject({ kind: "open", blockId });
+    expect(grip?.getAttribute("aria-expanded")).toBe("true");
+    expect(grip?.getAttribute("aria-controls")).toBe(menuStore.menuId);
+
+    fireEvent.click(grip!);
+    expect(menuStore.getSnapshot()).toEqual({ kind: "closed" });
   });
 
   it("exposes the typed block-start custom property", () => {
-    const insertBlock = vi.fn(successfulInsertion);
     const offset: CSSProperties["insetBlockStart"] = "0.75rem";
-    const { container } = render(
-      <FirstDraftBlockControls
-        blockId={blockId}
-        editor={{ insertBlock }}
-        blockStartOffset={offset}
-      />,
-    );
+    const { container } = renderControls(offset);
     const controls = container.querySelector<HTMLElement>(
       "[data-first-draft-block-controls='true']",
     );
     expect(controls?.style.getPropertyValue(offsetProperty)).toBe(offset);
   });
 
-  it("keeps every grip event inert", () => {
-    const insertBlock = vi.fn(successfulInsertion);
-    const { container } = render(
-      <FirstDraftBlockControls blockId={blockId} editor={{ insertBlock }} />,
-    );
+  it("lets only the drag package claim handle pointer activation", () => {
+    const { container } = renderControls();
     const grip = container.querySelector<HTMLElement>(
       ".first-draft-block-drag-handle",
     )!;
@@ -129,30 +105,27 @@ describe("FirstDraftBlockControls", () => {
     fireEvent.keyDown(grip, { key: "Enter" });
     expect(pointerDown.defaultPrevented).toBe(false);
     expect(mouseDown.defaultPrevented).toBe(false);
-    expect(insertBlock).not.toHaveBeenCalled();
   });
 });
 
-function successfulInsertion(): EditorBlockOperationResult {
-  return {
-    ok: true,
-    handled: true,
-    transaction: {
-      ok: true,
-      changed: true,
-      transaction: {
-        blocks: {},
-        rootBlockIds: [],
-        childIdsByParentId: {},
-        contentOperations: [],
-        stagedContent: {},
-        selection: { kind: "none" },
-        affectedBlockIds: [],
-        splitOutputs: {},
-      },
-      operationResult: { ok: true },
-    },
-  };
+function renderControls(
+  blockStartOffset?: CSSProperties["insetBlockStart"],
+) {
+  const menuStore = createFirstDraftBlockActionMenuStore();
+  return Object.assign(
+    render(
+      <FirstDraftBlockActionMenuProvider store={menuStore}>
+        <DragProvider>
+          <FirstDraftBlockControls
+            blockId={blockId}
+            editor={{} as FirstDraftEditor}
+            blockStartOffset={blockStartOffset}
+          />
+        </DragProvider>
+      </FirstDraftBlockActionMenuProvider>,
+    ),
+    { menuStore },
+  );
 }
 
 describe("FirstDraftBlockControlHoverZone", () => {

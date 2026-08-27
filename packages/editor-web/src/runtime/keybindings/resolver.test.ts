@@ -8,11 +8,13 @@ import type { EditorView } from "@repo/editor-dom/prosemirror";
 import { createBlockLocalProseMirrorState } from "@repo/editor-dom/block-editor";
 import type {
   EditorCommandDefinition,
+  EditorBlockCommandExecutionContext,
   EditorKeyBinding,
 } from "../definition/contracts.ts";
 import { testEditableEditorDefinition } from "../../tests/test-editor-definition.ts";
 import { normalizeKeyboardEventChord } from "./chord.ts";
 import {
+  executeStructuralTextBoundaryCommand,
   resolveBlockKeybinding,
   resolveDocumentKeybinding,
 } from "./resolver.ts";
@@ -141,7 +143,7 @@ describe("editor keybinding resolver", () => {
       {
         ...documentRuntime([command], keybindings),
         blockId,
-        blockType: "paragraph",
+        blockType: "textBlock",
         view,
       },
       "other",
@@ -172,12 +174,90 @@ describe("editor keybinding resolver", () => {
         {
           ...documentRuntime([command], keybindings),
           blockId,
-          blockType: "paragraph",
+          blockType: "textBlock",
           view: blockView(),
         },
         "other",
       ),
     ).toEqual({ kind: "unavailable", commandId: command.id });
+  });
+
+  it.each(["textBlock", "alternateTextBlock"] as const)(
+    "delivers the complete neutral structural request for opaque type %s",
+    (blockType) => {
+      const contexts: EditorBlockCommandExecutionContext[] = [];
+      const execute = vi.fn((context: EditorBlockCommandExecutionContext) => {
+        contexts.push(context);
+        return true;
+      });
+      const command: EditorCommandDefinition = {
+        id: "neutral.structural-enter",
+        scope: "block",
+        execute,
+      };
+      const runtime = documentRuntime(
+        [command],
+        [{ key: "Enter", commandId: command.id, scope: "block" }],
+        blockType,
+      );
+      const view = blockView(blockType);
+      const handled = executeStructuralTextBoundaryCommand(
+        {
+          key: "enter",
+          cursorOffset: 1,
+          selectionRange: { from: 1, to: 3 },
+          isComposing: false,
+        },
+        { ...runtime, blockId, blockType, view },
+      );
+
+      expect(handled).toBe(true);
+      const context = contexts[0];
+      expect(context?.structuralTextBoundary).toMatchObject({
+        intent: "enter",
+        focusedBlock: { id: blockId, type: blockType },
+        selection: { from: 1, to: 3 },
+        isComposing: false,
+      });
+      expect(context?.structuralTextBoundary?.graph.getRootBlockIds()).toEqual([
+        blockId,
+      ]);
+      expect(
+        context?.structuralTextBoundary?.readBlockPlainText(blockId, blockType),
+      ).toBe("text");
+      expect(
+        context?.structuralTextBoundary?.executeStructuralTransaction,
+      ).toBeTypeOf("function");
+    },
+  );
+
+  it("does not mutate when no structural command handles the request", () => {
+    const runtime = documentRuntime([], [], "alternateTextBlock");
+    const view = blockView("alternateTextBlock");
+    const roots = runtime.editor.getRootBlockIds();
+    const content = runtime.editor.readBlockPlainText(
+      blockId,
+      "alternateTextBlock",
+    );
+    expect(
+      executeStructuralTextBoundaryCommand(
+        {
+          key: "enter",
+          cursorOffset: 2,
+          isComposing: false,
+        },
+        {
+          ...runtime,
+          blockId,
+          blockType: "alternateTextBlock",
+          view,
+        },
+      ),
+    ).toBe(false);
+    expect(runtime.editor.getRootBlockIds()).toEqual(roots);
+    expect(
+      runtime.editor.readBlockPlainText(blockId, "alternateTextBlock"),
+    ).toBe(content);
   });
 });
 
@@ -199,6 +279,7 @@ function documentBehavior(execute: () => void) {
 function documentRuntime(
   commandDefinitions: readonly EditorCommandDefinition[],
   bindingDefinitions: readonly EditorKeyBinding[],
+  blockType: "textBlock" | "alternateTextBlock" = "textBlock",
 ): EditorKeybindingRuntimeContext {
   const editor = initializeTestEditableEditor({
     definition: {
@@ -207,7 +288,7 @@ function documentRuntime(
       keybindings: bindingDefinitions,
     },
     snapshot: createTestEditorSnapshot([
-      { id: blockId, type: "paragraph", text: "text" },
+      { id: blockId, type: blockType, text: "text" },
     ]),
   });
   liveEditors.push(editor);
@@ -218,11 +299,13 @@ function documentRuntime(
   };
 }
 
-function blockView(): EditorView {
+function blockView(
+  blockType: "textBlock" | "alternateTextBlock" = "textBlock",
+): EditorView {
   return {
     state: createBlockLocalProseMirrorState({
       blockId,
-      blockType: "paragraph",
+      blockType,
       doc: "text",
     }),
   } as EditorView;

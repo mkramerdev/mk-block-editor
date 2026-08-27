@@ -1,7 +1,4 @@
-import {
-  resolveRestorativeDefault,
-  type BlockDefinition,
-} from "@repo/editor-core/definitions";
+import type { BlockDefinition } from "@repo/editor-core/definitions";
 import type { BlockType, VersionedBlock } from "@repo/editor-core/document";
 import {
   findAdjacentValidInsertionPlacement,
@@ -18,7 +15,7 @@ import {
 import type { RichTextDocumentNodeJson } from "@repo/editor-core/content/rich-text";
 import type {
   EditableEditor,
-  EditorReadRuntime,
+  EditorDocumentRuntime,
   EditorTransactionSelectionEffect,
 } from "../runtime/document/contracts.ts";
 import { resolveCanonicalCreationSelection } from "./canonical-creation-selection.ts";
@@ -60,7 +57,8 @@ export interface CanonicalBlockCreationCommitInput extends CanonicalBlockCreatio
   readonly placement: "after" | "replace";
 }
 
-interface CanonicalBlockCreationAtPlacementInput extends CanonicalBlockCreationCommitBase {
+export interface CanonicalBlockCreationAtPlacementInput
+  extends CanonicalBlockCreationCommitBase {
   readonly placement: BlockPlacement;
   readonly source?: {
     readonly block: VersionedBlock;
@@ -79,7 +77,11 @@ export type CanonicalBlockCreationCommitResult =
         { readonly ok: true; readonly changed: true }
       >;
     }
-  | { readonly ok: false; readonly message: string };
+  | {
+      readonly ok: false;
+      readonly message: string;
+      readonly transactionAttempted?: boolean;
+    };
 
 /**
  * Plans and commits application-created canonical content together with any
@@ -164,7 +166,7 @@ export function commitCanonicalBlockCreation(
   });
 }
 
-function commitCanonicalBlockCreationAtPlacement(
+export function commitCanonicalBlockCreationAtPlacement(
   input: CanonicalBlockCreationAtPlacementInput,
 ): CanonicalBlockCreationCommitResult {
   const source = input.source?.block ?? null;
@@ -176,6 +178,39 @@ function commitCanonicalBlockCreationAtPlacement(
     };
   }
   const graph = readPublicEditorGraph(input.editor);
+  if (
+    !input.placement ||
+    !Number.isInteger(input.placement.childIndex) ||
+    input.placement.childIndex < 0
+  ) {
+    return { ok: false, message: "The insertion placement is invalid." };
+  }
+  if (input.placement.parentId !== null) {
+    const parent = graph.blocks[input.placement.parentId];
+    if (!parent || parent.tombstone) {
+      return { ok: false, message: "The insertion parent is unavailable." };
+    }
+    if (input.blockDefinitions[parent.type]?.kind !== "wrapper") {
+      return {
+        ok: false,
+        message: "The insertion parent does not accept child blocks.",
+      };
+    }
+  }
+  if (
+    !replacing &&
+    !structuralPlacementAcceptsBlockType({
+      ...graph,
+      blockDefinitions: input.blockDefinitions,
+      placement: input.placement,
+      proposedType: input.blockType,
+    })
+  ) {
+    return {
+      ok: false,
+      message: "The exact insertion placement does not accept this block.",
+    };
+  }
   let creation: ReturnType<typeof materializeCanonicalBlockCreation>;
   try {
     creation = materializeCanonicalBlockCreation({
@@ -216,39 +251,15 @@ function commitCanonicalBlockCreationAtPlacement(
       : null;
   const selection = resolveCreationSelection(input, creation);
   if (!selection.ok) return selection;
-  const replacingRestorativeDefault = Boolean(
-    replacing &&
-    source?.parentId &&
-    (() => {
-      const parent = graph.blocks[source.parentId!];
-      const definition = parent
-        ? input.blockDefinitions[parent.type]
-        : undefined;
-      const relationship = definition
-        ? resolveRestorativeDefault(input.blockDefinitions, definition)
-        : null;
-      const rootTypes = creation.fragment.rootBlockIds.map(
-        (rootId) =>
-          creation.fragment.blocks.find((record) => record.id === rootId)!.type,
-      );
-      return (
-        relationship?.defaultType === source.type &&
-        readDirectBlockIds(input.editor, source.parentId!).length === 1 &&
-        rootTypes.every((type) => type !== relationship.defaultType)
-      );
-    })(),
-  );
   const result = input.editor.transaction(() => {
     if (replacing && source) {
       // Keep a valid staged root while replacing the final live root.
       input.editor.insertBlocks(input.placement, creation.fragment);
-      if (!replacingRestorativeDefault) {
-        input.editor.deleteBlocks({
-          blockIds: [source.id],
-          includeDescendants: true,
-          expectedParents: { [source.id]: source.parentId },
-        });
-      }
+      input.editor.deleteBlocks({
+        blockIds: [source.id],
+        includeDescendants: true,
+        expectedParents: { [source.id]: source.parentId },
+      });
     } else {
       if (textDeletion) input.editor.deleteRange(textDeletion);
       input.editor.insertBlocks(input.placement, creation.fragment);
@@ -259,6 +270,7 @@ function commitCanonicalBlockCreationAtPlacement(
     return {
       ok: false,
       message: result.ok ? "The insertion made no change." : result.message,
+      transactionAttempted: true,
     };
   }
   return {
@@ -327,7 +339,7 @@ function textDeletionRange(
 
 export function readPublicEditorGraph(
   editor: Pick<
-    EditorReadRuntime,
+    EditorDocumentRuntime,
     "getBlock" | "getChildBlockIds" | "getRootBlockIds"
   >,
 ): {
@@ -363,7 +375,7 @@ export function readPublicEditorGraph(
 }
 
 export function readDirectBlockIds(
-  editor: Pick<EditorReadRuntime, "getChildBlockIds" | "getRootBlockIds">,
+  editor: Pick<EditorDocumentRuntime, "getChildBlockIds" | "getRootBlockIds">,
   parentId: BlockId | null,
 ): readonly BlockId[] {
   return parentId === null

@@ -10,24 +10,19 @@ const firstId = asBlockId("01890f07-1c00-7000-8000-000000000201");
 const secondId = asBlockId("01890f07-1c00-7000-8000-000000000202");
 const missingId = asBlockId("01890f07-1c00-7000-8000-000000000203");
 const tombstonedId = asBlockId("01890f07-1c00-7000-8000-000000000204");
-const renderer = () => null;
 
 const definitions: Readonly<Record<BlockType, BlockDefinition>> = {
-  paragraph: {
+  textBlock: {
     kind: "text",
-    type: "paragraph",
-    rootLayout: "normal",
-    renderer,
+    type: "textBlock",
     validateMetadata: ({ metadata }) =>
-      metadata?.required === true ? [] : ["paragraph requires required=true"],
+      metadata?.required === true ? [] : ["textBlock requires required=true"],
   },
-  callout: {
+  containerWrapper: {
     kind: "atomic",
-    type: "callout",
-    rootLayout: "normal",
-    renderer,
+    type: "containerWrapper",
     validateMetadata: ({ metadata }) =>
-      typeof metadata?.tone === "string" ? [] : ["callout requires tone"],
+      typeof metadata?.tone === "string" ? [] : ["container requires tone"],
   },
 };
 
@@ -177,7 +172,7 @@ function createBlocks(): Readonly<Record<BlockId, VersionedBlock>> {
   return {
     [firstId]: createVersionedBlockRecord({
       id: firstId,
-      type: "paragraph",
+      type: "textBlock",
       metadata: {
         required: true,
         untouched: "kept",
@@ -188,13 +183,13 @@ function createBlocks(): Readonly<Record<BlockId, VersionedBlock>> {
     }),
     [secondId]: createVersionedBlockRecord({
       id: secondId,
-      type: "callout",
+      type: "containerWrapper",
       metadata: { tone: "info" },
       version: { metadataVersion: "1", contentVersion: null },
     }),
     [tombstonedId]: createVersionedBlockRecord({
       id: tombstonedId,
-      type: "paragraph",
+      type: "textBlock",
       metadata: { required: true },
       tombstone: { deletedAt: 1, reason: "user-delete" },
       version: { metadataVersion: "1", contentVersion: null },

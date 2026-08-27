@@ -4,7 +4,7 @@ import type {
   FocusEvent as ReactFocusEvent,
   MouseEvent as ReactMouseEvent,
 } from "react";
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import type { EditableEditorRuntimePort } from "../../runtime/document/render-port.ts";
 import { isInSameEditorInteractionScope } from "../dom-markers.ts";
 import { isEditorInteractiveControlTarget } from "../interaction/interactive-targets.ts";
@@ -12,7 +12,7 @@ import { isEditorInteractiveControlTarget } from "../interaction/interactive-tar
 export interface WebFocusAdaptersOptions {
   editor: Pick<
     EditableEditorRuntimePort,
-    "blurEditor" | "ownsActiveElement" | "ownsNativeFocusTarget"
+    "blurEditor" | "resolveNativeFocusTarget"
   >;
   listElement?: HTMLElement | null;
   releaseComposition?: () => void;
@@ -28,26 +28,23 @@ export function useWebFocusAdapters({
   listElement = null,
   releaseComposition,
 }: WebFocusAdaptersOptions): WebFocusAdaptersState {
-  const releasingDocumentFocus = useRef(false);
   useEffect(() => {
     if (!listElement) return undefined;
     const doc = listElement.ownerDocument;
     const win = doc.defaultView;
-    const releaseDocumentFocus = () => {
-      if (releasingDocumentFocus.current) return;
-      releasingDocumentFocus.current = true;
-      try {
-        releaseComposition?.();
-        editor.blurEditor();
-      } finally {
-        releasingDocumentFocus.current = false;
-      }
-    };
-    const handleWindowBlur = () => releaseDocumentFocus();
+    // Window/document lifecycle loss is not an in-document focus transfer.
+    // Leave the native focus target alone so the browser can hide and later
+    // restore its caret naturally. Composition leases still need explicit
+    // cleanup because their terminal DOM event is not reliable across tab or
+    // page lifecycle boundaries.
+    const releaseLifecycleComposition = () => releaseComposition?.();
+    const handleWindowBlur = () => releaseLifecycleComposition();
     const handleVisibilityChange = () => {
-      if (doc.visibilityState === "hidden") releaseDocumentFocus();
+      if (doc.visibilityState === "hidden") releaseLifecycleComposition();
     };
-    const handlePageHide = () => releaseDocumentFocus();
+    // pagehide may precede navigation or BFCache suspension. It releases only
+    // composition resources; it must not manufacture a focus/selection clear.
+    const handlePageHide = () => releaseLifecycleComposition();
     win?.addEventListener("blur", handleWindowBlur);
     doc.addEventListener("visibilitychange", handleVisibilityChange);
     win?.addEventListener("pagehide", handlePageHide);
@@ -56,7 +53,7 @@ export function useWebFocusAdapters({
       doc.removeEventListener("visibilitychange", handleVisibilityChange);
       win?.removeEventListener("pagehide", handlePageHide);
     };
-  }, [listElement, editor, releaseComposition]);
+  }, [listElement, releaseComposition]);
 
   function handleListMouseDown(event: ReactMouseEvent<HTMLDivElement>) {
     // List whitespace has no native-focus authority. Exact text primitives and
@@ -65,9 +62,8 @@ export function useWebFocusAdapters({
   }
 
   function handleListBlur(event: ReactFocusEvent<HTMLDivElement>) {
-    if (releasingDocumentFocus.current) return;
     const nextTarget = event.relatedTarget;
-    if (editor.ownsNativeFocusTarget(nextTarget)) return;
+    if (editor.resolveNativeFocusTarget(nextTarget)) return;
     const list = event.currentTarget;
     if (nextTarget instanceof Node) {
       if (
@@ -80,7 +76,10 @@ export function useWebFocusAdapters({
       editor.blurEditor();
       return;
     }
-    if (!list.isConnected || editor.ownsActiveElement(list.ownerDocument))
+    if (
+      !list.isConnected ||
+      editor.resolveNativeFocusTarget(list.ownerDocument.activeElement)
+    )
       return;
     editor.blurEditor();
   }

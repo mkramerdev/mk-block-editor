@@ -1,7 +1,7 @@
 import { assertValidCanonicalBlockFragment } from "@repo/editor-core/editing";
 import type {
   EditableEditorDefinition,
-  Editor,
+  EditableEditor,
 } from "@repo/editor-web/document-runtime";
 import { describe, expect, it } from "vitest";
 import { firstDraftBlockDefinitions } from "../first-draft-definition.tsx";
@@ -10,6 +10,7 @@ import {
   firstDraftSlashActionCatalog,
 } from "./catalog.ts";
 import { materializeFirstDraftSlashAction } from "./materialize.ts";
+import { FIRST_DRAFT_HEADING_LEVELS } from "../heading-level.ts";
 
 const emptyDefinition = {
   blocks: firstDraftBlockDefinitions,
@@ -24,20 +25,17 @@ const emptyEditor = {
   getChildBlockIds: () => [],
   getBlock: () => null,
 } satisfies Pick<
-  Editor,
+  EditableEditor,
   "definition" | "getRootBlockIds" | "getChildBlockIds" | "getBlock"
 >;
 
 describe("First Draft slash catalog", () => {
-  it("contains all 27 user-insertable actions in stable order", () => {
+  it("contains all 21 user-insertable actions in stable order", () => {
     expect(firstDraftSlashActionCatalog.map(({ id }) => id)).toEqual([
       "paragraph",
       "heading-1",
       "heading-2",
       "heading-3",
-      "heading-4",
-      "heading-5",
-      "heading-6",
       "bullet-list",
       "numbered-list",
       "checklist",
@@ -47,12 +45,8 @@ describe("First Draft slash catalog", () => {
       "toggle-heading-1",
       "toggle-heading-2",
       "toggle-heading-3",
-      "toggle-heading-4",
-      "toggle-heading-5",
-      "toggle-heading-6",
       "toggle-list",
       "divider",
-      "bookmark",
       "columns-2",
       "columns-3",
       "columns-4",
@@ -82,7 +76,9 @@ describe("First Draft slash catalog", () => {
           blockDefinitions: firstDraftBlockDefinitions,
         }),
       ).not.toThrow();
-      expect(materialized.fragment.rootBlockIds).toHaveLength(1);
+      expect(materialized.fragment.rootBlockIds).toHaveLength(
+        candidate.kind.type === "divider" ? 2 : 1,
+      );
       expect(materialized.fragment.rootBlockIds).toContain(
         materialized.rootBlockId,
       );
@@ -106,7 +102,7 @@ describe("First Draft slash catalog", () => {
       ...emptyEditor,
       definition: { ...emptyDefinition, blocks },
     } satisfies Pick<
-      Editor,
+      EditableEditor,
       "definition" | "getRootBlockIds" | "getChildBlockIds" | "getBlock"
     >;
 
@@ -138,7 +134,7 @@ describe("First Draft slash catalog", () => {
   });
 
   it("sets all heading and nested toggle-heading levels", () => {
-    for (let level = 1; level <= 6; level += 1) {
+    for (const level of FIRST_DRAFT_HEADING_LEVELS) {
       const heading = materialize(`heading-${level}`);
       expect(
         heading.blocks.find(({ type }) => type === "heading")?.metadata,
@@ -173,7 +169,6 @@ describe("First Draft slash catalog", () => {
       "toggleListItem",
       "paragraph",
       "toggleListItemBody",
-      "placeholder",
     ]);
     for (const count of [2, 3, 4] as const) {
       const fragment = materialize(`columns-${count}`);
@@ -217,7 +212,7 @@ describe("First Draft slash catalog", () => {
   });
 
   it("preserves the creation planner's explicit selection targets", () => {
-    for (const id of ["paragraph", "heading-4"] as const) {
+    for (const id of ["paragraph", "heading-3"] as const) {
       const result = materialization(id);
       expect(recordType(result, result.selectionBlockId)).toBe(
         id === "paragraph" ? "paragraph" : "heading",
@@ -235,11 +230,32 @@ describe("First Draft slash catalog", () => {
       expect(result.selectionBlockId).not.toBe(result.rootBlockId);
     }
 
-    for (const id of ["divider", "bookmark"] as const) {
-      const result = materialization(id);
-      expect(result.selectionBlockId).toBe(result.rootBlockId);
-      expect(recordType(result, result.selectionBlockId)).toBe(id);
-    }
+    const divider = materialization("divider");
+    expect(divider.fragment.rootBlockIds).toEqual([
+      divider.rootBlockId,
+      divider.selectionBlockId,
+    ]);
+    expect(recordType(divider, divider.rootBlockId)).toBe("divider");
+    expect(recordType(divider, divider.selectionBlockId)).toBe("paragraph");
+    expect(divider.selectionBlockId).not.toBe(divider.rootBlockId);
+    expect(divider.fragment.start).toEqual({
+      kind: "block",
+      blockId: divider.rootBlockId,
+    });
+    expect(divider.fragment.end).toEqual({
+      kind: "text",
+      blockId: divider.selectionBlockId,
+    });
+    expect(
+      divider.fragment.blocks.find(
+        ({ id }) => id === divider.selectionBlockId,
+      ),
+    ).toMatchObject({
+      type: "paragraph",
+      parentId: null,
+      plainText: "",
+      content: { type: "doc" },
+    });
 
     const tabs = materialization("tabs");
     expect(recordType(tabs, tabs.selectionBlockId)).toBe("paragraph");

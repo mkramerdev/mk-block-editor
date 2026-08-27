@@ -10,20 +10,12 @@ import {
   EDITOR_REDO_COMMAND_ID,
   EDITOR_UNDO_COMMAND_ID,
 } from "@repo/editor-react/editor";
-import { beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
+import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import { createEditorContentRuntime } from "../runtime/content/content-runtime.ts";
-import type {
-  EditableEditorDefinition,
-  EditorDefinition,
-} from "../runtime/definition/contracts.ts";
+import type { EditableEditorDefinition } from "../runtime/definition/contracts.ts";
 import { EditorDocument } from "../runtime/document/editor-document-component.tsx";
-import type {
-  EditableEditor,
-  Editor,
-  ReadEditor,
-} from "../runtime/document/contracts.ts";
-import type { EditorRuntimePort } from "../runtime/document/render-port.ts";
-import { executeCoreBlockKeyBehavior } from "../runtime/document/execute-core-block-key-behavior.ts";
+import type { EditableEditor } from "../runtime/document/contracts.ts";
+import type { EditableEditorRuntimePort } from "../runtime/document/render-port.ts";
 import {
   createEditorDocumentCommandExecutionContext,
   executeRegisteredEditorDocumentCommand,
@@ -50,7 +42,7 @@ const remoteSubject = {
 };
 
 vi.mock("../document/editor/block-list", () => ({
-  BlockList: ({ editor }: { readonly editor: EditorRuntimePort }) => {
+  BlockList: ({ editor }: { readonly editor: EditableEditorRuntimePort }) => {
     useLayoutEffect(() => editor.acquireEditableDocument(), [editor]);
     renderProbe.editor = editor;
     renderProbe.selectionController = editor.selectionController;
@@ -63,7 +55,7 @@ describe("initializeTestEditableEditor", () => {
     const editor = initializeTestEditableEditor({
       definition: testEditableEditorDefinition,
       snapshot: createTestEditorSnapshot([
-        { id: "editor-api-no-runtime" as BlockId, type: "paragraph", text: "" },
+        { id: "editor-api-no-runtime" as BlockId, type: "textBlock", text: "" },
       ]),
     });
     expect("runtime" in editor).toBe(false);
@@ -96,13 +88,9 @@ describe("initializeTestEditableEditor", () => {
     expectTypeOf<
       EditableEditor["commandAvailability"]["subscribe"]
     >().toEqualTypeOf<(listener: () => void) => () => void>();
-    expectTypeOf<ReadEditor>().not.toHaveProperty("insertText");
-    expectTypeOf<ReadEditor>().not.toHaveProperty("undo");
-    expectTypeOf<ReadEditor>().not.toHaveProperty("commandAvailability");
-    expectTypeOf<ReadEditor>().not.toHaveProperty("formatSelectionInlineMark");
-    expectTypeOf<Editor>().toHaveProperty("selection");
-    expectTypeOf<Editor>().not.toHaveProperty("history");
-    expectTypeOf<Editor>().not.toHaveProperty("readInlineMarkState");
+    expectTypeOf<EditableEditor>().toHaveProperty("selection");
+    expectTypeOf<EditableEditor>().not.toHaveProperty("history");
+    expectTypeOf<EditableEditor>().not.toHaveProperty("readInlineMarkState");
   });
 
   it("returns a complete, immediately usable editor synchronously", () => {
@@ -111,7 +99,7 @@ describe("initializeTestEditableEditor", () => {
     const editor = initializeTestEditableEditor({
       definition: testEditableEditorDefinition,
       snapshot: createTestEditorSnapshot([
-        { id: blockId, type: "paragraph", text: "direct" },
+        { id: blockId, type: "textBlock", text: "direct" },
       ]),
       onChange: changes,
     });
@@ -124,8 +112,8 @@ describe("initializeTestEditableEditor", () => {
     expect(editor.canRedo).toBe(false);
     expect(editor.undo()).toEqual({ status: "history-empty" });
     expect(editor.redo()).toEqual({ status: "history-empty" });
-    expect(editor.getBlock(blockId)?.type).toBe("paragraph");
-    expect(editor.readBlockContent(blockId, "paragraph")).not.toBeNull();
+    expect(editor.getBlock(blockId)?.type).toBe("textBlock");
+    expect(editor.readBlockContent(blockId, "textBlock")).not.toBeNull();
     expect(
       implementation.updateBlockMetadata([
         { blockId, values: { "direct-field": true } },
@@ -151,7 +139,7 @@ describe("initializeTestEditableEditor", () => {
     const editor = initializeTestEditableEditor({
       definition: testEditableEditorDefinition,
       snapshot: createTestEditorSnapshot([
-        { id: blockId, type: "paragraph", text: "registered" },
+        { id: blockId, type: "textBlock", text: "registered" },
       ]),
     });
     const renderEditor = resolveEditorRuntimePort(editor);
@@ -220,14 +208,14 @@ describe("initializeTestEditableEditor", () => {
     const editor = initializeTestEditableEditor({
       definition: testEditableEditorDefinition,
       snapshot: createTestEditorSnapshot([
-        { id: blockId, type: "paragraph", text: "start" },
+        { id: blockId, type: "textBlock", text: "start" },
       ]),
     });
     const runtime = resolveEditorRuntimePort(editor);
     runtime.contentRuntime.applyExternalContentUpdate({
       blockGraphVersion: runtime.getSelectionGraphRevision(),
       blockId,
-      blockType: "paragraph",
+      blockType: "textBlock",
       update: createTestContentOperationUpdate(runtime.contentRuntime),
       readProjection: {
         type: "doc",
@@ -253,12 +241,12 @@ describe("initializeTestEditableEditor", () => {
     const editor = initializeTestEditableEditor({
       definition: testEditableEditorDefinition,
       snapshot: createTestEditorSnapshot([
-        { id: blockId, type: "paragraph", text: "abcd" },
+        { id: blockId, type: "textBlock", text: "abcd" },
       ]),
       onChange: changes,
     });
     expect(editor.insertText({ blockId, offset: 2, text: "XY" })).toBe(true);
-    expect(editor.readBlockContent(blockId, "paragraph")).toMatchObject({
+    expect(editor.readBlockContent(blockId, "textBlock")).toMatchObject({
       content: [{ content: [{ text: "abXYcd" }] }],
     });
     expect(changes).toHaveBeenCalledTimes(1);
@@ -267,17 +255,137 @@ describe("initializeTestEditableEditor", () => {
     expect(editor.deleteText({ blockId, range: { from: 1, to: 4 } })).toBe(
       true,
     );
-    expect(editor.readBlockContent(blockId, "paragraph")).toMatchObject({
+    expect(editor.readBlockContent(blockId, "textBlock")).toMatchObject({
       content: [{ content: [{ text: "acd" }] }],
     });
     expect(changes).toHaveBeenCalledTimes(4);
     editor.dispose();
   });
 
+  it("publishes replay content with the refreshed history transition installed", () => {
+    const blockId = "editor-api-history-publication-order" as BlockId;
+    const observed: Array<Record<string, unknown>> = [];
+    const editor = initializeTestEditableEditor({
+      definition: testEditableEditorDefinition,
+      snapshot: createTestEditorSnapshot([
+        { id: blockId, type: "textBlock", text: "abc" },
+      ]),
+      onChange: (change) => {
+        if (change.historyAction !== "undo" && change.historyAction !== "redo")
+          return;
+        const access = editor as unknown as {
+          readonly history: readonly { readonly state: string }[];
+          readonly historyIndex: number;
+        };
+        observed.push({
+          action: change.historyAction,
+          text: editor.readBlockPlainText(blockId, "textBlock"),
+          historyIndex: access.historyIndex,
+          state: access.history[0]?.state,
+          canUndo: editor.canUndo,
+          canRedo: editor.canRedo,
+          nested:
+            change.historyAction === "undo" ? editor.undo() : editor.redo(),
+        });
+      },
+    });
+    expect(editor.insertText({ blockId, offset: 1, text: "X" })).toBe(true);
+    expect(editor.undo()).toEqual({ status: "applied" });
+    expect(editor.redo()).toEqual({ status: "applied" });
+
+    expect(observed).toEqual([
+      {
+        action: "undo",
+        text: "abc",
+        historyIndex: 0,
+        state: "undone",
+        canUndo: false,
+        canRedo: true,
+        nested: {
+          status: "execution-unavailable",
+          reason: "history-replay-in-progress",
+        },
+      },
+      {
+        action: "redo",
+        text: "aXbc",
+        historyIndex: 1,
+        state: "applied",
+        canUndo: true,
+        canRedo: false,
+        nested: {
+          status: "execution-unavailable",
+          reason: "history-replay-in-progress",
+        },
+      },
+    ]);
+    editor.dispose();
+  });
+
+  it("uses one released history content lease for all boundaries in a block", () => {
+    const blockId = "editor-api-history-anchor-batch" as BlockId;
+    const editor = initializeTestEditableEditor({
+      definition: testEditableEditorDefinition,
+      snapshot: createTestEditorSnapshot([
+        { id: blockId, type: "textBlock", text: "abcd" },
+      ]),
+    });
+    const runtime = resolveEditorRuntimePort(editor).contentRuntime;
+    const acquire = runtime.acquireBlockContent.bind(runtime);
+    const events: string[] = [];
+    const acquireSpy = vi
+      .spyOn(runtime, "acquireBlockContent")
+      .mockImplementation((requestedBlockId, blockType, reason) => {
+        const lease = acquire(requestedBlockId, blockType, reason);
+        if (reason !== "history") return lease;
+        events.push(`acquire:${requestedBlockId}`);
+        const release = lease.release.bind(lease);
+        lease.release = () => {
+          events.push(`release:${requestedBlockId}`);
+          release();
+        };
+        return lease;
+      });
+
+    expect(editor.insertText({ blockId, offset: 2, text: "XY" })).toBe(true);
+    events.length = 0;
+    acquireSpy.mockClear();
+    expect(editor.undo()).toEqual({ status: "applied" });
+    expect(
+      acquireSpy.mock.calls.filter((call) => call[2] === "history"),
+    ).toHaveLength(1);
+    expect(events).toEqual([`acquire:${blockId}`, `release:${blockId}`]);
+
+    events.length = 0;
+    acquireSpy.mockClear();
+    expect(editor.redo()).toEqual({ status: "applied" });
+    expect(
+      acquireSpy.mock.calls.filter((call) => call[2] === "history"),
+    ).toHaveLength(1);
+    expect(events).toEqual([`acquire:${blockId}`, `release:${blockId}`]);
+
+    expect(editor.insertText({ blockId, offset: 0, text: "Z" })).toBe(true);
+    const beforeFailedUndo = editor.readBlockPlainText(blockId, "textBlock");
+    vi.spyOn(runtime, "resolveOperationAnchorInContext").mockReturnValueOnce({
+      ok: false,
+      reason: "invalid",
+    });
+    events.length = 0;
+    acquireSpy.mockClear();
+    expect(editor.undo()).toMatchObject({
+      status: "operation-application-failed",
+    });
+    expect(editor.readBlockPlainText(blockId, "textBlock")).toBe(
+      beforeFailedUndo,
+    );
+    expect(events).toEqual([`acquire:${blockId}`, `release:${blockId}`]);
+    editor.dispose();
+  });
+
   it("routes public semantic mutations through the configured content runtime", () => {
     const blockId = "editor-api-configured-content-runtime" as BlockId;
     const phases: string[] = [];
-    const definition: EditorDefinition = {
+    const definition: EditableEditorDefinition = {
       ...testEditableEditorDefinition,
       content: {
         createRuntime(source) {
@@ -288,9 +396,9 @@ describe("initializeTestEditableEditor", () => {
               phases.push("validate");
               return runtime.validateContentCommit(input);
             },
-            commitContent(validated) {
+            commitContent(validated, replayCapture) {
               phases.push("commit");
-              return runtime.commitContent(validated);
+              return runtime.commitContent(validated, replayCapture);
             },
             publishContentCommit(applied) {
               phases.push("publish");
@@ -303,13 +411,13 @@ describe("initializeTestEditableEditor", () => {
     const editor = initializeTestEditableEditor({
       definition,
       snapshot: createTestEditorSnapshot([
-        { id: blockId, type: "paragraph", text: "A" },
+        { id: blockId, type: "textBlock", text: "A" },
       ]),
     });
 
     expect(editor.insertText({ blockId, offset: 1, text: "B" })).toBe(true);
     expect(phases).toEqual(["validate", "commit", "publish"]);
-    expect(editor.readBlockContent(blockId, "paragraph")).toMatchObject({
+    expect(editor.readBlockContent(blockId, "textBlock")).toMatchObject({
       content: [{ content: [{ type: "text", text: "AB" }] }],
     });
     editor.dispose();
@@ -317,7 +425,7 @@ describe("initializeTestEditableEditor", () => {
 
   it("isolates configured runtime rejection without history or publication", () => {
     const blockId = "editor-api-rejected-content-runtime" as BlockId;
-    const definition: EditorDefinition = {
+    const definition: EditableEditorDefinition = {
       ...testEditableEditorDefinition,
       content: {
         createRuntime(source) {
@@ -335,7 +443,7 @@ describe("initializeTestEditableEditor", () => {
     const editor = initializeTestEditableEditor({
       definition,
       snapshot: createTestEditorSnapshot([
-        { id: blockId, type: "paragraph", text: "A" },
+        { id: blockId, type: "textBlock", text: "A" },
       ]),
       onChange: changes,
     });
@@ -343,7 +451,7 @@ describe("initializeTestEditableEditor", () => {
     expect(editor.insertText({ blockId, offset: 1, text: "B" })).toBe(false);
     expect(editor.canUndo).toBe(false);
     expect(changes).not.toHaveBeenCalled();
-    expect(editor.readBlockContent(blockId, "paragraph")).toMatchObject({
+    expect(editor.readBlockContent(blockId, "textBlock")).toMatchObject({
       content: [{ content: [{ type: "text", text: "A" }] }],
     });
     editor.dispose();
@@ -355,7 +463,7 @@ describe("initializeTestEditableEditor", () => {
     const editor = initializeTestEditableEditor({
       definition: testEditableEditorDefinition,
       snapshot: createTestEditorSnapshot([
-        { id: blockId, type: "paragraph", text: "text" },
+        { id: blockId, type: "textBlock", text: "text" },
       ]),
       onChange: changes,
     });
@@ -385,7 +493,7 @@ describe("initializeTestEditableEditor", () => {
     const editor = initializeTestEditableEditor({
       definition: testEditableEditorDefinition,
       snapshot: createTestEditorSnapshot([
-        { id: blockId, type: "paragraph", text: "format" },
+        { id: blockId, type: "textBlock", text: "format" },
       ]),
       onChange: changes,
     });
@@ -411,18 +519,50 @@ describe("initializeTestEditableEditor", () => {
     const secondId = "editor-api-selection-format-second" as BlockId;
     const unrelatedBlocks = Array.from({ length: 100 }, (_, index) => ({
       id: `editor-api-selection-format-unrelated-${index}` as BlockId,
-      type: "paragraph",
+      type: "textBlock",
       text: `unrelated ${index}`,
     }));
     const changes = vi.fn();
     const projectionReads = new Map<BlockId, number>();
-    const definition: EditorDefinition = {
+    const historyLeaseEvents: string[] = [];
+    const operationAnchorLeases: Array<{
+      readonly blockId: BlockId;
+      readonly lease: object;
+    }> = [];
+    let liveHistoryLeases = 0;
+    let maximumLiveHistoryLeases = 0;
+    const definition: EditableEditorDefinition = {
       ...testEditableEditorDefinition,
       content: {
         createRuntime(source) {
           const runtime = createEditorContentRuntime(source);
           return {
             ...runtime,
+            acquireBlockContent(blockId, blockType, reason) {
+              const lease = runtime.acquireBlockContent(
+                blockId,
+                blockType,
+                reason,
+              );
+              if (reason !== "history") return lease;
+              historyLeaseEvents.push(`acquire:${blockId}`);
+              liveHistoryLeases += 1;
+              maximumLiveHistoryLeases = Math.max(
+                maximumLiveHistoryLeases,
+                liveHistoryLeases,
+              );
+              const release = lease.release.bind(lease);
+              lease.release = () => {
+                historyLeaseEvents.push(`release:${blockId}`);
+                liveHistoryLeases -= 1;
+                release();
+              };
+              return lease;
+            },
+            resolveOperationAnchorInContext(lease, anchor) {
+              operationAnchorLeases.push({ blockId: lease.blockId, lease });
+              return runtime.resolveOperationAnchorInContext(lease, anchor);
+            },
             readBlockProjection(blockId, blockType) {
               projectionReads.set(
                 blockId,
@@ -437,8 +577,8 @@ describe("initializeTestEditableEditor", () => {
     const editor = initializeTestEditableEditor({
       definition,
       snapshot: createTestEditorSnapshot([
-        { id: firstId, type: "paragraph", text: "first" },
-        { id: secondId, type: "heading", text: "second" },
+        { id: firstId, type: "textBlock", text: "first" },
+        { id: secondId, type: "alternateTextBlock", text: "second" },
         ...unrelatedBlocks,
       ]),
       onChange: changes,
@@ -481,7 +621,7 @@ describe("initializeTestEditableEditor", () => {
     });
     expect(result).toMatchObject({ ok: true, changed: true });
     expect(changes).toHaveBeenCalledTimes(1);
-    expect(editor.readBlockContent(firstId, "paragraph")).toMatchObject({
+    expect(editor.readBlockContent(firstId, "textBlock")).toMatchObject({
       content: [
         {
           content: [
@@ -491,7 +631,7 @@ describe("initializeTestEditableEditor", () => {
         },
       ],
     });
-    expect(editor.readBlockContent(secondId, "heading")).toMatchObject({
+    expect(editor.readBlockContent(secondId, "alternateTextBlock")).toMatchObject({
       content: [
         {
           content: [
@@ -502,15 +642,35 @@ describe("initializeTestEditableEditor", () => {
       ],
     });
     for (const [index, block] of unrelatedBlocks.entries()) {
-      expect(editor.readBlockContent(block.id, "paragraph")).toMatchObject({
+      expect(editor.readBlockContent(block.id, "textBlock")).toMatchObject({
         content: [{ content: [{ text: `unrelated ${index}` }] }],
       });
     }
+    historyLeaseEvents.length = 0;
+    operationAnchorLeases.length = 0;
+    maximumLiveHistoryLeases = 0;
     expect(editor.undo()).toEqual({ status: "applied" });
-    expect(editor.readBlockContent(firstId, "paragraph")).toMatchObject({
+    expect(historyLeaseEvents).toEqual([
+      `acquire:${secondId}`,
+      `release:${secondId}`,
+      `acquire:${firstId}`,
+      `release:${firstId}`,
+    ]);
+    expect(maximumLiveHistoryLeases).toBe(1);
+    expect(operationAnchorLeases).toHaveLength(4);
+    expect(operationAnchorLeases[0]?.lease).toBe(
+      operationAnchorLeases[1]?.lease,
+    );
+    expect(operationAnchorLeases[2]?.lease).toBe(
+      operationAnchorLeases[3]?.lease,
+    );
+    expect(operationAnchorLeases[0]?.lease).not.toBe(
+      operationAnchorLeases[2]?.lease,
+    );
+    expect(editor.readBlockContent(firstId, "textBlock")).toMatchObject({
       content: [{ content: [{ text: "first" }] }],
     });
-    expect(editor.readBlockContent(secondId, "heading")).toMatchObject({
+    expect(editor.readBlockContent(secondId, "alternateTextBlock")).toMatchObject({
       content: [{ content: [{ text: "second" }] }],
     });
     expect(editor.redo()).toEqual({ status: "applied" });
@@ -522,7 +682,7 @@ describe("initializeTestEditableEditor", () => {
     const editor = initializeTestEditableEditor({
       definition: testEditableEditorDefinition,
       snapshot: createTestEditorSnapshot([
-        { id: blockId, type: "paragraph", text: "abcde" },
+        { id: blockId, type: "textBlock", text: "abcde" },
       ]),
     });
     commitTestTextSelection(
@@ -545,7 +705,7 @@ describe("initializeTestEditableEditor", () => {
         action: "add",
       }),
     ).toMatchObject({ ok: true, changed: true });
-    expect(editor.readBlockContent(blockId, "paragraph")).toMatchObject({
+    expect(editor.readBlockContent(blockId, "textBlock")).toMatchObject({
       content: [
         {
           content: [
@@ -564,7 +724,7 @@ describe("initializeTestEditableEditor", () => {
     const editor = initializeTestEditableEditor({
       definition: testEditableEditorDefinition,
       snapshot: createTestEditorSnapshot([
-        { id: blockId, type: "paragraph", text: "abcde" },
+        { id: blockId, type: "textBlock", text: "abcde" },
       ]),
     });
     commitTestTextSelection(
@@ -596,8 +756,8 @@ describe("initializeTestEditableEditor", () => {
     const editor = initializeTestEditableEditor({
       definition: testEditableEditorDefinition,
       snapshot: createTestEditorSnapshot([
-        { id: firstId, type: "paragraph", text: "first" },
-        { id: secondId, type: "paragraph", text: "second" },
+        { id: firstId, type: "textBlock", text: "first" },
+        { id: secondId, type: "textBlock", text: "second" },
       ]),
     });
     expect(
@@ -652,8 +812,8 @@ describe("initializeTestEditableEditor", () => {
     const editor = initializeTestEditableEditor({
       definition: testEditableEditorDefinition,
       snapshot: createTestEditorSnapshot([
-        { id: firstId, type: "paragraph", text: "first" },
-        { id: secondId, type: "paragraph", text: "second" },
+        { id: firstId, type: "textBlock", text: "first" },
+        { id: secondId, type: "textBlock", text: "second" },
       ]),
     });
     commitTestTextSelection(
@@ -681,7 +841,7 @@ describe("initializeTestEditableEditor", () => {
         action: "add",
       }),
     ).toMatchObject({ ok: false });
-    expect(editor.readBlockContent(firstId, "paragraph")).toMatchObject({
+    expect(editor.readBlockContent(firstId, "textBlock")).toMatchObject({
       content: [{ content: [{ text: "first" }] }],
     });
     editor.dispose();
@@ -692,7 +852,7 @@ describe("initializeTestEditableEditor", () => {
     const editor = initializeTestEditableEditor({
       definition: testEditableEditorDefinition,
       snapshot: createTestEditorSnapshot([
-        { id: blockId, type: "paragraph", text: "linked" },
+        { id: blockId, type: "textBlock", text: "linked" },
       ]),
     });
 
@@ -729,7 +889,7 @@ describe("initializeTestEditableEditor", () => {
   it("rejects invalid mark metadata and validates configured inline atoms", () => {
     const blockId = "editor-api-mark-atom-validation" as BlockId;
     const changes = vi.fn();
-    const definition: EditorDefinition = {
+    const definition: EditableEditorDefinition = {
       ...testEditableEditorDefinition,
       inlineAtoms: [
         {
@@ -742,7 +902,7 @@ describe("initializeTestEditableEditor", () => {
     const editor = initializeTestEditableEditor({
       definition,
       snapshot: createTestEditorSnapshot([
-        { id: blockId, type: "paragraph", text: "@ada" },
+        { id: blockId, type: "textBlock", text: "@ada" },
       ]),
       onChange: changes,
     });
@@ -774,7 +934,7 @@ describe("initializeTestEditableEditor", () => {
     acceptedAtomMetadata.id = "grace";
     expect(changes).toHaveBeenCalledTimes(1);
     expect(editor.canUndo).toBe(true);
-    expect(editor.readBlockContent(blockId, "paragraph")).toMatchObject({
+    expect(editor.readBlockContent(blockId, "textBlock")).toMatchObject({
       content: [{ content: [{ type: "mention", metadata: { id: "ada" } }] }],
     });
     expect(editor.undo()).toEqual({ status: "applied" });
@@ -795,8 +955,8 @@ describe("initializeTestEditableEditor", () => {
       content: { createRuntime },
       blocks: {
         ...testEditableEditorDefinition.blocks,
-        paragraph: {
-          ...testEditableEditorDefinition.blocks.paragraph!,
+        textBlock: {
+          ...testEditableEditorDefinition.blocks.textBlock!,
           renderer: undefined,
         },
       },
@@ -807,7 +967,7 @@ describe("initializeTestEditableEditor", () => {
         // @ts-expect-error The missing renderer is the invalid startup contract under test.
         definition: invalidDefinition,
         snapshot: createTestEditorSnapshot([
-          { type: "paragraph", text: "invalid definition" },
+          { type: "textBlock", text: "invalid definition" },
         ]),
       }),
     ).toThrow();
@@ -818,7 +978,7 @@ describe("initializeTestEditableEditor", () => {
       content: { createRuntime },
     } satisfies EditableEditorDefinition;
     const snapshot = createTestEditorSnapshot([
-      { type: "paragraph", text: "invalid snapshot" },
+      { type: "textBlock", text: "invalid snapshot" },
     ]);
     expect(() =>
       initializeTestEditableEditor({
@@ -839,7 +999,7 @@ describe("initializeTestEditableEditor", () => {
       snapshot: createTestEditorSnapshot([
         {
           id: "editor-api-cleanup" as BlockId,
-          type: "paragraph",
+          type: "textBlock",
           text: "cleanup",
         },
       ]),
@@ -857,7 +1017,7 @@ describe("initializeTestEditableEditor", () => {
     const editor = initializeTestEditableEditor({
       definition,
       snapshot: createTestEditorSnapshot([
-        { type: "paragraph", text: "cleanup isolation" },
+        { type: "textBlock", text: "cleanup isolation" },
       ]),
     });
     (editor as EditorImplementation).registerCleanup(() => {
@@ -873,7 +1033,7 @@ describe("initializeTestEditableEditor", () => {
   it("isolates stores, content runtimes, selection controllers, and callbacks", () => {
     const blockId = "editor-api-isolation" as BlockId;
     const snapshot = createTestEditorSnapshot([
-      { id: blockId, type: "paragraph", text: "isolated" },
+      { id: blockId, type: "textBlock", text: "isolated" },
     ]);
     const firstListener = vi.fn();
     const secondListener = vi.fn();
@@ -881,12 +1041,12 @@ describe("initializeTestEditableEditor", () => {
       definition: testEditableEditorDefinition,
       snapshot,
       onChange: firstListener,
-    }) as EditorRuntimePort;
+    }) as EditableEditorRuntimePort;
     const second = initializeTestEditableEditor({
       definition: testEditableEditorDefinition,
       snapshot,
       onChange: secondListener,
-    }) as EditorRuntimePort;
+    }) as EditableEditorRuntimePort;
 
     expect(first.store).not.toBe(second.store);
     expect(first.contentRuntime).not.toBe(second.contentRuntime);
@@ -908,115 +1068,13 @@ describe("initializeTestEditableEditor", () => {
 });
 
 describe("core structural key behavior", () => {
-  it("runs Backspace for a textbox definition with no optional capabilities", () => {
-    const firstId = "textbox-first" as BlockId;
-    const secondId = "textbox-second" as BlockId;
-    const definition: EditableEditorDefinition = {
-      blocks: {
-        paragraph: testEditableEditorDefinition.blocks.paragraph!,
-      },
-      defaultRoot: "paragraph",
-      inlineMarks: [],
-      inlineAtoms: [],
-    };
-    const editor = initializeTestEditableEditor({
-      definition,
-      snapshot: createTestEditorSnapshot([
-        { id: firstId, type: "paragraph", text: "left" },
-        { id: secondId, type: "paragraph", text: "right" },
-      ]),
-    });
-    const result = executeCoreBlockKeyBehavior({
-      editor: resolveEditorRuntimePort(editor),
-      blockId: secondId,
-      blockType: "paragraph",
-      key: "backspace",
-      cursorOffset: 0,
-    });
-
-    expect(result).toStrictEqual({ ok: true, handled: true });
-    expect(editor.getRootBlockIds()).toStrictEqual([firstId]);
-    expect(editor.readBlockPlainText(firstId, "paragraph")).toBe("leftright");
-    expect(editor.getBlock(secondId)).toBeNull();
-    editor.dispose();
-  });
-
-  it("forwards end-boundary Delete once and keeps local Delete out of the structural channel", () => {
-    const firstId = "delete-first" as BlockId;
-    const secondId = "delete-second" as BlockId;
-    const onChange = vi.fn();
-    const editor = initializeTestEditableEditor({
-      definition: testEditableEditorDefinition,
-      snapshot: createTestEditorSnapshot([
-        { id: firstId, type: "paragraph", text: "left" },
-        { id: secondId, type: "paragraph", text: "right" },
-      ]),
-      onChange,
-    });
-
-    expect(
-      executeCoreBlockKeyBehavior({
-        editor: editor as EditorRuntimePort,
-        blockId: firstId,
-        blockType: "paragraph",
-        key: "delete",
-        cursorOffset: 2,
-      }),
-    ).toStrictEqual({ ok: false, handled: false, reason: "unhandled" });
-    expect(onChange).not.toHaveBeenCalled();
-    expect(() =>
-      executeCoreBlockKeyBehavior({
-        editor: editor as EditorRuntimePort,
-        blockId: firstId,
-        blockType: "paragraph",
-        key: "delete",
-        cursorOffset: 4,
-        selectionRange: { from: 1, to: 3 },
-      }),
-    ).toThrow(/Same-block Delete/);
-    expect(onChange).not.toHaveBeenCalled();
-
-    expect(
-      executeCoreBlockKeyBehavior({
-        editor: editor as EditorRuntimePort,
-        blockId: firstId,
-        blockType: "paragraph",
-        key: "delete",
-        cursorOffset: 4,
-      }),
-    ).toStrictEqual({ ok: true, handled: true });
-    expect(editor.getRootBlockIds()).toStrictEqual([firstId]);
-    expect(editor.readBlockPlainText(firstId, "paragraph")).toBe("leftright");
-    expect(editor.getBlock(secondId)).toBeNull();
-    expect(onChange).toHaveBeenCalledOnce();
-
-    expect(
-      executeCoreBlockKeyBehavior({
-        editor: editor as EditorRuntimePort,
-        blockId: firstId,
-        blockType: "paragraph",
-        key: "delete",
-        cursorOffset: 9,
-      }),
-    ).toStrictEqual({ ok: false, handled: false, reason: "unhandled" });
-    expect(onChange).toHaveBeenCalledOnce();
-    editor.dispose();
-  });
-});
-
-describe("useEditor", () => {
-  beforeEach(() => {
-    renderProbe.editor = null;
-    renderProbe.selectionController = null;
-  });
-
   it("retains one selection controller across editable document remounts", () => {
     const editor = initializeTestEditableEditor({
       definition: testEditableEditorDefinition,
       snapshot: createTestEditorSnapshot([
-        { type: "paragraph", text: "selection owner" },
+        { type: "textBlock", text: "selection owner" },
       ]),
-    }) as EditorRuntimePort;
+    }) as EditableEditorRuntimePort;
     const firstView = render(<EditorDocument editor={editor} />);
     const controller = renderProbe.selectionController;
 
@@ -1032,9 +1090,9 @@ describe("useEditor", () => {
     const editor = initializeTestEditableEditor({
       definition: testEditableEditorDefinition,
       snapshot: createTestEditorSnapshot([
-        { type: "paragraph", text: "single editable mount" },
+        { type: "textBlock", text: "single editable mount" },
       ]),
-    }) as EditorRuntimePort;
+    }) as EditableEditorRuntimePort;
     expect(editor.editable).toBe(true);
     const firstView = render(<EditorDocument editor={editor} />);
 
@@ -1050,9 +1108,9 @@ describe("useEditor", () => {
     const editor = initializeTestEditableEditor({
       definition: testEditableEditorDefinition,
       snapshot: createTestEditorSnapshot([
-        { type: "paragraph", text: "dispose selection" },
+        { type: "textBlock", text: "dispose selection" },
       ]),
-    }) as EditorRuntimePort;
+    }) as EditableEditorRuntimePort;
     const disposeSelection = vi.spyOn(editor.selectionController, "dispose");
 
     editor.dispose();
@@ -1061,9 +1119,9 @@ describe("useEditor", () => {
   });
 
   it("keeps one editor object across rerenders and observes the latest callback", async () => {
-    const blockId = "editor-api-paragraph" as BlockId;
+    const blockId = "editor-api-textBlock" as BlockId;
     const snapshot = createTestEditorSnapshot([
-      { id: blockId, type: "paragraph", text: "hello" },
+      { id: blockId, type: "textBlock", text: "hello" },
     ]);
     const firstOnChange = vi.fn();
     const secondOnChange = vi.fn();
@@ -1105,7 +1163,7 @@ describe("useEditor", () => {
         const editor = useEditor({
           definition: testEditableEditorDefinition,
           snapshot: createTestEditorSnapshot([
-            { id: blockId, type: "paragraph", text: "callback" },
+            { id: blockId, type: "textBlock", text: "callback" },
           ]),
           onChange,
         });
@@ -1141,7 +1199,7 @@ describe("useEditor", () => {
       useEditor({
         definition: testEditableEditorDefinition,
         snapshot: createTestEditorSnapshot([
-          { id: blockId, type: "paragraph", text: "construction" },
+          { id: blockId, type: "textBlock", text: "construction" },
         ]),
         onChange,
       }),
@@ -1165,12 +1223,12 @@ describe("useEditor", () => {
       const editor = useEditor({
         definition: testEditableEditorDefinition,
         snapshot: createTestEditorSnapshot([
-          { id: firstId, type: "paragraph", text: "first" },
-          { id: secondId, type: "paragraph", text: "second" },
+          { id: firstId, type: "textBlock", text: "first" },
+          { id: secondId, type: "textBlock", text: "second" },
         ]),
         onChange: observed,
       });
-      return editor as EditorRuntimePort;
+      return editor as EditableEditorRuntimePort;
     });
 
     act(() => {
@@ -1220,11 +1278,11 @@ describe("useEditor", () => {
 
   it("retains the first editor across new options and equivalent snapshots", async () => {
     const snapshot = createTestEditorSnapshot([
-      { type: "paragraph", text: "startup" },
+      { type: "textBlock", text: "startup" },
     ]);
     let snapshotReads = 0;
     let contentCreations = 0;
-    const definition: EditorDefinition = {
+    const definition: EditableEditorDefinition = {
       ...testEditableEditorDefinition,
       content: {
         createRuntime(source) {
@@ -1265,7 +1323,7 @@ describe("useEditor", () => {
       useEditor({
         definition: testEditableEditorDefinition,
         snapshot: createTestEditorSnapshot([
-          { id: blockId, type: "paragraph", text: "retained" },
+          { id: blockId, type: "textBlock", text: "retained" },
         ]),
       }),
     );
@@ -1289,7 +1347,7 @@ describe("useEditor", () => {
     vi.useFakeTimers();
     try {
       const snapshot = createTestEditorSnapshot([
-        { type: "paragraph", text: "strict" },
+        { type: "textBlock", text: "strict" },
       ]);
       const { result, unmount } = renderHook(
         () =>
@@ -1329,7 +1387,7 @@ describe("useEditor", () => {
         useEditor({
           definition: testEditableEditorDefinition,
           snapshot: createTestEditorSnapshot([
-            { id: blockId, type: "paragraph", text: "strict isolation" },
+            { id: blockId, type: "textBlock", text: "strict isolation" },
           ]),
         }),
       { wrapper: StrictMode },
@@ -1356,7 +1414,7 @@ describe("useEditor", () => {
     const blockId = "editor-api-pending-atomic-focus" as BlockId;
     const editor = initializeTestEditableEditor({
       definition: testEditableEditorDefinition,
-      snapshot: createTestEditorSnapshot([{ id: blockId, type: "divider" }]),
+      snapshot: createTestEditorSnapshot([{ id: blockId, type: "atomicBlock" }]),
     });
 
     expect(editor.focusBlock(blockId, { preventScroll: true })).toEqual({
@@ -1375,7 +1433,7 @@ describe("useEditor", () => {
       useEditor({
         definition: testEditableEditorDefinition,
         snapshot: createTestEditorSnapshot([
-          { id: blockId, type: "paragraph", text: "disposed" },
+          { id: blockId, type: "textBlock", text: "disposed" },
         ]),
       }),
     );
@@ -1425,7 +1483,7 @@ describe("useEditor", () => {
   it("supersedes a pending text activation without resettling canonical selection", async () => {
     const blockId = "editor-api-focus" as BlockId;
     const snapshot = createTestEditorSnapshot([
-      { id: blockId, type: "paragraph", text: "focus" },
+      { id: blockId, type: "textBlock", text: "focus" },
     ]);
     const { result, unmount } = renderHook(() =>
       useEditor({
@@ -1462,15 +1520,15 @@ describe("useEditor", () => {
     const movingId = "editor-api-noop-moving" as BlockId;
     const lastId = "editor-api-noop-last" as BlockId;
     const onChange = vi.fn();
-    const definition: EditorDefinition = {
+    const definition: EditableEditorDefinition = {
       ...testEditableEditorDefinition,
       blocks: {
         ...testEditableEditorDefinition.blocks,
-        quote: {
-          ...testEditableEditorDefinition.blocks.quote!,
+        wrapperBlock: {
+          ...testEditableEditorDefinition.blocks.wrapperBlock!,
           content: {
-            required: ["paragraph"],
-            additional: "paragraph",
+            required: ["textBlock"],
+            additional: "textBlock",
           },
         },
       },
@@ -1479,9 +1537,9 @@ describe("useEditor", () => {
       const editor = useEditor({
         definition,
         snapshot: createTestEditorSnapshot([
-          { id: firstId, type: "paragraph", text: "first" },
-          { id: movingId, type: "paragraph", text: "moving" },
-          { id: lastId, type: "paragraph", text: "last" },
+          { id: firstId, type: "textBlock", text: "first" },
+          { id: movingId, type: "textBlock", text: "moving" },
+          { id: lastId, type: "textBlock", text: "last" },
         ]),
         onChange,
       });
@@ -1533,8 +1591,8 @@ describe("useEditor", () => {
     const firstId = "editor-api-subscription-first" as BlockId;
     const secondId = "editor-api-subscription-second" as BlockId;
     const snapshot = createTestEditorSnapshot([
-      { id: firstId, type: "paragraph", text: "first" },
-      { id: secondId, type: "paragraph", text: "second" },
+      { id: firstId, type: "textBlock", text: "first" },
+      { id: secondId, type: "textBlock", text: "second" },
     ]);
     const { result, unmount } = renderHook(() =>
       useEditor({
@@ -1569,11 +1627,11 @@ describe("useEditor", () => {
     const secondChildId = "focused-graph-second-child" as BlockId;
     const unrelatedId = "focused-graph-unrelated" as BlockId;
     const flat = createTestEditorSnapshot([
-      { id: firstWrapperId, type: "quote" },
-      { id: firstChildId, type: "paragraph", text: "first" },
-      { id: secondWrapperId, type: "quote" },
-      { id: secondChildId, type: "paragraph", text: "second" },
-      { id: unrelatedId, type: "paragraph", text: "unrelated" },
+      { id: firstWrapperId, type: "wrapperBlock" },
+      { id: firstChildId, type: "textBlock", text: "first" },
+      { id: secondWrapperId, type: "wrapperBlock" },
+      { id: secondChildId, type: "textBlock", text: "second" },
+      { id: unrelatedId, type: "textBlock", text: "unrelated" },
     ]);
     const snapshot = {
       ...flat,
@@ -1663,7 +1721,7 @@ describe("useEditor", () => {
   it("keeps canonical graph snapshots stable across pending focus requests", async () => {
     const blockId = "focused-graph-stability" as BlockId;
     const snapshot = createTestEditorSnapshot([
-      { id: blockId, type: "paragraph", text: "stable" },
+      { id: blockId, type: "textBlock", text: "stable" },
     ]);
     const { result, unmount } = renderHook(() =>
       useEditor({
@@ -1698,7 +1756,7 @@ describe("useEditor", () => {
   it("reuses every equal graph reference during a newer no-op reconciliation", async () => {
     const blockId = "no-op-reconciliation" as BlockId;
     const snapshot = createTestEditorSnapshot([
-      { id: blockId, type: "paragraph", text: "stable" },
+      { id: blockId, type: "textBlock", text: "stable" },
     ]);
     const { result, unmount } = renderHook(() =>
       useEditor({
@@ -1744,7 +1802,7 @@ describe("useEditor", () => {
 describe("EditorDocument", () => {
   it("passes the same concrete editor object to rendering", async () => {
     const snapshot = createTestEditorSnapshot([
-      { type: "paragraph", text: "render" },
+      { type: "textBlock", text: "render" },
     ]);
     const hook = renderHook(() =>
       useEditor({
@@ -1752,7 +1810,7 @@ describe("EditorDocument", () => {
         snapshot,
       }),
     );
-    const editor: Editor = hook.result.current;
+    const editor: EditableEditor = hook.result.current;
     const view = render(<EditorDocument editor={editor} />);
     expect(renderProbe.editor).toBe(editor);
     expect(view.getByTestId("render-probe")).toBeTruthy();
@@ -1806,11 +1864,11 @@ function commitTestTextSelection(
 }
 
 function commitTextAppend(
-  editor: EditorRuntimePort,
+  editor: EditableEditorRuntimePort,
   blockId: BlockId,
   text: string,
 ): void {
-  const blockType = "paragraph";
+  const blockType = "textBlock";
   const offset = editor.readBlockPlainText(blockId, blockType).length;
   const base = editor.contentRuntime.readContentBaseToken(
     blockId,

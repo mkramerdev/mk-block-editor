@@ -8,7 +8,7 @@ import {
 } from "@repo/editor-core/editing";
 import type { BlockId } from "@repo/editor-core/kernel";
 import { createBlockRecord } from "@repo/editor-core/metadata";
-import type { Editor } from "@repo/editor-web/document-runtime";
+import type { EditableEditor } from "@repo/editor-web/document-runtime";
 import { createDefaultColumnMetadata } from "../blocks/columns/model.ts";
 import {
   createFirstDraftTableColumnIds,
@@ -16,11 +16,12 @@ import {
 } from "../blocks/table/model.ts";
 import { createFirstDraftBlockIdAllocator } from "../identity/block-id-allocator.ts";
 import type { FirstDraftSlashAction } from "./catalog.ts";
+import type { FirstDraftHeadingLevel } from "../heading-level.ts";
 
 export function materializeFirstDraftSlashAction(
   action: FirstDraftSlashAction,
   editor: Pick<
-    Editor,
+    EditableEditor,
     "definition" | "getRootBlockIds" | "getChildBlockIds" | "getBlock"
   >,
 ): FirstDraftSlashMaterialization {
@@ -56,12 +57,17 @@ export function materializeFirstDraftSlashAction(
     case "checklist":
     case "quote":
     case "toggleListItem":
-    case "divider":
       return requireSelection(
         materializeCanonicalBlockCreation({
           ...common,
           type: action.kind.type,
         }),
+      );
+    case "divider":
+      return materializeDivider(
+        blockDefinitions,
+        reservedBlockIds,
+        allocateBlockId,
       );
     case "code":
       return requireSelection(
@@ -87,14 +93,6 @@ export function materializeFirstDraftSlashAction(
         }),
         action.kind.level,
         blockDefinitions,
-      );
-    case "bookmark":
-      return requireSelection(
-        materializeCanonicalBlockCreation({
-          ...common,
-          type: "bookmark",
-          metadata: { url: "" },
-        }),
       );
     case "columns":
       return materializeColumns(
@@ -128,8 +126,8 @@ export interface FirstDraftSlashMaterialization {
 
 function withNestedHeadingLevel(
   creation: MaterializedCanonicalBlockCreation,
-  level: number,
-  blockDefinitions: Editor["definition"]["blocks"],
+  level: FirstDraftHeadingLevel,
+  blockDefinitions: EditableEditor["definition"]["blocks"],
 ): FirstDraftSlashMaterialization {
   return recreateMaterialization(
     creation,
@@ -140,9 +138,42 @@ function withNestedHeadingLevel(
   );
 }
 
+function materializeDivider(
+  blockDefinitions: EditableEditor["definition"]["blocks"],
+  reservedBlockIds: ReadonlySet<BlockId>,
+  allocateBlockId: () => BlockId,
+): FirstDraftSlashMaterialization {
+  const common = {
+    blockDefinitions,
+    reservedBlockIds,
+    createBlockId: allocateBlockId,
+  } as const;
+  const divider = materializeCanonicalBlockCreation({
+    ...common,
+    type: "divider",
+  });
+  const paragraph = requireSelection(
+    materializeCanonicalBlockCreation({
+      ...common,
+      type: "paragraph",
+    }),
+  );
+  return {
+    fragment: createCanonicalBlockFragment({
+      blocks: [...divider.fragment.blocks, ...paragraph.fragment.blocks],
+      rootBlockIds: [divider.rootBlockId, paragraph.rootBlockId],
+      start: { kind: "block", blockId: divider.rootBlockId },
+      end: { kind: "text", blockId: paragraph.selectionBlockId },
+      blockDefinitions,
+    }),
+    rootBlockId: divider.rootBlockId,
+    selectionBlockId: paragraph.selectionBlockId,
+  };
+}
+
 function materializeColumns(
   count: 2 | 3 | 4,
-  blockDefinitions: Editor["definition"]["blocks"],
+  blockDefinitions: EditableEditor["definition"]["blocks"],
   reservedBlockIds: ReadonlySet<BlockId>,
   allocateBlockId: () => BlockId,
 ): FirstDraftSlashMaterialization {
@@ -165,7 +196,7 @@ function materializeColumns(
 }
 
 function materializeTabs(
-  blockDefinitions: Editor["definition"]["blocks"],
+  blockDefinitions: EditableEditor["definition"]["blocks"],
   reservedBlockIds: ReadonlySet<BlockId>,
   allocateBlockId: () => BlockId,
 ): FirstDraftSlashMaterialization {
@@ -177,30 +208,43 @@ function materializeTabs(
     defaultContentCount: 2,
   });
   let paneIndex = 0;
-  return recreateMaterialization(
-    creation,
-    creation.fragment.blocks.map((record) => {
-      if (record.type === "tabPane") {
-        paneIndex += 1;
-        return {
-          ...record,
-          metadata: { tabId: `tab-${paneIndex}`, title: `Tab ${paneIndex}` },
-        };
-      }
-      if (record.type !== "placeholder") return record;
-      return {
-        ...record,
-        type: "paragraph",
+  let selectionBlockId: BlockId | null = null;
+  const blocks = creation.fragment.blocks.flatMap((record) => {
+    if (record.type !== "tabPane") return [record];
+    paneIndex += 1;
+    const pane = {
+      ...record,
+      metadata: { tabId: `tab-${paneIndex}`, title: `Tab ${paneIndex}` },
+    };
+    const paragraph = createBlockRecord({
+      id: allocateBlockId(),
+      type: "paragraph",
+      parentId: pane.id,
+    });
+    selectionBlockId ??= paragraph.id;
+    return [
+      pane,
+      {
+        id: paragraph.id,
+        type: paragraph.type,
+        parentId: paragraph.parentId,
         content: createBlockRichTextContentFromPlainText("paragraph", ""),
         plainText: "",
-      };
-    }),
-    blockDefinitions,
-  );
+      },
+    ];
+  });
+  if (!selectionBlockId) {
+    throw new Error("First Draft tabs creation has no text selection target");
+  }
+  return {
+    fragment: recreateFragment(creation.fragment, blocks, blockDefinitions),
+    rootBlockId: creation.rootBlockId,
+    selectionBlockId,
+  };
 }
 
 function materializeTable(
-  blockDefinitions: Editor["definition"]["blocks"],
+  blockDefinitions: EditableEditor["definition"]["blocks"],
   reservedBlockIds: ReadonlySet<BlockId>,
   allocateBlockId: () => BlockId,
   rows: number,
@@ -249,7 +293,7 @@ function requireSelection(
 function recreateMaterialization(
   source: MaterializedCanonicalBlockCreation,
   blocks: readonly CanonicalBlockRecord[],
-  blockDefinitions: Editor["definition"]["blocks"],
+  blockDefinitions: EditableEditor["definition"]["blocks"],
 ): FirstDraftSlashMaterialization {
   const materialization = requireSelection(source);
   const fragment = recreateFragment(source.fragment, blocks, blockDefinitions);
@@ -271,7 +315,7 @@ function recreateMaterialization(
 function recreateFragment(
   source: CanonicalBlockFragment,
   blocks: readonly CanonicalBlockRecord[],
-  blockDefinitions: Editor["definition"]["blocks"],
+  blockDefinitions: EditableEditor["definition"]["blocks"],
 ): CanonicalBlockFragment {
   return createCanonicalBlockFragment({
     blocks,
@@ -283,7 +327,7 @@ function recreateFragment(
 }
 
 export function readLiveBlockIds(
-  editor: Pick<Editor, "getRootBlockIds" | "getChildBlockIds" | "getBlock">,
+  editor: Pick<EditableEditor, "getRootBlockIds" | "getChildBlockIds" | "getBlock">,
 ): ReadonlySet<BlockId> {
   const result = new Set<BlockId>();
   const pending = [...editor.getRootBlockIds()];

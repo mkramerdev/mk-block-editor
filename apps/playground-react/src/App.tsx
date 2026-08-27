@@ -1,6 +1,6 @@
-import { Route, Routes } from "react-router";
-import FirstDraft from "./routes/first-draft";
-import FullEditor from "./routes/full-editor";
+import { Navigate, Route, Routes } from "react-router";
+import MkBlockEditorLayout from "./routes/layout";
+import MkBlockEditorPage from "./routes/page";
 
 function Home() {
   return (
@@ -18,8 +18,23 @@ export default function App() {
   return (
     <Routes>
       <Route path="/" element={<Home />} />
-      <Route path="/first-draft" element={<FirstDraft />} />
-      <Route path="/full-editor" element={<FullEditor />} />
+      <Route
+        path="/first-draft"
+        element={
+          <MkBlockEditorLayout>
+            <MkBlockEditorPage />
+          </MkBlockEditorLayout>
+        }
+      />
+      <Route
+        path="/mk-block-editor"
+        element={<Navigate to="/first-draft" replace />}
+      />
+      <Route
+        path="/full-editor"
+        element={<Navigate to="/first-draft" replace />}
+      />
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }

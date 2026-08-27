@@ -24,96 +24,65 @@ import type {
   StructuralTransactionContext,
   StructuralTransactionOperation,
 } from "./types.ts";
-
-const renderer = () => null;
 const definitions: Readonly<Record<BlockType, BlockDefinition>> = {
-  paragraph: {
+  textBlock: {
     kind: "text",
-    type: "paragraph",
-    rootLayout: "normal",
-    renderer,
+    type: "textBlock",
   },
-  heading: {
+  alternateTextBlock: {
     kind: "text",
-    type: "heading",
-    rootLayout: "normal",
-    renderer,
+    type: "alternateTextBlock",
   },
-  divider: {
+  atomicBlock: {
     kind: "atomic",
-    type: "divider",
-    rootLayout: "normal",
-    renderer,
+    type: "atomicBlock",
   },
-  callout: {
+  wrapperBlock: {
     kind: "wrapper",
-    type: "callout",
-    rootLayout: "normal",
-    renderer,
+    type: "wrapperBlock",
     contentBoundary: false,
     content: { required: ["block"], additional: "block" },
-    defaultContent: "paragraph",
+    defaultContent: "textBlock",
   },
   boundary: {
     kind: "wrapper",
     type: "boundary",
-    rootLayout: "normal",
-    renderer,
     contentBoundary: true,
     content: { required: ["block"], additional: "block" },
   },
   pair: {
     kind: "wrapper",
     type: "pair",
-    rootLayout: "normal",
-    renderer,
     contentBoundary: false,
     content: { required: ["bucket", "bucket"] },
-    underflow: { kind: "promote-single-child-contents" },
   },
   bucket: {
     kind: "wrapper",
     type: "bucket",
-    rootLayout: "normal",
-    renderer,
     contentBoundary: false,
     content: { required: ["block"], additional: "block" },
   },
-  compound: {
+  primaryWrapper: {
     kind: "wrapper",
-    type: "compound",
-    rootLayout: "normal",
-    renderer,
+    type: "primaryWrapper",
     contentBoundary: false,
-    content: { required: ["heading", "bucket"] },
-    compound: {
-      kind: "primary-text-with-promoted-content",
-      primaryTextChildType: "heading",
-      contentWrapperChildType: "bucket",
-      emptyPrimary: "remove-wrapper",
-    },
+    content: { required: ["alternateTextBlock", "bucket"] },
   },
   collection: {
     kind: "wrapper",
     type: "collection",
-    rootLayout: "full",
-    renderer,
     contentBoundary: true,
     content: { required: ["collectionGroup"], additional: "collectionGroup" },
   },
   collectionGroup: {
     kind: "wrapper",
     type: "collectionGroup",
-    rootLayout: "full",
-    renderer,
     contentBoundary: true,
     content: { required: ["collectionText"], additional: "collectionText" },
   },
   collectionText: {
     kind: "text",
     type: "collectionText",
-    rootLayout: "normal",
-    renderer,
   },
 };
 
@@ -210,55 +179,55 @@ function range(
 
 describe("ordinary structural range mutations", () => {
   it("deletes a partial rich-text range without replacing its block", () => {
-    const paragraph = block(1, "paragraph");
+    const textBlock = block(1, "textBlock");
     const result = applied(
       apply(
-        graph([paragraph]),
-        new Map([[paragraph.id, text("paragraph", "abcdef")]]),
+        graph([textBlock]),
+        new Map([[textBlock.id, text("textBlock", "abcdef")]]),
         [
           deleteRange(
             range(
               [
                 {
                   kind: "text",
-                  blockId: paragraph.id,
-                  blockType: paragraph.type,
+                  blockId: textBlock.id,
+                  blockType: textBlock.type,
                   parentId: null,
                   from: 2,
                   to: 4,
                   expectedContentVersion: "1",
                 },
               ],
-              { kind: "text", blockId: paragraph.id, offset: 2 },
-              { kind: "text", blockId: paragraph.id, offset: 4 },
+              { kind: "text", blockId: textBlock.id, offset: 2 },
+              { kind: "text", blockId: textBlock.id, offset: 4 },
             ),
           ),
         ],
       ),
     );
 
-    expect(result.blocks[paragraph.id]?.id).toBe(paragraph.id);
+    expect(result.blocks[textBlock.id]?.id).toBe(textBlock.id);
     expect(result.contentOperations).toHaveLength(1);
-    expect(result.stagedContent[paragraph.id]).toMatchObject({
+    expect(result.stagedContent[textBlock.id]).toMatchObject({
       plainText: "abef",
     });
     expect(result.selection).toEqual({
       kind: "text-offset",
-      blockId: paragraph.id,
+      blockId: textBlock.id,
       offset: 2,
     });
   });
 
   it("preserves both text boundaries and removes intervening structure", () => {
-    const leading = block(1, "paragraph");
-    const atom = block(2, "divider");
-    const trailing = block(3, "heading");
+    const leading = block(1, "textBlock");
+    const atom = block(2, "atomicBlock");
+    const trailing = block(3, "alternateTextBlock");
     const result = applied(
       apply(
         graph([leading, atom, trailing]),
         new Map([
-          [leading.id, text("paragraph", "abcd")],
-          [trailing.id, text("heading", "wxyz")],
+          [leading.id, text("textBlock", "abcd")],
+          [trailing.id, text("alternateTextBlock", "wxyz")],
         ]),
         [
           deleteRange(
@@ -308,12 +277,12 @@ describe("ordinary structural range mutations", () => {
   });
 
   it("uses the nearest surviving start-side text point when the first selected block is removed", () => {
-    const removed = block(1, "divider");
-    const trailing = block(2, "heading");
+    const removed = block(1, "atomicBlock");
+    const trailing = block(2, "alternateTextBlock");
     const result = applied(
       apply(
         graph([removed, trailing]),
-        new Map([[trailing.id, text("heading", "wxyz")]]),
+        new Map([[trailing.id, text("alternateTextBlock", "wxyz")]]),
         [
           deleteRange(
             range(
@@ -352,48 +321,48 @@ describe("ordinary structural range mutations", () => {
   });
 
   it("keeps an empty definition-owned text survivor when all roots are removed", () => {
-    const paragraph = block(1, "paragraph");
+    const textBlock = block(1, "textBlock");
     const result = applied(
       apply(
-        graph([paragraph]),
-        new Map([[paragraph.id, text("paragraph", "content")]]),
+        graph([textBlock]),
+        new Map([[textBlock.id, text("textBlock", "content")]]),
         [
           deleteRange(
             range(
               [
                 {
                   kind: "block",
-                  blockId: paragraph.id,
-                  blockType: paragraph.type,
+                  blockId: textBlock.id,
+                  blockType: textBlock.type,
                   parentId: null,
                 },
               ],
-              { kind: "block", blockId: paragraph.id },
-              { kind: "block", blockId: paragraph.id },
+              { kind: "block", blockId: textBlock.id },
+              { kind: "block", blockId: textBlock.id },
             ),
           ),
         ],
       ),
     );
 
-    expect(result.rootBlockIds).toEqual([paragraph.id]);
-    expect(result.stagedContent[paragraph.id]).toMatchObject({
+    expect(result.rootBlockIds).toEqual([textBlock.id]);
+    expect(result.stagedContent[textBlock.id]).toMatchObject({
       plainText: "",
     });
   });
 
-  it("does not normalize an unrelated empty compound wrapper", () => {
-    const compound = block(1, "compound");
-    const primary = block(2, "heading", compound.id);
-    const bucket = block(3, "bucket", compound.id);
-    const child = block(4, "paragraph", bucket.id);
-    const removed = block(5, "divider");
+  it("does not normalize an unrelated empty primaryWrapper wrapper", () => {
+    const primaryWrapper = block(1, "primaryWrapper");
+    const primary = block(2, "alternateTextBlock", primaryWrapper.id);
+    const bucket = block(3, "bucket", primaryWrapper.id);
+    const child = block(4, "textBlock", bucket.id);
+    const removed = block(5, "atomicBlock");
     const result = applied(
       apply(
-        graph([compound, primary, bucket, child, removed]),
+        graph([primaryWrapper, primary, bucket, child, removed]),
         new Map([
-          [primary.id, text("heading", "")],
-          [child.id, text("paragraph", "")],
+          [primary.id, text("alternateTextBlock", "")],
+          [child.id, text("textBlock", "")],
         ]),
         [
           deleteRange(
@@ -414,15 +383,15 @@ describe("ordinary structural range mutations", () => {
       ),
     );
 
-    expect(result.rootBlockIds).toEqual([compound.id]);
-    expect(result.blocks[compound.id]?.type).toBe("compound");
+    expect(result.rootBlockIds).toEqual([primaryWrapper.id]);
+    expect(result.blocks[primaryWrapper.id]?.type).toBe("primaryWrapper");
   });
 
   it("removes only selected wrapper children or the complete wrapper", () => {
-    const wrapper = block(1, "callout");
-    const first = block(2, "paragraph", wrapper.id);
-    const second = block(3, "divider", wrapper.id);
-    const values = new Map([[first.id, text("paragraph", "one")]]);
+    const wrapper = block(1, "wrapperBlock");
+    const first = block(2, "textBlock", wrapper.id);
+    const second = block(3, "atomicBlock", wrapper.id);
+    const values = new Map([[first.id, text("textBlock", "one")]]);
     const partial = applied(
       apply(graph([wrapper, first, second]), values, [
         deleteRange(
@@ -463,44 +432,6 @@ describe("ordinary structural range mutations", () => {
     );
     expect(complete.rootBlockIds).toEqual([]);
     expect(complete.blocks[wrapper.id]).toBeUndefined();
-  });
-
-  it("applies definition-owned wrapper underflow cleanup", () => {
-    const pair = block(1, "pair");
-    const removedBucket = block(2, "bucket", pair.id);
-    const removedText = block(3, "paragraph", removedBucket.id);
-    const survivorBucket = block(4, "bucket", pair.id);
-    const survivorText = block(5, "paragraph", survivorBucket.id);
-    const result = applied(
-      apply(
-        graph([pair, removedBucket, removedText, survivorBucket, survivorText]),
-        new Map([
-          [removedText.id, text("paragraph", "removed")],
-          [survivorText.id, text("paragraph", "survivor")],
-        ]),
-        [
-          deleteRange(
-            range(
-              [
-                {
-                  kind: "block",
-                  blockId: removedBucket.id,
-                  blockType: removedBucket.type,
-                  parentId: pair.id,
-                },
-              ],
-              { kind: "block", blockId: removedBucket.id },
-              { kind: "block", blockId: removedBucket.id },
-            ),
-          ),
-        ],
-      ),
-    );
-
-    expect(result.rootBlockIds).toEqual([survivorText.id]);
-    expect(result.blocks[survivorText.id]?.parentId).toBeNull();
-    expect(result.blocks[pair.id]).toBeUndefined();
-    expect(result.blocks[survivorBucket.id]).toBeUndefined();
   });
 
   it("clears nested text as content and removes its wrapper as structure", () => {
@@ -630,27 +561,27 @@ describe("ordinary structural range mutations", () => {
   });
 
   it("inserts an ordered canonical subtree without changing any IDs", () => {
-    const existing = block(1, "paragraph");
+    const existing = block(1, "textBlock");
     const wrapperId = id(10);
     const childId = id(11);
     const atomId = id(12);
     const result = applied(
       apply(
         graph([existing]),
-        new Map([[existing.id, text("paragraph", "before")]]),
+        new Map([[existing.id, text("textBlock", "before")]]),
         [
           insertBlocks({
             placement: { parentId: null, childIndex: 0 },
             blocks: [
-              { id: wrapperId, type: "callout", parentId: null },
+              { id: wrapperId, type: "wrapperBlock", parentId: null },
               {
                 id: childId,
-                type: "paragraph",
+                type: "textBlock",
                 parentId: wrapperId,
-                content: text("paragraph", "inside"),
+                content: text("textBlock", "inside"),
                 plainText: "inside",
               },
-              { id: atomId, type: "divider", parentId: null },
+              { id: atomId, type: "atomicBlock", parentId: null },
             ],
           }),
         ],
@@ -665,17 +596,17 @@ describe("ordinary structural range mutations", () => {
   });
 
   it("rejects duplicate IDs and placements invalidated by earlier operations", () => {
-    const paragraph = block(1, "paragraph");
-    const values = new Map([[paragraph.id, text("paragraph", "one")]]);
-    const duplicate = apply(graph([paragraph]), values, [
+    const textBlock = block(1, "textBlock");
+    const values = new Map([[textBlock.id, text("textBlock", "one")]]);
+    const duplicate = apply(graph([textBlock]), values, [
       insertBlocks({
         placement: { parentId: null, childIndex: 1 },
         blocks: [
           {
-            id: paragraph.id,
-            type: paragraph.type,
+            id: textBlock.id,
+            type: textBlock.type,
             parentId: null,
-            content: text("paragraph", "duplicate"),
+            content: text("textBlock", "duplicate"),
             plainText: "duplicate",
           },
         ],
@@ -686,11 +617,11 @@ describe("ordinary structural range mutations", () => {
       failureKind: "invalid-plan",
     });
 
-    const removedParent = block(2, "callout");
-    const child = block(3, "paragraph", removedParent.id);
+    const removedParent = block(2, "wrapperBlock");
+    const child = block(3, "textBlock", removedParent.id);
     const invalidPlacement = apply(
       graph([removedParent, child]),
-      new Map([[child.id, text("paragraph", "child")]]),
+      new Map([[child.id, text("textBlock", "child")]]),
       [
         deleteRange(
           range(
@@ -708,7 +639,7 @@ describe("ordinary structural range mutations", () => {
         ),
         insertBlocks({
           placement: { parentId: removedParent.id, childIndex: 0 },
-          blocks: [{ id: id(20), type: "divider", parentId: removedParent.id }],
+          blocks: [{ id: id(20), type: "atomicBlock", parentId: removedParent.id }],
         }),
       ],
       false,
@@ -721,8 +652,8 @@ describe("ordinary structural range mutations", () => {
   });
 
   it("joins adjacent compatible text while preserving rich inline nodes", () => {
-    const left = block(1, "paragraph");
-    const right = block(2, "heading");
+    const left = block(1, "textBlock");
+    const right = block(2, "alternateTextBlock");
     const leftContent: RichTextDocumentNodeJson = {
       type: "doc",
       content: [
@@ -772,12 +703,12 @@ describe("ordinary structural range mutations", () => {
   });
 
   it("rejects non-adjacent, atomic, and content-boundary joins", () => {
-    const left = block(1, "paragraph");
-    const atom = block(2, "divider");
-    const right = block(3, "paragraph");
+    const left = block(1, "textBlock");
+    const atom = block(2, "atomicBlock");
+    const right = block(3, "textBlock");
     const values = new Map([
-      [left.id, text("paragraph", "left")],
-      [right.id, text("paragraph", "right")],
+      [left.id, text("textBlock", "left")],
+      [right.id, text("textBlock", "right")],
     ]);
     expect(
       apply(graph([left, atom, right]), values, [
@@ -789,30 +720,53 @@ describe("ordinary structural range mutations", () => {
     ).toMatchObject({ ok: false, failureKind: "invalid-content" });
 
     const boundary = block(10, "boundary");
-    const nestedLeft = block(11, "paragraph", boundary.id);
-    const nestedRight = block(12, "paragraph", boundary.id);
+    const nestedLeft = block(11, "textBlock", boundary.id);
+    const nestedRight = block(12, "textBlock", boundary.id);
     expect(
       apply(
         graph([boundary, nestedLeft, nestedRight]),
         new Map([
-          [nestedLeft.id, text("paragraph", "left")],
-          [nestedRight.id, text("paragraph", "right")],
+          [nestedLeft.id, text("textBlock", "left")],
+          [nestedRight.id, text("textBlock", "right")],
         ]),
         [joinTextBlocks(nestedLeft.id, nestedRight.id)],
       ),
     ).toMatchObject({ ok: false, failureKind: "invalid-boundary" });
   });
 
+  it("joins an empty right text block without emitting an empty content operation", () => {
+    const left = block(20, "textBlock");
+    const right = block(21, "textBlock");
+    const result = applied(
+      apply(
+        graph([left, right]),
+        new Map([
+          [left.id, text("textBlock", "left")],
+          [right.id, text("textBlock", "")],
+        ]),
+        [joinTextBlocks(left.id, right.id)],
+      ),
+    );
+
+    expect(result.blocks[right.id]).toBeUndefined();
+    expect(result.contentOperations).toEqual([]);
+    expect(result.selection).toEqual({
+      kind: "text-offset",
+      blockId: left.id,
+      offset: 4,
+    });
+  });
+
   it("lets later mutations observe deletion and staged text from earlier ones", () => {
-    const left = block(1, "paragraph");
-    const removed = block(2, "divider");
-    const right = block(3, "paragraph");
+    const left = block(1, "textBlock");
+    const removed = block(2, "atomicBlock");
+    const right = block(3, "textBlock");
     const result = applied(
       apply(
         graph([left, removed, right]),
         new Map([
-          [left.id, text("paragraph", "abc")],
-          [right.id, text("paragraph", "xyz")],
+          [left.id, text("textBlock", "abc")],
+          [right.id, text("textBlock", "xyz")],
         ]),
         [
           deleteRange(
@@ -873,33 +827,33 @@ describe("ordinary structural range mutations", () => {
   });
 
   it("rejects stale graph and content preconditions", () => {
-    const paragraph = block(1, "paragraph");
+    const textBlock = block(1, "textBlock");
     const stale = range(
       [
         {
           kind: "text",
-          blockId: paragraph.id,
-          blockType: paragraph.type,
+          blockId: textBlock.id,
+          blockType: textBlock.type,
           parentId: null,
           from: 0,
           to: 1,
           expectedContentVersion: "stale",
         },
       ],
-      { kind: "text", blockId: paragraph.id, offset: 0 },
-      { kind: "text", blockId: paragraph.id, offset: 1 },
+      { kind: "text", blockId: textBlock.id, offset: 0 },
+      { kind: "text", blockId: textBlock.id, offset: 1 },
     );
     expect(
       apply(
-        graph([paragraph]),
-        new Map([[paragraph.id, text("paragraph", "value")]]),
+        graph([textBlock]),
+        new Map([[textBlock.id, text("textBlock", "value")]]),
         [deleteRange(stale)],
       ),
     ).toMatchObject({ ok: false, failureKind: "stale-precondition" });
     expect(
       apply(
-        graph([paragraph]),
-        new Map([[paragraph.id, text("paragraph", "value")]]),
+        graph([textBlock]),
+        new Map([[textBlock.id, text("textBlock", "value")]]),
         [deleteRange({ ...stale, graphRevision: 2 })],
       ),
     ).toMatchObject({ ok: false, failureKind: "stale-precondition" });

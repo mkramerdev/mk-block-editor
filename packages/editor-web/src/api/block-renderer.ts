@@ -2,15 +2,21 @@
 
 export {
   useDirectChildBlocks,
-  ReadTextBlockPrimitive,
-  blockHeadingLevel,
-  normalizeHeadingLevel,
+  InactiveTextBlockPrimitive,
   editorSelectionBoundsDataAttributes,
   fixedPopoverPositionForAnchor,
   textOffsetFromPoint,
   textPointFromPoint,
+  useEditorTextGestureBoundary,
 } from "../document/blocks/block-renderer.tsx";
 export type { EditorTextPointHit } from "../document/blocks/block-renderer.tsx";
+export type {
+  EditorTextGestureBoundary,
+  EditorTextGestureBoundarySession,
+  EditorTextGesturePointer,
+  EditorTextGestureStart,
+  EditorTransferredPointerGesture,
+} from "../document/blocks/block-renderer.tsx";
 export { useEditorBlockScopedSelection } from "../document/selection/block-scoped-selection.ts";
 export {
   createRectangularSelectionPaintSegments,
@@ -36,7 +42,11 @@ export type {
   EditorWebBlockRenderer,
 } from "../document/blocks/block-renderer.tsx";
 export type { TextPlaceholder } from "@repo/editor-dom/block-editor";
-export type { ReadTextBlockPrimitiveProps } from "../document/blocks/read-text-block-primitive.tsx";
+export type { InactiveTextBlockPrimitiveProps } from "../document/blocks/inactive-text-block-primitive.tsx";
+export type {
+  TextDomPresentation,
+  TextDomPresentationElement,
+} from "../document/blocks/text-dom-presentation.ts";
 export type {
   EditorRendererInfrastructure,
   EditorRenderPort,

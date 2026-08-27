@@ -84,6 +84,205 @@ describe("editor document geometry owner", () => {
     expect(owner.reader.readBlockSelectionRect(blockId, "missing")).toBeNull();
   });
 
+  it("fails closed for invalid named viewport bounds and isolates matching targets between editors", () => {
+    const first = createEditorDocumentGeometryOwner();
+    const second = createEditorDocumentGeometryOwner();
+    const firstHost = connectedElement("div");
+    const secondHost = connectedElement("div");
+    const firstShell = connectedElement("div", firstHost);
+    const secondShell = connectedElement("div", secondHost);
+    for (const shell of [firstShell, secondShell]) {
+      Object.assign(shell.dataset, {
+        editorBlockShell: "true",
+        editorBlockId: blockId,
+      });
+      applyAttributes(shell, editorSelectionBoundsDataAttributes(blockId));
+    }
+    const wrongBlockTarget = connectedElement("div", firstShell);
+    applyAttributes(
+      wrongBlockTarget,
+      editorSelectionBoundsDataAttributes(secondBlockId, {
+        target: "drag-visual",
+      }),
+    );
+    const secondTarget = connectedElement("div", secondShell);
+    applyAttributes(
+      secondTarget,
+      editorSelectionBoundsDataAttributes(blockId, {
+        target: "drag-visual",
+      }),
+    );
+    mockRect(secondTarget, rect(210, 220, 230, 240));
+    first.registration.attachDocumentHost(firstHost);
+    second.registration.attachDocumentHost(secondHost);
+    first.registration.blockDomRegistrar.registerBlockShell(
+      blockId,
+      firstShell,
+    );
+    second.registration.blockDomRegistrar.registerBlockShell(
+      blockId,
+      secondShell,
+    );
+
+    expect(
+      first.reader.readViewportBlockSelectionRect(blockId, "drag-visual"),
+    ).toBeNull();
+    expect(
+      second.reader.readViewportBlockSelectionRect(blockId, "drag-visual"),
+    ).toEqual({ left: 210, top: 220, width: 230, height: 240 });
+
+    const firstTarget = connectedElement("div", firstShell);
+    applyAttributes(
+      firstTarget,
+      editorSelectionBoundsDataAttributes(blockId, {
+        target: "drag-visual",
+      }),
+    );
+    const duplicate = connectedElement("div", firstShell);
+    applyAttributes(
+      duplicate,
+      editorSelectionBoundsDataAttributes(blockId, {
+        target: "drag-visual",
+      }),
+    );
+    expect(
+      first.reader.readViewportBlockSelectionRect(blockId, "drag-visual"),
+    ).toBeNull();
+
+    duplicate.remove();
+    mockRect(firstTarget, rect(10, 20, 30, 40));
+    expect(
+      first.reader.readViewportBlockSelectionRect(blockId, "drag-visual"),
+    ).toEqual({ left: 10, top: 20, width: 30, height: 40 });
+    firstTarget.remove();
+    expect(
+      first.reader.readViewportBlockSelectionRect(blockId, "drag-visual"),
+    ).toBeNull();
+
+    second.dispose();
+    expect(
+      second.reader.readViewportBlockSelectionRect(blockId, "drag-visual"),
+    ).toBeNull();
+  });
+
+  it("reads a frozen viewport shell rectangle through nested scrolling without clipping it", () => {
+    const owner = createEditorDocumentGeometryOwner();
+    const host = connectedElement("div");
+    const scroller = connectedElement("div", host);
+    const shell = connectedElement("div", scroller);
+    Object.assign(shell.dataset, {
+      editorBlockShell: "true",
+      editorBlockId: blockId,
+    });
+    scroller.style.overflow = "auto";
+    scroller.scrollLeft = 73;
+    scroller.scrollTop = 91;
+    mockRect(host, rect(100, 200, 500, 400));
+    mockRect(scroller, rect(120, 220, 180, 90));
+    mockRect(shell, rect(64, 172, 360, 0));
+    owner.registration.attachDocumentHost(host);
+    owner.registration.blockDomRegistrar.registerBlockShell(blockId, shell);
+
+    const viewportRect = owner.reader.readViewportBlockShellRect(blockId);
+
+    expect(viewportRect).toEqual({
+      left: 64,
+      top: 172,
+      width: 360,
+      height: 0,
+    });
+    expect(Object.isFrozen(viewportRect)).toBe(true);
+    expect(owner.reader.readBlockShellRect(blockId)).toEqual({
+      left: -36,
+      top: -28,
+      width: 360,
+      height: 0,
+    });
+  });
+
+  it("rejects disconnected, mismatched, foreign, and disposed viewport shell registrations", () => {
+    const owner = createEditorDocumentGeometryOwner();
+    const host = connectedElement("div");
+    const shell = connectedElement("div", host);
+    Object.assign(shell.dataset, {
+      editorBlockShell: "true",
+      editorBlockId: secondBlockId,
+    });
+    mockRect(shell, rect(10, 20, 30, 40));
+    owner.registration.attachDocumentHost(host);
+    owner.registration.blockDomRegistrar.registerBlockShell(blockId, shell);
+    expect(owner.reader.readViewportBlockShellRect(blockId)).toBeNull();
+
+    shell.dataset.editorBlockId = blockId;
+    expect(owner.reader.readViewportBlockShellRect(blockId)).toEqual({
+      left: 10,
+      top: 20,
+      width: 30,
+      height: 40,
+    });
+    shell.remove();
+    expect(owner.reader.readViewportBlockShellRect(blockId)).toBeNull();
+
+    const foreignHost = connectedElement("div");
+    const foreignShell = connectedElement("div", foreignHost);
+    Object.assign(foreignShell.dataset, {
+      editorBlockShell: "true",
+      editorBlockId: blockId,
+    });
+    owner.registration.blockDomRegistrar.registerBlockShell(
+      blockId,
+      foreignShell,
+    );
+    expect(owner.reader.readViewportBlockShellRect(blockId)).toBeNull();
+
+    owner.dispose();
+    expect(owner.reader.readViewportBlockShellRect(blockId)).toBeNull();
+  });
+
+  it("keeps replaced registrations and matching block IDs isolated between geometry owners", () => {
+    const first = createEditorDocumentGeometryOwner();
+    const second = createEditorDocumentGeometryOwner();
+    const firstHost = connectedElement("div");
+    const secondHost = connectedElement("div");
+    const stale = connectedElement("div", firstHost);
+    const replacement = connectedElement("div", firstHost);
+    const other = connectedElement("div", secondHost);
+    for (const shell of [stale, replacement, other]) {
+      Object.assign(shell.dataset, {
+        editorBlockShell: "true",
+        editorBlockId: blockId,
+      });
+    }
+    mockRect(stale, rect(1, 2, 3, 4));
+    mockRect(replacement, rect(11, 12, 13, 14));
+    mockRect(other, rect(101, 102, 103, 104));
+    first.registration.attachDocumentHost(firstHost);
+    second.registration.attachDocumentHost(secondHost);
+    const releaseStale =
+      first.registration.blockDomRegistrar.registerBlockShell(blockId, stale);
+    first.registration.blockDomRegistrar.registerBlockShell(
+      blockId,
+      replacement,
+    );
+    second.registration.blockDomRegistrar.registerBlockShell(blockId, other);
+
+    releaseStale();
+
+    expect(first.reader.readViewportBlockShellRect(blockId)).toEqual({
+      left: 11,
+      top: 12,
+      width: 13,
+      height: 14,
+    });
+    expect(second.reader.readViewportBlockShellRect(blockId)).toEqual({
+      left: 101,
+      top: 102,
+      width: 103,
+      height: 104,
+    });
+    expect(first.reader.readViewportBlockShellRect(secondBlockId)).toBeNull();
+  });
+
   it("measures zero, final, marked, hard-break, atom, and empty caret offsets", () => {
     const cases: Array<{
       html: string;
@@ -149,7 +348,7 @@ describe("editor document geometry owner", () => {
       height: 20,
     });
     textRoot.innerHTML =
-      '<p><br class="ProseMirror-trailingBreak" data-editor-read-trailing-break="true"></p>';
+      '<p><br class="ProseMirror-trailingBreak" data-editor-canonical-trailing-break="true"></p>';
     expect(emptyOwner.reader.readTextCanonicalLength(blockId)).toBe(0);
   });
 
@@ -161,6 +360,106 @@ describe("editor document geometry owner", () => {
     for (const offset of [0, 1, 2, 3, 4, 5]) {
       expect(owner.reader.readTextCaretRect(blockId, offset)).not.toBeNull();
     }
+  });
+
+  it("maps simple, nested, split, Unicode, and semantic node ranges", () => {
+    const owner = createEditorDocumentGeometryOwner();
+    const { textRoot } = mountTextGeometry(
+      owner,
+      blockId,
+      '<a href="/one">A<strong>bold</strong></a><a href="/one">&#x1f600;</a><br><span data-editor-inline-atom="true">ignored label</span>',
+    );
+    const firstLink = textRoot.querySelector("a");
+    const nested = textRoot.querySelector("strong");
+    const splitLink = textRoot.querySelectorAll("a")[1];
+    const hardBreak = textRoot.querySelector("br");
+    const atom = textRoot.querySelector<HTMLElement>(
+      "[data-editor-inline-atom]",
+    );
+    if (!firstLink || !nested || !splitLink || !hardBreak || !atom) {
+      throw new Error("missing semantic range fixture");
+    }
+
+    expect(owner.reader.readTextNodeRange(blockId, firstLink)).toEqual({
+      from: 0,
+      to: 5,
+    });
+    expect(owner.reader.readTextNodeRange(blockId, nested)).toEqual({
+      from: 1,
+      to: 5,
+    });
+    expect(owner.reader.readTextNodeRange(blockId, splitLink)).toEqual({
+      from: 5,
+      to: 6,
+    });
+    expect(owner.reader.readTextNodeRange(blockId, hardBreak)).toEqual({
+      from: 6,
+      to: 7,
+    });
+    expect(owner.reader.readTextNodeRange(blockId, atom)).toEqual({
+      from: 7,
+      to: 8,
+    });
+    expect(owner.reader.readTextNodeRange(blockId, textRoot)).toEqual({
+      from: 0,
+      to: 8,
+    });
+  });
+
+  it("reads only non-empty nodes in the current mounted text projection", () => {
+    const owner = createEditorDocumentGeometryOwner();
+    const first = mountTextGeometry(
+      owner,
+      blockId,
+      '<a href="/inactive">inactive</a><span></span>',
+    );
+    const inactiveLink = first.textRoot.querySelector("a");
+    const empty = first.textRoot.querySelector("span");
+    if (!inactiveLink || !empty) throw new Error("missing inactive fixture");
+    expect(owner.reader.readTextNodeRange(blockId, inactiveLink)).toEqual({
+      from: 0,
+      to: 8,
+    });
+    expect(owner.reader.readTextNodeRange(blockId, empty)).toBeNull();
+
+    const activeRoot = connectedElement("div", first.surface);
+    activeRoot.dataset.editorTextRoot = "true";
+    activeRoot.innerHTML = '<p><a href="/active"><em>active</em></a></p>';
+    expect(owner.registration.updateMountedTextRoot(blockId, activeRoot)).toBe(
+      true,
+    );
+    const activeLink = activeRoot.querySelector("a");
+    if (!activeLink) throw new Error("missing active fixture");
+    expect(owner.reader.readTextNodeRange(blockId, activeLink)).toEqual({
+      from: 0,
+      to: 6,
+    });
+    expect(owner.reader.readTextNodeRange(blockId, inactiveLink)).toBeNull();
+  });
+
+  it("rejects foreign, detached, and unmounted text nodes", () => {
+    const owner = createEditorDocumentGeometryOwner();
+    const first = mountTextGeometry(owner, blockId, '<a href="/one">one</a>');
+    const foreignOwner = createEditorDocumentGeometryOwner();
+    const foreign = mountTextGeometry(
+      foreignOwner,
+      secondBlockId,
+      '<a href="/two">two</a>',
+    );
+    const localLink = first.textRoot.querySelector("a");
+    const foreignLink = foreign.textRoot.querySelector("a");
+    if (!localLink || !foreignLink) throw new Error("missing foreign fixture");
+
+    expect(owner.reader.readTextNodeRange(blockId, foreignLink)).toBeNull();
+    expect(owner.reader.readTextNodeRange(secondBlockId, localLink)).toBeNull();
+    const detached = document.createElement("a");
+    detached.textContent = "detached";
+    expect(owner.reader.readTextNodeRange(blockId, detached)).toBeNull();
+    first.textRoot.remove();
+    expect(owner.reader.readTextNodeRange(blockId, localLink)).toBeNull();
+    expect(
+      owner.reader.readTextNodeRange("missing" as BlockId, foreignLink),
+    ).toBeNull();
   });
 
   it("uses the registered text root without scanning the block shell", () => {
@@ -246,7 +545,7 @@ describe("editor document geometry owner", () => {
     const { textRoot } = mountTextGeometry(
       owner,
       blockId,
-      'a<br><br class="ProseMirror-trailingBreak" data-editor-read-trailing-break="true">',
+      'a<br><br class="ProseMirror-trailingBreak" data-editor-canonical-trailing-break="true">',
     );
     textRoot.style.lineHeight = "18px";
     mockTextUnitRangeRects(rect(110, 210, 8, 18));

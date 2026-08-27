@@ -19,10 +19,7 @@ import type {
   AdditionalSelectionRecord,
   CollaborationSubjectKey,
 } from "../../../runtime/collaboration/contracts.ts";
-import type {
-  EditableEditor,
-  ReadEditor,
-} from "../../../runtime/document/contracts.ts";
+import type { EditableEditor } from "../../../runtime/document/contracts.ts";
 import type {
   EditorDocumentGeometryReader,
   EditorDocumentRect,
@@ -40,17 +37,11 @@ export interface SelectionPaintLayerProps {
   readonly transientPointerPaint?: TransientPointerSelectionPaint | null;
 }
 
-export type SelectionPaintEditor =
-  | Pick<ReadEditor, "editable" | "selection" | "selectionPaint" | "geometry">
-  | (Pick<
-      EditableEditor,
-      | "editable"
-      | "selection"
-      | "selectionPaint"
-      | "geometry"
-      | "additionalSelections"
-    > &
-      EditorSelectionGraphReader);
+export type SelectionPaintEditor = Pick<
+  EditableEditor,
+  "selection" | "selectionPaint" | "geometry" | "additionalSelections"
+> &
+  EditorSelectionGraphReader;
 
 /** Web-local derivative paint; it contains no logical or stable selection. */
 export interface TransientPointerSelectionPaint {
@@ -92,8 +83,6 @@ const emptyPaintSubjects = Object.freeze(
 const emptyRenderedPaint = Object.freeze(
   [],
 ) as readonly RenderedSelectionPaint[];
-const subscribeNever = () => () => undefined;
-const readEmptyAdditionalSelections = () => emptyAdditionalSelections;
 
 export function SelectionPaintLayer({
   editor,
@@ -104,22 +93,19 @@ export function SelectionPaintLayer({
     editor.selectionPaint.getSnapshot,
     editor.selectionPaint.getSnapshot,
   );
-  const additionalReader = editor.editable ? editor.additionalSelections : null;
+  const additionalReader = editor.additionalSelections;
   const subscribeAdditional = useCallback(
-    (listener: () => void) =>
-      additionalReader
-        ? additionalReader.subscribe(listener)
-        : subscribeNever(),
+    (listener: () => void) => additionalReader.subscribe(listener),
     [additionalReader],
   );
   const readAdditional = useCallback(
-    () => additionalReader?.getSnapshot() ?? emptyAdditionalSelections,
+    () => additionalReader.getSnapshot(),
     [additionalReader],
   );
   const additionalSelections = useSyncExternalStore(
-    additionalReader ? subscribeAdditional : subscribeNever,
-    additionalReader ? readAdditional : readEmptyAdditionalSelections,
-    readEmptyAdditionalSelections,
+    subscribeAdditional,
+    readAdditional,
+    () => emptyAdditionalSelections,
   );
   const model = useMemo(
     () =>
@@ -189,28 +175,22 @@ export function SelectionPaintLayer({
         model.localPlan?.sourceSelectionRevision
       }
       data-editor-selection-additional-subject-count={
-        editor.editable ? additionalSelections.length : undefined
+        additionalSelections.length
       }
       data-editor-selection-additional-resolved-subject-count={
-        editor.editable
-          ? additionalSelections.filter(
-              (selection) => selection.resolution === "resolved",
-            ).length
-          : undefined
+        additionalSelections.filter(
+          (selection) => selection.resolution === "resolved",
+        ).length
       }
       data-editor-selection-additional-unresolved-subject-count={
-        editor.editable
-          ? additionalSelections.filter(
-              (selection) => selection.resolution === "unresolved",
-            ).length
-          : undefined
+        additionalSelections.filter(
+          (selection) => selection.resolution === "unresolved",
+        ).length
       }
       data-editor-selection-additional-invalid-subject-count={
-        editor.editable
-          ? additionalSelections.filter(
-              (selection) => selection.resolution === "invalid",
-            ).length
-          : undefined
+        additionalSelections.filter(
+          (selection) => selection.resolution === "invalid",
+        ).length
       }
       data-editor-selection-rendered-primitive-count={rendered.length}
       aria-hidden="true"
@@ -295,7 +275,6 @@ function createSelectionPaintModel(
     });
   }
   for (const record of additionalSelections) {
-    if (!editor.editable) continue;
     if (!record.active || record.resolution !== "resolved") continue;
     const selection = record.resolvedSelection;
     if (!selection || selection.kind !== "document") continue;

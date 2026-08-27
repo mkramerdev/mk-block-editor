@@ -29,7 +29,6 @@ describe("SelectionPaintLayer", () => {
     let invalidate: () => void = () => undefined;
     const noPaint = { kind: "none" as const };
     const editor = {
-      editable: false,
       selection: {
         getSnapshot: () => selection,
         subscribe: (listener: () => void) => {
@@ -42,6 +41,8 @@ describe("SelectionPaintLayer", () => {
         subscribe: () => () => undefined,
       },
       geometry: geometryReader(),
+      additionalSelections: additionalSelectionReader([]),
+      ...selectionGraph("textBlock"),
     } satisfies SelectionPaintEditor;
     const view = render(<SelectionPaintLayer editor={editor} />);
 
@@ -62,7 +63,7 @@ describe("SelectionPaintLayer", () => {
     ]);
     const view = render(
       <SelectionPaintLayer
-        editor={readEditor(rangeSelection(1, 4), {
+        editor={localEditor(rangeSelection(1, 4), {
           readTextRangeRects,
         })}
       />,
@@ -197,7 +198,7 @@ describe("SelectionPaintLayer", () => {
     const readTextRangeRects = vi.fn(() => []);
     const view = render(
       <SelectionPaintLayer
-        editor={readEditor(completeEmptySelection(), {
+        editor={localEditor(completeEmptySelection(), {
           readTextCanonicalLength: () => 0,
           readTextRootRect,
           readTextRangeRects,
@@ -217,7 +218,7 @@ describe("SelectionPaintLayer", () => {
     const readBlockSelectionRect = vi.fn(() => rect(6, 9, 40, 20));
     const point = {
       blockId,
-      blockType: "divider",
+      blockType: "atomicBlock",
       blockCategory: "object" as const,
       textOffset: 0,
       textAnchor: null,
@@ -309,7 +310,7 @@ describe("SelectionPaintLayer", () => {
     let invalidate: () => void = () => undefined;
     const unsubscribe = vi.fn();
     const readTextRangeRects = vi.fn(() => [rect(1, 2, 8, 10)]);
-    const editor = readEditor(rangeSelection(0, 2), {
+    const editor = localEditor(rangeSelection(0, 2), {
       readTextRangeRects,
       subscribe(listener) {
         invalidate = listener;
@@ -330,7 +331,7 @@ describe("SelectionPaintLayer", () => {
     const readTextRangeRects = vi.fn(() => [rect(1, 2, 1, 12)]);
     const view = render(
       <SelectionPaintLayer
-        editor={readEditor(rangeSelection(3, 3), {
+        editor={localEditor(rangeSelection(3, 3), {
           readTextCaretRect,
           readTextRangeRects,
           subscribe,
@@ -357,13 +358,14 @@ describe("SelectionPaintLayer", () => {
     };
     const noPaint = { kind: "none" as const };
     const editor = {
-      editable: false,
       selection: reader,
       selectionPaint: {
         getSnapshot: () => noPaint,
         subscribe: () => () => undefined,
       },
       geometry: geometryReader(),
+      additionalSelections: additionalSelectionReader([]),
+      ...selectionGraph("textBlock"),
     } satisfies SelectionPaintEditor;
     const view = render(<SelectionPaintLayer editor={editor} />);
     const layer = view.container.querySelector(
@@ -388,7 +390,7 @@ describe("SelectionPaintLayer", () => {
       const readTextCaretRect = vi.fn(() => rect(7, 11, 1, 14));
       const view = render(
         <SelectionPaintLayer
-          editor={readEditor(rangeSelection(3, 3, affinity), {
+          editor={localEditor(rangeSelection(3, 3, affinity), {
             readTextCaretRect,
           })}
         />,
@@ -401,43 +403,28 @@ describe("SelectionPaintLayer", () => {
     },
   );
 
-  it("never requests or subscribes to additional state in read mode", () => {
-    const editor = readEditor(noneSelection());
-    Object.defineProperty(editor, "additionalSelections", {
-      get() {
-        throw new Error("read mode requested additional selections");
-      },
-    });
-    expect(() => render(<SelectionPaintLayer editor={editor} />)).not.toThrow();
-  });
 });
 
-function readEditor(
+function localEditor(
   selection: CanonicalLocalSelection,
   geometryOverrides: Partial<EditorDocumentGeometryReader> = {},
-): Extract<SelectionPaintEditor, { readonly editable: false }> {
-  return {
-    editable: false,
-    selection: selectionReader(selection),
-    selectionPaint: selectionPaintReader(selection),
-    geometry: geometryReader(geometryOverrides),
-  } satisfies SelectionPaintEditor;
+): SelectionPaintEditor {
+  return editableEditor(selection, [], geometryOverrides);
 }
 
 function editableEditor(
   selection: CanonicalLocalSelection,
   additional: readonly AdditionalSelectionRecord[],
   geometryOverrides: Partial<EditorDocumentGeometryReader> = {},
-): Extract<SelectionPaintEditor, { readonly editable: true }> {
+): SelectionPaintEditor {
   const resolvedDocumentSelection = additional.find(
     (record) => record.resolvedSelection?.kind === "document",
   )?.resolvedSelection;
   const blockType =
     resolvedDocumentSelection?.kind === "document"
       ? resolvedDocumentSelection.anchor.blockType
-      : "paragraph";
+      : "textBlock";
   return {
-    editable: true,
     selection: selectionReader(selection),
     selectionPaint: selectionPaintReader(selection),
     geometry: geometryReader(geometryOverrides),
@@ -456,16 +443,42 @@ function editableEditor(
     getRootBlockIds: () => [blockId],
     getChildBlockIds: () => [],
     readBlockSelectionModel: () =>
-      blockType === "divider" ? wholeSelection() : contentSelection(),
-    additionalSelections: {
-      getSnapshot: () => additional,
-      subscribe: () => () => undefined,
-      getBlockSnapshot: () => additional,
-      subscribeBlock: () => () => undefined,
-      getBlockInternalSnapshot: () => additional,
-      subscribeBlockInternal: () => () => undefined,
-    },
+      blockType === "atomicBlock" ? wholeSelection() : contentSelection(),
+    additionalSelections: additionalSelectionReader(additional),
   } satisfies SelectionPaintEditor;
+}
+
+function additionalSelectionReader(
+  additional: readonly AdditionalSelectionRecord[],
+) {
+  return {
+    getSnapshot: () => additional,
+    subscribe: () => () => undefined,
+    getBlockSnapshot: () => additional,
+    subscribeBlock: () => () => undefined,
+    getBlockInternalSnapshot: () => additional,
+    subscribeBlockInternal: () => () => undefined,
+  };
+}
+
+function selectionGraph(blockType: string) {
+  return {
+    getBlock: (candidate: BlockId) =>
+      candidate === blockId
+        ? ({
+            id: blockId,
+            type: blockType,
+            parentId: null,
+            tombstone: null,
+            metadataVersion: "selection-paint-metadata",
+            contentVersion: asContentVersion("selection-paint-content"),
+          } satisfies VersionedBlock)
+        : null,
+    getParentId: () => null,
+    getRootBlockIds: () => [blockId],
+    getChildBlockIds: () => [],
+    readBlockSelectionModel: () => contentSelection(),
+  };
 }
 
 function selectionReader(selection: CanonicalLocalSelection) {
@@ -540,7 +553,7 @@ function completeEmptySelection(): CanonicalLocalSelection {
     coverage: "complete-content" as const,
     coverageResult: {
       blockId,
-      blockType: "paragraph",
+      blockType: "textBlock",
       modelId: "content",
       coverage: "complete-content" as const,
       paint: { kind: "content" as const },
@@ -595,12 +608,12 @@ function textRangeBlock(
   const coverage = from === to ? ("none" as const) : ("partial" as const);
   return {
     blockId,
-    blockType: "paragraph",
+    blockType: "textBlock",
     category: "text" as const,
     coverage,
     coverageResult: {
       blockId,
-      blockType: "paragraph",
+      blockType: "textBlock",
       modelId: "content",
       coverage,
       ...(coverage === "none" ? {} : { paint: { kind: "content" as const } }),
@@ -618,7 +631,7 @@ function point(
 ): EditorLogicalSelectionPoint {
   return {
     blockId,
-    blockType: "paragraph",
+    blockType: "textBlock",
     blockCategory: "text",
     textOffset: offset,
     textAnchor: {
@@ -637,12 +650,14 @@ function geometryReader(
   return {
     getRevision: () => 0,
     readBlockShellRect: () => null,
+    readViewportBlockShellRect: () => null,
     readBlockSelectionRect: () => null,
     readViewportBlockSelectionRect: () => null,
     readTextCaretRect: () => null,
     readTextRootRect: () => null,
     readViewportTextCaretRect: () => null,
     readTextRangeRects: () => [],
+    readTextNodeRange: () => null,
     readTextCanonicalLength: () => 5,
     readTextVisualRowBoundary: () => null,
     moveTextVertically: () => ({ kind: "unavailable", reason: "unavailable" }),

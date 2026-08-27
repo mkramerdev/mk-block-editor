@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createBlockRichTextContentFromPlainText } from "@repo/editor-core/content/rich-text";
 import type { VersionedBlock } from "@repo/editor-core/document";
 import {
@@ -7,9 +7,13 @@ import {
   createCollisionSafeBlockIdAllocator,
   reidentifyCanonicalBlockFragment,
   type CanonicalBlockFragment,
+  type CanonicalBlockFragmentCandidate,
 } from "@repo/editor-core/editing";
 import { asBlockId, type BlockId } from "@repo/editor-core/kernel";
-import { exportCanonicalFragmentPlainText } from "@repo/editor-web/clipboard-runtime";
+import {
+  createEditorClipboardBoundary,
+  exportCanonicalFragmentPlainText,
+} from "@repo/editor-web/clipboard-runtime";
 import { firstDraftBlockDefinitions } from "../../first-draft-definition.tsx";
 import { createFirstDraftSnapshot } from "../../first-draft-fixture.ts";
 import {
@@ -17,10 +21,25 @@ import {
   materializeFirstDraftTableCellRange,
 } from "./clipboard.ts";
 
+const validationProbe = vi.hoisted(() => ({ calls: 0 }));
+
+vi.mock("@repo/editor-core/editing", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@repo/editor-core/editing")>();
+  return {
+    ...actual,
+    assertValidCanonicalBlockFragment: (...args: Parameters<
+      typeof actual.assertValidCanonicalBlockFragment
+    >) => {
+      validationProbe.calls += 1;
+      return actual.assertValidCanonicalBlockFragment(...args);
+    },
+  };
+});
+
 describe("First Draft table clipboard contribution", () => {
   it("materializes a backward 2x2 direct-cell table with fresh identities and TSV", () => {
     const snapshot = createFirstDraftSnapshot();
-    const fragment = materializeFirstDraftTableCellRange({
+    const candidate = materializeFirstDraftTableCellRange({
       hostBlockId: "fd-table" as BlockId,
       selection: {
         kind: "cell-range",
@@ -40,8 +59,26 @@ describe("First Draft table clipboard contribution", () => {
       getChildBlockIds: (id) => snapshot.childIdsByParentId[id] ?? [],
       getParentId: (id) => snapshot.blocks[id]?.parentId ?? null,
       readBlockContent: (id) => snapshot.content[id] ?? null,
-      blockDefinitions: firstDraftBlockDefinitions,
     });
+    validationProbe.calls = 0;
+    const clipboard = new MemoryDataTransfer();
+    const boundary = createEditorClipboardBoundary({
+      blockDefinitions: firstDraftBlockDefinitions,
+      plainTextImportBlockType: "paragraph",
+      materializeSelection: () => candidate,
+      plainTextExportHandlers:
+        firstDraftTableClipboardCodecs.plainTextExportHandlers,
+      htmlExportHandlers: firstDraftTableClipboardCodecs.htmlExportHandlers,
+    });
+    expect(
+      boundary.writeSelection(
+        clipboard.asDataTransfer(),
+        {} as import("@repo/editor-react/selection").EditorSelectionSnapshot,
+      ),
+    ).toBe(true);
+    expect(validationProbe.calls).toBe(1);
+    expect(clipboard.writes).toEqual(["text/plain", "text/html"]);
+    const fragment = finalizeCandidate(candidate);
     expect(fragment).not.toBeNull();
     const table = fragment!.blocks[0]!;
     const rows = fragment!.blocks.filter(
@@ -52,10 +89,10 @@ describe("First Draft table clipboard contribution", () => {
     );
     expect(rows).toHaveLength(2);
     expect(cells.map((cell) => cell.plainText)).toEqual([
-      "Ada",
+      "Maya Chen",
       "In progress",
-      "Mina",
-      "Planned",
+      "Noah Williams",
+      "Ready for review",
     ]);
     expect(cells.every((cell) => cell.type === "tableCell")).toBe(true);
     expect(fragment!.blocks.some((block) => snapshot.blocks[block.id])).toBe(
@@ -81,7 +118,7 @@ describe("First Draft table clipboard contribution", () => {
         defaultTextBlockType: "paragraph",
         exportHandlers: firstDraftTableClipboardCodecs.plainTextExportHandlers,
       }),
-    ).toBe("Ada\tIn progress\nMina\tPlanned");
+    ).toBe("Maya Chen\tIn progress\nNoah Williams\tReady for review");
   });
 
   it("materializes TSV and semantic HTML tables with table-owned column identities", () => {
@@ -208,7 +245,6 @@ describe("First Draft table clipboard contribution", () => {
       getChildBlockIds: (id: BlockId) => snapshot.childIdsByParentId[id] ?? [],
       getParentId: (id: BlockId) => snapshot.blocks[id]?.parentId ?? null,
       readBlockContent: (id: BlockId) => snapshot.content[id] ?? null,
-      blockDefinitions: firstDraftBlockDefinitions,
     };
     expect(
       materializeFirstDraftTableCellRange({
@@ -263,6 +299,19 @@ function expectValidMaterializedTable(
   ).toEqual(expectedCellText);
 }
 
+function finalizeCandidate(
+  candidate: CanonicalBlockFragmentCandidate | null,
+): CanonicalBlockFragment | null {
+  if (!candidate) return null;
+  return createCanonicalBlockFragment({
+    blocks: candidate.blocks,
+    rootBlockIds: candidate.rootBlockIds,
+    start: candidate.start,
+    end: candidate.end,
+    blockDefinitions: firstDraftBlockDefinitions,
+  });
+}
+
 function reidentifyForPaste(
   fragment: CanonicalBlockFragment,
   firstSuffix: number,
@@ -282,4 +331,26 @@ function reidentifyForPaste(
     blockDefinitions: firstDraftBlockDefinitions,
     allocateBlockId: allocator.allocateBlockId,
   });
+}
+
+class MemoryDataTransfer {
+  readonly values = new Map<string, string>();
+  readonly writes: string[] = [];
+
+  setData(format: string, value: string): void {
+    this.writes.push(format);
+    this.values.set(format, value);
+  }
+
+  getData(format: string): string {
+    return this.values.get(format) ?? "";
+  }
+
+  get types(): readonly string[] {
+    return [...this.values.keys()];
+  }
+
+  asDataTransfer(): DataTransfer {
+    return this as unknown as DataTransfer;
+  }
 }

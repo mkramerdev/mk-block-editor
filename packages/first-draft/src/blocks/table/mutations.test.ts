@@ -20,12 +20,22 @@ import {
   TABLE_COLUMN_WIDTHS_FIELD,
 } from "./model.ts";
 import {
-  appendFirstDraftTableColumn,
-  appendFirstDraftTableRow,
+  deleteFirstDraftTableColumn,
+  deleteFirstDraftTableRow,
+  duplicateFirstDraftTableColumn,
+  duplicateFirstDraftTableRow,
+  insertFirstDraftTableColumn,
+  insertFirstDraftTableRow,
+  moveFirstDraftTableColumn,
+  moveFirstDraftTableRow,
   resizeFirstDraftTableColumn,
 } from "./mutations.ts";
 
 const tableId = asBlockId("fd-table");
+
+function canonicalColumnTarget(columnId: string) {
+  return { kind: "canonical", columnId } as const;
+}
 const canonicalIdPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const invalidColumnMetadataCases: readonly {
@@ -67,6 +77,305 @@ afterEach(() => {
 });
 
 describe("First Draft table mutations", () => {
+  it("moves an existing row upward or downward in one preserving transaction", () => {
+    const { editor, changes } = createEditor(createFirstDraftSnapshot());
+    const canonical = [...editor.getChildBlockIds(tableId)];
+    const source = canonical[0]!;
+    const sourceCells = [...editor.getChildBlockIds(source)];
+    const transaction = vi.spyOn(editor, "transaction");
+    const selection = vi.spyOn(editor, "setTransactionSelection");
+    const finalOrder = [...canonical.slice(1), source];
+
+    const result = moveFirstDraftTableRow(
+      editor,
+      tableId,
+      source,
+      finalOrder,
+    );
+
+    expect(result).toMatchObject({
+      kind: "moved",
+      rowId: source,
+      rowIndex: finalOrder.length - 1,
+    });
+    expect(transaction).toHaveBeenCalledOnce();
+    expect(selection).toHaveBeenCalledOnce();
+    expect(selection).toHaveBeenCalledWith({ kind: "preserve" });
+    expect(changes).toHaveLength(1);
+    expect(editor.getChildBlockIds(tableId)).toEqual(finalOrder);
+    expect(editor.getChildBlockIds(source)).toEqual(sourceCells);
+
+    expect(editor.undo()).toMatchObject({ status: "applied" });
+    expect(editor.getChildBlockIds(tableId)).toEqual(canonical);
+    expect(editor.redo()).toMatchObject({ status: "applied" });
+    expect(editor.getChildBlockIds(tableId)).toEqual(finalOrder);
+  });
+
+  it("does not open a transaction for a semantic row no-op", () => {
+    const { editor, changes } = createEditor(createFirstDraftSnapshot());
+    const canonical = editor.getChildBlockIds(tableId);
+    const transaction = vi.spyOn(editor, "transaction");
+
+    expect(
+      moveFirstDraftTableRow(
+        editor,
+        tableId,
+        canonical[1]!,
+        canonical,
+      ),
+    ).toEqual({ kind: "no-op", rowId: canonical[1], rowIndex: 1 });
+    expect(transaction).not.toHaveBeenCalled();
+    expect(changes).toEqual([]);
+  });
+
+  it("rejects stale row orders before a transaction", () => {
+    const { editor } = createEditor(createFirstDraftSnapshot());
+    const canonical = editor.getChildBlockIds(tableId);
+    const transaction = vi.spyOn(editor, "transaction");
+    expect(() =>
+      moveFirstDraftTableRow(editor, tableId, canonical[0]!, [
+        canonical[0]!,
+        canonical[0]!,
+        ...canonical.slice(2),
+      ]),
+    ).toThrow("stale or invalid order");
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it("moves one existing cell per row and column metadata in one preserving transaction", () => {
+    const { editor, changes } = createEditor(createFirstDraftSnapshot());
+    const columnIds = [...readColumnIds(editor)];
+    const rows = editor.getChildBlockIds(tableId);
+    const cellsBefore = rows.map((rowId) => [
+      ...editor.getChildBlockIds(rowId),
+    ]);
+    const contentsBefore = cellsBefore.map((cells) =>
+      cells.map((cellId) => editor.readBlockContent(cellId, "tableCell")),
+    );
+    const widthsBefore = editor.getBlock(tableId)?.metadata?.columnWidths;
+    const transaction = vi.spyOn(editor, "transaction");
+    const moveBlocks = vi.spyOn(editor, "moveBlocks");
+    const selection = vi.spyOn(editor, "setTransactionSelection");
+
+    const result = moveFirstDraftTableColumn(
+      editor,
+      tableId,
+      canonicalColumnTarget(columnIds[0]!),
+      [columnIds[1]!, columnIds[2]!, columnIds[0]!].map(
+        canonicalColumnTarget,
+      ),
+    );
+
+    expect(result).toMatchObject({
+      kind: "moved",
+      columnId: columnIds[0],
+      columnIndex: 2,
+      cellIds: cellsBefore.map((cells) => cells[0]),
+      expectedColumnIds: [columnIds[1], columnIds[2], columnIds[0]],
+    });
+    expect(transaction).toHaveBeenCalledOnce();
+    expect(moveBlocks).toHaveBeenCalledTimes(rows.length);
+    expect(selection).toHaveBeenCalledOnce();
+    expect(selection).toHaveBeenCalledWith({ kind: "preserve" });
+    expect(changes).toHaveLength(1);
+    expect(readColumnIds(editor)).toEqual([
+      columnIds[1],
+      columnIds[2],
+      columnIds[0],
+    ]);
+    rows.forEach((rowId, rowIndex) => {
+      expect(editor.getChildBlockIds(rowId)).toEqual([
+        cellsBefore[rowIndex]![1],
+        cellsBefore[rowIndex]![2],
+        cellsBefore[rowIndex]![0],
+      ]);
+      expect(
+        editor
+          .getChildBlockIds(rowId)
+          .map((cellId) => editor.readBlockContent(cellId, "tableCell")),
+      ).toEqual([
+        contentsBefore[rowIndex]![1],
+        contentsBefore[rowIndex]![2],
+        contentsBefore[rowIndex]![0],
+      ]);
+    });
+    expect(editor.getBlock(tableId)?.metadata?.columnWidths).toEqual(
+      widthsBefore,
+    );
+  });
+
+  it("does not open a transaction for a semantic column no-op", () => {
+    const { editor, changes } = createEditor(createFirstDraftSnapshot());
+    const columnIds = readColumnIds(editor);
+    const transaction = vi.spyOn(editor, "transaction");
+
+    expect(
+      moveFirstDraftTableColumn(
+        editor,
+        tableId,
+        canonicalColumnTarget(columnIds[1]!),
+        columnIds.map(canonicalColumnTarget),
+      ),
+    ).toMatchObject({ kind: "no-op", columnIndex: 1 });
+    expect(transaction).not.toHaveBeenCalled();
+    expect(changes).toEqual([]);
+  });
+
+  it.each(invalidColumnMetadataCases)(
+    "normalizes $name and moves cells in the same transaction",
+    ({ columnIds, widths, expectedWidths }) => {
+      const { editor, changes } = createEditor(
+        snapshotWithTableMetadata(columnIds, widths),
+      );
+      const rows = editor.getChildBlockIds(tableId);
+      const cellsBefore = rows.map((rowId) => editor.getChildBlockIds(rowId));
+      const allocated = ["normalized-1", "normalized-2", "normalized-3"];
+      const transaction = vi.spyOn(editor, "transaction");
+
+      const result = moveFirstDraftTableColumn(
+        editor,
+        tableId,
+        {
+          kind: "synthetic-presentation",
+          presentationId: "column-2",
+          indexAtOpen: 1,
+          columnCountAtOpen: 3,
+        },
+        [0, 2, 1].map((index) => ({
+          kind: "synthetic-presentation" as const,
+          presentationId: `column-${index + 1}`,
+          indexAtOpen: index,
+          columnCountAtOpen: 3,
+        })),
+        { createColumnId: () => allocated.shift() ?? "exhausted" },
+      );
+
+      expect(result).toMatchObject({
+        kind: "moved",
+        columnIndex: 2,
+        expectedColumnIds: [
+          "normalized-1",
+          "normalized-3",
+          "normalized-2",
+        ],
+      });
+      expect(transaction).toHaveBeenCalledOnce();
+      expect(changes).toHaveLength(1);
+      expect(editor.getBlock(tableId)?.metadata?.columnWidths).toEqual(
+        expectedWidths,
+      );
+      rows.forEach((rowId, rowIndex) => {
+        expect(editor.getChildBlockIds(rowId)).toEqual([
+          cellsBefore[rowIndex]![0],
+          cellsBefore[rowIndex]![2],
+          cellsBefore[rowIndex]![1],
+        ]);
+      });
+    },
+  );
+
+  it("rolls back every staged row move when a later column move operation fails", () => {
+    const { editor, changes } = createEditor(createFirstDraftSnapshot());
+    const before = readTableState(editor);
+    const columnIds = readColumnIds(editor);
+    const originalMoveBlocks = editor.moveBlocks.bind(editor);
+    let moves = 0;
+    vi.spyOn(editor, "moveBlocks").mockImplementation((input) => {
+      moves += 1;
+      if (moves === 2) throw new Error("forced staged column failure");
+      return originalMoveBlocks(input);
+    });
+
+    expect(() =>
+      moveFirstDraftTableColumn(
+        editor,
+        tableId,
+        canonicalColumnTarget(columnIds[0]!),
+        [columnIds[1]!, columnIds[2]!, columnIds[0]!].map(
+          canonicalColumnTarget,
+        ),
+      ),
+    ).toThrow();
+    expect(readTableState(editor)).toEqual(before);
+    expect(changes).toEqual([]);
+    expect(editor.canUndo).toBe(false);
+  });
+
+  it("fails synthetic column identity exhaustion before opening a transaction", () => {
+    const { editor, changes } = createEditor(
+      snapshotWithTableMetadata(undefined, {}),
+    );
+    const before = readTableState(editor);
+    const transaction = vi.spyOn(editor, "transaction");
+    const synthetic = (index: number) => ({
+      kind: "synthetic-presentation" as const,
+      presentationId: `column-${index + 1}`,
+      indexAtOpen: index,
+      columnCountAtOpen: 3,
+    });
+
+    expect(() =>
+      moveFirstDraftTableColumn(
+        editor,
+        tableId,
+        synthetic(0),
+        [synthetic(1), synthetic(2), synthetic(0)],
+        { createColumnId: () => "" },
+      ),
+    ).toThrow("unable to allocate a unique table column id");
+    expect(transaction).not.toHaveBeenCalled();
+    expect(readTableState(editor)).toEqual(before);
+    expect(changes).toEqual([]);
+  });
+
+  it.each([
+    "insert-row",
+    "delete-row",
+    "duplicate-row",
+    "insert-column",
+    "delete-column",
+    "duplicate-column",
+  ] as const)("requests one atomic selection clear for %s", (action) => {
+    const { editor, changes } = createEditor(createFirstDraftSnapshot());
+    const selection = vi.spyOn(editor, "setTransactionSelection");
+    const targetRowId = editor.getChildBlockIds(tableId)[1]!;
+    const targetColumnId = readColumnIds(editor)[1]!;
+
+    switch (action) {
+      case "insert-row":
+        insertFirstDraftTableRow(editor, tableId, 1);
+        break;
+      case "delete-row":
+        deleteFirstDraftTableRow(editor, tableId, targetRowId);
+        break;
+      case "duplicate-row":
+        duplicateFirstDraftTableRow(editor, tableId, targetRowId);
+        break;
+      case "insert-column":
+        insertFirstDraftTableColumn(editor, tableId, 1);
+        break;
+      case "delete-column":
+        deleteFirstDraftTableColumn(
+          editor,
+          tableId,
+          canonicalColumnTarget(targetColumnId),
+        );
+        break;
+      case "duplicate-column":
+        duplicateFirstDraftTableColumn(
+          editor,
+          tableId,
+          canonicalColumnTarget(targetColumnId),
+        );
+        break;
+    }
+
+    expect(selection).toHaveBeenCalledOnce();
+    expect(selection).toHaveBeenCalledWith({ kind: "clear" });
+    expect(changes).toHaveLength(1);
+    expectClearedSelection(editor, changes[0]!);
+  });
+
   it("materializes rows and cells against the active editor definition", () => {
     const baseDefinition = createFirstDraftEditorDefinition(
       createFirstDraftViewStateStore(),
@@ -96,7 +405,7 @@ describe("First Draft table mutations", () => {
     expect([...definitionReads]).toEqual(
       expect.arrayContaining(["tableRow", "tableCell"]),
     );
-    expectRectangularTable(editor, 4, 4);
+    expectRectangularTable(editor, 5, 4);
   });
 
   it("allocates canonical structural ids and a separate unique column id", () => {
@@ -108,11 +417,11 @@ describe("First Draft table mutations", () => {
     expect(row).not.toBeNull();
     if (!row) throw new Error("Expected a row append");
     expect(changes).toHaveLength(1);
-    expectSelection(editor, row.cellIds[0]!);
+    expectClearedSelection(editor, changes[0]!);
 
     const column = appendColumn(editor);
     expect(changes).toHaveLength(2);
-    expectSelection(editor, column.cellIds[0]!);
+    expectClearedSelection(editor, changes[1]!);
 
     const structuralIds = [row.rowId, ...row.cellIds, ...column.cellIds];
     expect(new Set(structuralIds).size).toBe(structuralIds.length);
@@ -131,11 +440,614 @@ describe("First Draft table mutations", () => {
         (block) => block.id === column.columnId,
       ),
     ).toBe(false);
-    expectRectangularTable(editor, 4, 4);
+    expectRectangularTable(editor, 5, 4);
     for (const cellId of [...row.cellIds, ...column.cellIds]) {
       expect(editor.readBlockPlainText(cellId, "tableCell")).toBe("");
     }
   });
+
+  it("inserts rows at the requested first, middle, and append positions", () => {
+    const { editor, changes } = createEditor(createFirstDraftSnapshot());
+    const originalRows = editor.getChildBlockIds(tableId);
+
+    const first = insertFirstDraftTableRow(editor, tableId, 0);
+    expect(editor.getChildBlockIds(tableId)).toEqual([
+      first.rowId,
+      ...originalRows,
+    ]);
+    expectClearedSelection(editor, changes[0]!);
+
+    const middle = insertFirstDraftTableRow(editor, tableId, 3);
+    expect(editor.getChildBlockIds(tableId)[3]).toBe(middle.rowId);
+    expectClearedSelection(editor, changes[1]!);
+
+    const appended = insertFirstDraftTableRow(
+      editor,
+      tableId,
+      editor.getChildBlockIds(tableId).length,
+    );
+    expect(editor.getChildBlockIds(tableId).at(-1)).toBe(appended.rowId);
+    expect(changes).toHaveLength(3);
+    expectClearedSelection(editor, changes[2]!);
+    expectRectangularTable(editor, 7, 3);
+  });
+
+  it.each([
+    { name: "first", index: 0 },
+    { name: "middle", index: 1 },
+    { name: "final deletable", index: 3 },
+  ])("deletes the $name row and clears selection", ({ index }) => {
+    const { editor, changes } = createEditor(createFirstDraftSnapshot());
+    const beforeRows = editor.getChildBlockIds(tableId);
+    const rowId = beforeRows[index]!;
+    const result = deleteFirstDraftTableRow(editor, tableId, rowId);
+
+    expect(result).toMatchObject({ rowId, rowIndex: index });
+    expect(result).not.toHaveProperty("selectionCellId");
+    expect(editor.getChildBlockIds(tableId)).toEqual(
+      beforeRows.filter((candidate) => candidate !== rowId),
+    );
+    expect(editor.getBlock(rowId)?.tombstone).not.toBeNull();
+    expect(changes).toHaveLength(1);
+    expectClearedSelection(editor, changes[0]!);
+    expectRectangularTable(editor, 3, 3);
+  });
+
+  it("rejects final-row deletion before opening a transaction", () => {
+    const { editor, changes } = createEditor(createFirstDraftSnapshot());
+    while (editor.getChildBlockIds(tableId).length > 1) {
+      deleteFirstDraftTableRow(
+        editor,
+        tableId,
+        editor.getChildBlockIds(tableId).at(-1)!,
+      );
+    }
+    changes.splice(0);
+    const before = readTableState(editor);
+    const beforeSelection = editor.selectionController.getCanonicalSnapshot();
+    const transaction = vi.spyOn(editor, "transaction");
+
+    expect(() =>
+      deleteFirstDraftTableRow(
+        editor,
+        tableId,
+        editor.getChildBlockIds(tableId)[0]!,
+      ),
+    ).toThrow("cannot delete the final table row");
+    expect(transaction).not.toHaveBeenCalled();
+    expect(changes).toEqual([]);
+    expect(readTableState(editor)).toEqual(before);
+    expect(editor.selectionController.getCanonicalSnapshot()).toEqual(
+      beforeSelection,
+    );
+  });
+
+  it("duplicates a complete formatted row with fresh structural identities", () => {
+    const { editor, changes } = createEditor(createFirstDraftSnapshot());
+    const sourceRowId = editor.getChildBlockIds(tableId)[0]!;
+    const sourceCellIds = editor.getChildBlockIds(sourceRowId);
+    const sourceContents = sourceCellIds.map((cellId) =>
+      editor.readBlockContent(cellId, "tableCell"),
+    );
+
+    const duplicate = duplicateFirstDraftTableRow(editor, tableId, sourceRowId);
+
+    expect(editor.getChildBlockIds(tableId)[1]).toBe(duplicate.rowId);
+    expect(duplicate.rowId).not.toBe(sourceRowId);
+    expect(new Set(duplicate.cellIds).size).toBe(sourceCellIds.length);
+    expect(duplicate.cellIds).not.toEqual(sourceCellIds);
+    expect(
+      duplicate.cellIds.map((cellId) =>
+        editor.readBlockContent(cellId, "tableCell"),
+      ),
+    ).toEqual(sourceContents);
+    expect(
+      sourceCellIds.map((cellId) =>
+        editor.readBlockContent(cellId, "tableCell"),
+      ),
+    ).toEqual(sourceContents);
+    expect(changes).toHaveLength(1);
+    expectClearedSelection(editor, changes[0]!);
+  });
+
+  it("duplicates a row whose cells are all empty", () => {
+    const { editor, changes } = createEditor(createFirstDraftSnapshot());
+    const empty = insertFirstDraftTableRow(
+      editor,
+      tableId,
+      editor.getChildBlockIds(tableId).length,
+    );
+    changes.splice(0);
+
+    const duplicate = duplicateFirstDraftTableRow(editor, tableId, empty.rowId);
+
+    expect(duplicate.cellIds).toHaveLength(3);
+    expect(
+      duplicate.cellIds.map((cellId) =>
+        editor.readBlockPlainText(cellId, "tableCell"),
+      ),
+    ).toEqual(["", "", ""]);
+    expect(changes).toHaveLength(1);
+  });
+
+  it("duplicates inline atoms and valid cell metadata without sharing identity", () => {
+    const { editor, changes } = createEditor(createFirstDraftSnapshot());
+    const sourceRowId = editor.getChildBlockIds(tableId)[1]!;
+    const sourceCellId = editor.getChildBlockIds(sourceRowId)[1]!;
+    expect(
+      editor.updateInlineAtom({
+        blockId: sourceCellId,
+        range: { from: 0, to: 4 },
+        atom: { type: "mention", metadata: { id: "person-001" } },
+      }),
+    ).toBe(true);
+    expect(
+      editor.updateBlockMetadata(
+        [{ blockId: sourceCellId, values: { textAlign: "center" } }],
+        { editorSuggestion: null },
+      ),
+    ).toBe(true);
+    changes.splice(0);
+    const sourceContent = editor.readBlockContent(sourceCellId, "tableCell");
+
+    const duplicate = duplicateFirstDraftTableRow(editor, tableId, sourceRowId);
+    const duplicateCellId = duplicate.cellIds[1]!;
+
+    expect(editor.readBlockContent(duplicateCellId, "tableCell")).toEqual(
+      sourceContent,
+    );
+    expect(editor.getBlock(duplicateCellId)?.metadata).toEqual(
+      editor.getBlock(sourceCellId)?.metadata,
+    );
+    expect(duplicateCellId).not.toBe(sourceCellId);
+    expect(changes).toHaveLength(1);
+  });
+
+  it("inserts columns at the requested first, middle, and append positions", () => {
+    const { editor, changes } = createEditor(createFirstDraftSnapshot());
+    const originalColumnIds = readColumnIds(editor);
+    const originalFirstRow = editor.getChildBlockIds(
+      editor.getChildBlockIds(tableId)[0]!,
+    );
+
+    const first = insertFirstDraftTableColumn(editor, tableId, 0);
+    expect(readColumnIds(editor)).toEqual([
+      first.columnId,
+      ...originalColumnIds,
+    ]);
+    expect(
+      editor.getChildBlockIds(editor.getChildBlockIds(tableId)[0]!)[0],
+    ).toBe(first.cellIds[0]);
+
+    const middle = insertFirstDraftTableColumn(editor, tableId, 2);
+    expect(readColumnIds(editor)[2]).toBe(middle.columnId);
+
+    const appended = insertFirstDraftTableColumn(
+      editor,
+      tableId,
+      readColumnIds(editor).length,
+    );
+    expect(readColumnIds(editor).at(-1)).toBe(appended.columnId);
+    expect(editor.getChildBlockIds(tableId)).toHaveLength(4);
+    expect(originalFirstRow.every((cellId) => editor.getBlock(cellId))).toBe(
+      true,
+    );
+    expect(changes).toHaveLength(3);
+    expectClearedSelection(editor, changes[2]!);
+    expectRectangularTable(editor, 4, 6);
+  });
+
+  it.each([
+    { name: "first", index: 0 },
+    { name: "middle", index: 1 },
+    { name: "final deletable", index: 2 },
+  ])(
+    "deletes the $name column and only its width while clearing selection",
+    ({ index }) => {
+      const { editor, changes } = createEditor(createFirstDraftSnapshot());
+      const beforeColumnIds = readColumnIds(editor);
+      const sourceColumnId = beforeColumnIds[index]!;
+      const rowIds = editor.getChildBlockIds(tableId);
+      const targetCellIds = rowIds.map(
+        (rowId) => editor.getChildBlockIds(rowId)[index]!,
+      );
+      const result = deleteFirstDraftTableColumn(
+        editor,
+        tableId,
+        canonicalColumnTarget(sourceColumnId),
+      );
+
+      expect(result).toMatchObject({
+        columnId: sourceColumnId,
+        columnIndex: index,
+        cellIds: targetCellIds,
+      });
+      expect(result).not.toHaveProperty("selectionCellId");
+      expect(readColumnIds(editor)).toEqual(
+        beforeColumnIds.filter((columnId) => columnId !== sourceColumnId),
+      );
+      expect(editor.getBlock(tableId)?.metadata?.columnWidths).toEqual(
+        Object.fromEntries(
+          beforeColumnIds
+            .filter((columnId) => columnId !== sourceColumnId)
+            .map((columnId) => [columnId, 208]),
+        ),
+      );
+      for (const cellId of targetCellIds) {
+        expect(editor.getBlock(cellId)?.tombstone).not.toBeNull();
+      }
+      expect(changes).toHaveLength(1);
+      expectClearedSelection(editor, changes[0]!);
+      expectRectangularTable(editor, 4, 2);
+    },
+  );
+
+  it("rejects final-column deletion before opening a transaction", () => {
+    const { editor, changes } = createEditor(createFirstDraftSnapshot());
+    while (readColumnIds(editor).length > 1) {
+      deleteFirstDraftTableColumn(
+        editor,
+        tableId,
+        canonicalColumnTarget(readColumnIds(editor)[0]!),
+      );
+    }
+    changes.splice(0);
+    const before = readTableState(editor);
+    const beforeSelection = editor.selectionController.getCanonicalSnapshot();
+    const transaction = vi.spyOn(editor, "transaction");
+
+    expect(() =>
+      deleteFirstDraftTableColumn(
+        editor,
+        tableId,
+        canonicalColumnTarget(readColumnIds(editor)[0]!),
+      ),
+    ).toThrow("cannot delete the final table column");
+    expect(transaction).not.toHaveBeenCalled();
+    expect(changes).toEqual([]);
+    expect(readTableState(editor)).toEqual(before);
+    expect(editor.selectionController.getCanonicalSnapshot()).toEqual(
+      beforeSelection,
+    );
+  });
+
+  it("duplicates a formatted column with fresh cell and column identities", () => {
+    const { editor, changes } = createEditor(createFirstDraftSnapshot());
+    const sourceColumnId = readColumnIds(editor)[0]!;
+    const rowIds = editor.getChildBlockIds(tableId);
+    const sourceCellIds = rowIds.map(
+      (rowId) => editor.getChildBlockIds(rowId)[0]!,
+    );
+    const sourceContents = sourceCellIds.map((cellId) =>
+      editor.readBlockContent(cellId, "tableCell"),
+    );
+
+    const duplicate = duplicateFirstDraftTableColumn(
+      editor,
+      tableId,
+      canonicalColumnTarget(sourceColumnId),
+    );
+
+    expect(duplicate.sourceColumnId).toBe(sourceColumnId);
+    expect(duplicate.columnId).not.toBe(sourceColumnId);
+    expect(readColumnIds(editor)[1]).toBe(duplicate.columnId);
+    expect(duplicate.cellIds).not.toEqual(sourceCellIds);
+    expect(
+      duplicate.cellIds.map((cellId) =>
+        editor.readBlockContent(cellId, "tableCell"),
+      ),
+    ).toEqual(sourceContents);
+    expect(editor.getBlock(tableId)?.metadata?.columnWidths).toMatchObject({
+      [sourceColumnId]: 208,
+      [duplicate.columnId]: 208,
+    });
+    expect(changes).toHaveLength(1);
+    expectClearedSelection(editor, changes[0]!);
+  });
+
+  it("duplicates different per-row content including marks and an inline atom", () => {
+    const { editor, changes } = createEditor(createFirstDraftSnapshot());
+    const sourceColumnId = readColumnIds(editor)[0]!;
+    const sourceCellIds = editor
+      .getChildBlockIds(tableId)
+      .map((rowId) => editor.getChildBlockIds(rowId)[0]!);
+    expect(
+      editor.updateInlineAtom({
+        blockId: sourceCellIds[1]!,
+        range: { from: 0, to: 8 },
+        atom: { type: "mention", metadata: { id: "person-002" } },
+      }),
+    ).toBe(true);
+    changes.splice(0);
+    const sourceContents = sourceCellIds.map((cellId) =>
+      editor.readBlockContent(cellId, "tableCell"),
+    );
+
+    const duplicate = duplicateFirstDraftTableColumn(
+      editor,
+      tableId,
+      canonicalColumnTarget(sourceColumnId),
+    );
+
+    expect(
+      duplicate.cellIds.map((cellId) =>
+        editor.readBlockContent(cellId, "tableCell"),
+      ),
+    ).toEqual(sourceContents);
+    expect(new Set(duplicate.cellIds).size).toBe(sourceCellIds.length);
+    expect(
+      duplicate.cellIds.every((cellId) => !sourceCellIds.includes(cellId)),
+    ).toBe(true);
+    expect(changes).toHaveLength(1);
+  });
+
+  it("preserves default-width behavior when duplicating an implicit-width column", () => {
+    const sourceColumnId = "fd-table-column-b";
+    const snapshot = snapshotWithTableMetadata(
+      ["fd-table-column-a", sourceColumnId, "fd-table-column-c"],
+      {
+        "fd-table-column-a": 180,
+        "fd-table-column-c": 260,
+      },
+    );
+    const { editor } = createEditor(snapshot);
+
+    const duplicate = duplicateFirstDraftTableColumn(
+      editor,
+      tableId,
+      canonicalColumnTarget(sourceColumnId),
+    );
+    const widths = editor.getBlock(tableId)?.metadata?.columnWidths;
+
+    expect(widths).toEqual({
+      "fd-table-column-a": 180,
+      "fd-table-column-c": 260,
+    });
+    expect(widths).not.toHaveProperty(duplicate.columnId);
+  });
+
+  it("never falls back to a stale column index", () => {
+    const { editor, changes } = createEditor(createFirstDraftSnapshot());
+    const staleId = readColumnIds(editor)[1]!;
+    deleteFirstDraftTableColumn(
+      editor,
+      tableId,
+      canonicalColumnTarget(staleId),
+    );
+    changes.splice(0);
+    const before = readTableState(editor);
+    const transaction = vi.spyOn(editor, "transaction");
+
+    expect(() =>
+      duplicateFirstDraftTableColumn(
+        editor,
+        tableId,
+        canonicalColumnTarget(staleId),
+      ),
+    ).toThrow("cannot mutate a missing table column");
+    expect(transaction).not.toHaveBeenCalled();
+    expect(changes).toEqual([]);
+    expect(readTableState(editor)).toEqual(before);
+  });
+
+  it("normalizes a verified synthetic column target in the mutation commit", () => {
+    const { editor, changes } = createEditor(
+      snapshotWithTableMetadata(undefined, {
+        "column-1": 170,
+        "column-2": 210,
+      }),
+    );
+    const presentationId = readColumnIds(editor)[1]!;
+    const candidates = [
+      "normalized-a",
+      "normalized-b",
+      "normalized-c",
+      "duplicated-b",
+    ];
+
+    const result = duplicateFirstDraftTableColumn(
+      editor,
+      tableId,
+      {
+        kind: "synthetic-presentation",
+        presentationId,
+        indexAtOpen: 1,
+        columnCountAtOpen: 3,
+      },
+      {
+        createColumnId: () => candidates.shift() ?? "exhausted",
+      },
+    );
+
+    expect(result).toMatchObject({
+      sourceColumnId: "normalized-b",
+      columnId: "duplicated-b",
+      columnIndex: 2,
+    });
+    expect(readColumnIds(editor)).toEqual([
+      "normalized-a",
+      "normalized-b",
+      "duplicated-b",
+      "normalized-c",
+    ]);
+    expect(editor.getBlock(tableId)?.metadata?.columnWidths).toEqual({
+      "normalized-a": 170,
+      "normalized-b": 210,
+      "duplicated-b": 210,
+    });
+    expect(changes).toHaveLength(1);
+    expectRectangularTable(editor, 4, 4);
+  });
+
+  it("rejects a synthetic column target after the table shape changes", () => {
+    const { editor, changes } = createEditor(
+      snapshotWithTableMetadata(undefined, {}),
+    );
+    const presentationId = readColumnIds(editor)[1]!;
+    const before = readTableState(editor);
+    const transaction = vi.spyOn(editor, "transaction");
+
+    expect(() =>
+      duplicateFirstDraftTableColumn(editor, tableId, {
+        kind: "synthetic-presentation",
+        presentationId,
+        indexAtOpen: 1,
+        columnCountAtOpen: 4,
+      }),
+    ).toThrow("cannot mutate a stale synthetic table shape");
+    expect(transaction).not.toHaveBeenCalled();
+    expect(changes).toEqual([]);
+    expect(readTableState(editor)).toEqual(before);
+  });
+
+  it("rejects stale row identity and stale row parent before mutation", () => {
+    const first = createEditor(createFirstDraftSnapshot());
+    const firstTransaction = vi.spyOn(first.editor, "transaction");
+    expect(() =>
+      duplicateFirstDraftTableRow(
+        first.editor,
+        tableId,
+        asBlockId("missing-row"),
+      ),
+    ).toThrow("cannot mutate a missing table row");
+    expect(firstTransaction).not.toHaveBeenCalled();
+    expect(first.changes).toEqual([]);
+
+    const second = createEditor(createFirstDraftSnapshot());
+    const rowId = asBlockId("fd-table-row-2");
+    const getParentId = second.editor.getParentId.bind(second.editor);
+    vi.spyOn(second.editor, "getParentId").mockImplementation((blockId) =>
+      blockId === rowId ? null : getParentId(blockId),
+    );
+    const secondTransaction = vi.spyOn(second.editor, "transaction");
+    expect(() =>
+      deleteFirstDraftTableRow(second.editor, tableId, rowId),
+    ).toThrow("cannot mutate an invalid table row");
+    expect(secondTransaction).not.toHaveBeenCalled();
+    expect(second.changes).toEqual([]);
+  });
+
+  it("leaves snapshot and selection unchanged when the transaction rejects", () => {
+    const { editor, changes } = createEditor(createFirstDraftSnapshot());
+    const before = readTableState(editor);
+    const beforeSelection = editor.selectionController.getCanonicalSnapshot();
+    vi.spyOn(editor, "transaction").mockReturnValue({
+      ok: false,
+      phase: "commit",
+      message: "forced rejection",
+    });
+
+    expect(() => insertFirstDraftTableRow(editor, tableId, 1)).toThrow(
+      "table mutation was rejected: forced rejection",
+    );
+    expect(changes).toEqual([]);
+    expect(readTableState(editor)).toEqual(before);
+    expect(editor.selectionController.getCanonicalSnapshot()).toEqual(
+      beforeSelection,
+    );
+  });
+
+  it.each([
+    {
+      name: "row insert",
+      mutate: (editor: FirstDraftTestEditor) =>
+        insertFirstDraftTableRow(editor, tableId, 2),
+    },
+    {
+      name: "row delete",
+      mutate: (editor: FirstDraftTestEditor) =>
+        deleteFirstDraftTableRow(
+          editor,
+          tableId,
+          editor.getChildBlockIds(tableId)[1]!,
+        ),
+    },
+    {
+      name: "row duplicate",
+      mutate: (editor: FirstDraftTestEditor) =>
+        duplicateFirstDraftTableRow(
+          editor,
+          tableId,
+          editor.getChildBlockIds(tableId)[1]!,
+        ),
+    },
+    {
+      name: "row move",
+      mutate: (editor: FirstDraftTestEditor) => {
+        const rowIds = editor.getChildBlockIds(tableId);
+        return moveFirstDraftTableRow(editor, tableId, rowIds[0]!, [
+          ...rowIds.slice(1),
+          rowIds[0]!,
+        ]);
+      },
+    },
+    {
+      name: "column insert",
+      mutate: (editor: FirstDraftTestEditor) =>
+        insertFirstDraftTableColumn(editor, tableId, 1),
+    },
+    {
+      name: "column move",
+      mutate: (editor: FirstDraftTestEditor) => {
+        const columnIds = readColumnIds(editor);
+        return moveFirstDraftTableColumn(
+          editor,
+          tableId,
+          canonicalColumnTarget(columnIds[2]!),
+          [columnIds[2]!, columnIds[0]!, columnIds[1]!].map(
+            canonicalColumnTarget,
+          ),
+        );
+      },
+    },
+    {
+      name: "column delete",
+      mutate: (editor: FirstDraftTestEditor) =>
+        deleteFirstDraftTableColumn(
+          editor,
+          tableId,
+          canonicalColumnTarget(readColumnIds(editor)[1]!),
+        ),
+    },
+    {
+      name: "column duplicate",
+      mutate: (editor: FirstDraftTestEditor) =>
+        duplicateFirstDraftTableColumn(
+          editor,
+          tableId,
+          canonicalColumnTarget(readColumnIds(editor)[1]!),
+        ),
+    },
+  ])(
+    "$name is one undoable, redoable, transport- and reload-stable commit",
+    ({ mutate }) => {
+      const snapshot = createFirstDraftSnapshot();
+      const source = createEditor(snapshot);
+      const peer = createEditor(snapshot).editor;
+      const before = readTableState(source.editor);
+
+      mutate(source.editor);
+      const after = readTableState(source.editor);
+      expect(source.changes).toHaveLength(1);
+      applyChange(peer, source.changes[0]!);
+      expect(readTableState(peer)).toEqual(after);
+
+      expect(source.editor.undo()).toEqual({ status: "applied" });
+      expect(source.changes).toHaveLength(2);
+      applyChange(peer, source.changes[1]!);
+      expect(readTableState(source.editor)).toEqual(before);
+      expect(readTableState(peer)).toEqual(before);
+
+      expect(source.editor.redo()).toEqual({ status: "applied" });
+      expect(source.changes).toHaveLength(3);
+      applyChange(peer, source.changes[2]!);
+      expect(readTableState(source.editor)).toEqual(after);
+      expect(readTableState(peer)).toEqual(after);
+
+      const reloaded = createEditor(peer.readSnapshot()).editor;
+      expect(readTableState(reloaded)).toEqual(after);
+    },
+  );
 
   it("preserves legacy counter-shaped identities while appending successfully", () => {
     const snapshot = legacyCounterIdentitySnapshot();
@@ -160,7 +1072,7 @@ describe("First Draft table mutations", () => {
       "fd-table-column-b",
       "fd-table-column-c",
     ]);
-    expectRectangularTable(editor, 4, 4);
+    expectRectangularTable(editor, 5, 4);
     expect(readColumnIds(editor)).toHaveLength(4);
     expect(new Set(readColumnIds(editor)).size).toBe(4);
   });
@@ -182,7 +1094,7 @@ describe("First Draft table mutations", () => {
         "normalized-4",
       ];
 
-      const result = appendFirstDraftTableColumn(editor, tableId, {
+      const result = insertFirstDraftTableColumn(editor, tableId, 3, {
         createColumnId: () => candidates.shift() ?? "normalized-exhausted",
       });
 
@@ -263,7 +1175,7 @@ describe("First Draft table mutations", () => {
     const transaction = vi.spyOn(editor, "transaction");
 
     expect(() =>
-      appendFirstDraftTableColumn(editor, tableId, {
+      insertFirstDraftTableColumn(editor, tableId, 3, {
         createColumnId: () => "",
       }),
     ).toThrow("unable to allocate a unique table column id");
@@ -311,7 +1223,7 @@ describe("First Draft table mutations", () => {
       persistedColumns,
     );
     expect(new Set(readColumnIds(second)).size).toBe(5);
-    expectRectangularTable(second, 5, 5);
+    expectRectangularTable(second, 6, 5);
     for (const rowId of second.getChildBlockIds(tableId)) {
       for (const cellId of second.getChildBlockIds(rowId)) {
         const content = second.readBlockContent(cellId, "tableCell");
@@ -360,11 +1272,9 @@ describe("First Draft table mutations", () => {
       if (!result) throw new Error("Expected a table append");
       const createdIds: BlockId[] = [...result.cellIds];
       if ("rowId" in result) createdIds.unshift(result.rowId);
-      const expectedSelection = result.cellIds[0]!;
-
       expect(result.transaction).toMatchObject({ ok: true, changed: true });
       expect(changes).toHaveLength(1);
-      expectSelection(editor, expectedSelection);
+      expectClearedSelection(editor, changes[0]!);
       expect(editor.undo()).toEqual({ status: "applied" });
       expect(editor.getChildBlockIds(tableId)).toEqual(beforeRows);
       expect(readColumnIds(editor)).toEqual(beforeColumns);
@@ -375,7 +1285,9 @@ describe("First Draft table mutations", () => {
           tombstone: null,
         });
       }
-      expectSelection(editor, expectedSelection);
+      expect(editor.selectionController.getCanonicalSnapshot()).toMatchObject({
+        kind: "none",
+      });
 
       const reloaded = createEditor(editor.readSnapshot()).editor;
       for (const blockId of createdIds) {
@@ -394,12 +1306,12 @@ describe("First Draft table mutations", () => {
     const collision = () => tableId;
 
     expect(() =>
-      appendFirstDraftTableRow(editor, tableId, 3, 3, {
+      insertFirstDraftTableRow(editor, tableId, 3, {
         createBlockId: collision,
       }),
     ).toThrow("unable to allocate a unique block id for table mutation");
     expect(() =>
-      appendFirstDraftTableColumn(editor, tableId, {
+      insertFirstDraftTableColumn(editor, tableId, 3, {
         createBlockId: collision,
       }),
     ).toThrow("unable to allocate a unique block id for table mutation");
@@ -427,7 +1339,7 @@ describe("First Draft table mutations", () => {
     const transaction = vi.spyOn(editor, "transaction");
 
     expect(() =>
-      appendFirstDraftTableRow(editor, tableId, 3, 3, {
+      insertFirstDraftTableRow(editor, tableId, 3, {
         createBlockId: () => tombstonedId,
       }),
     ).toThrow("unable to allocate a unique block id for table mutation");
@@ -516,7 +1428,7 @@ describe("First Draft table mutations", () => {
     );
     const candidates = ["remote-1", "remote-2", "remote-3", "remote-4"];
 
-    appendFirstDraftTableColumn(editor, tableId, {
+    insertFirstDraftTableColumn(editor, tableId, 3, {
       createColumnId: () => candidates.shift() ?? "remote-exhausted",
     });
 
@@ -550,6 +1462,74 @@ describe("First Draft table mutations", () => {
       editor.getBlock(tableId)?.metadata,
     );
   });
+
+  it.each(["yjs", "local"] as const)(
+    "keeps a mixed structural sequence stable through repeated undo/redo in the %s runtime",
+    (runtime) => {
+      const definition = createFirstDraftEditorDefinition(
+        createFirstDraftViewStateStore(),
+      );
+      const localDefinition = { ...definition };
+      if (runtime === "local") delete localDefinition.content;
+      const { editor, changes } = createEditor(
+        createFirstDraftSnapshot(),
+        localDefinition,
+      );
+      const before = readTableState(editor);
+
+      const insertedRow = insertFirstDraftTableRow(editor, tableId, 1);
+      const duplicatedRow = duplicateFirstDraftTableRow(
+        editor,
+        tableId,
+        insertedRow.rowId,
+      );
+      const insertedColumn = insertFirstDraftTableColumn(editor, tableId, 1);
+      const duplicatedColumn = duplicateFirstDraftTableColumn(editor, tableId, {
+        kind: "canonical",
+        columnId: insertedColumn.columnId,
+      });
+      deleteFirstDraftTableRow(editor, tableId, duplicatedRow.rowId);
+      deleteFirstDraftTableColumn(editor, tableId, {
+        kind: "canonical",
+        columnId: duplicatedColumn.columnId,
+      });
+      const after = readTableState(editor);
+      expect(changes).toHaveLength(6);
+
+      for (let repetition = 0; repetition < 2; repetition += 1) {
+        for (let index = 0; index < 6; index += 1) {
+          expect(editor.undo()).toEqual({ status: "applied" });
+        }
+        expect(readTableState(editor)).toEqual(before);
+        for (let index = 0; index < 6; index += 1) {
+          expect(editor.redo()).toEqual({ status: "applied" });
+        }
+        expect(readTableState(editor)).toEqual(after);
+      }
+    },
+  );
+
+  it("rolls back all staged rows when a multi-row column mutation fails", () => {
+    const { editor, changes } = createEditor(createFirstDraftSnapshot());
+    const before = readTableState(editor);
+    const originalInsertBlocks = editor.insertBlocks.bind(editor);
+    let insertions = 0;
+    vi.spyOn(editor, "insertBlocks").mockImplementation(
+      (placement, fragment) => {
+        const result = originalInsertBlocks(placement, fragment);
+        insertions += 1;
+        if (insertions === 2) throw new Error("forced staged failure");
+        return result;
+      },
+    );
+
+    expect(() => insertFirstDraftTableColumn(editor, tableId, 1)).toThrow(
+      "forced staged failure",
+    );
+    expect(readTableState(editor)).toEqual(before);
+    expect(changes).toEqual([]);
+    expect(editor.canUndo).toBe(false);
+  });
 });
 
 function createEditor(
@@ -575,12 +1555,16 @@ function createEditor(
 
 function appendRow(editor: FirstDraftTestEditor) {
   const rowIds = editor.getChildBlockIds(tableId);
-  const columnCount = editor.getChildBlockIds(rowIds[0]!).length;
-  return appendFirstDraftTableRow(editor, tableId, rowIds.length, columnCount);
+  return insertFirstDraftTableRow(editor, tableId, rowIds.length);
 }
 
 function appendColumn(editor: FirstDraftTestEditor) {
-  return appendFirstDraftTableColumn(editor, tableId);
+  const rowId = editor.getChildBlockIds(tableId)[0]!;
+  return insertFirstDraftTableColumn(
+    editor,
+    tableId,
+    editor.getChildBlockIds(rowId).length,
+  );
 }
 
 function readColumnIds(editor: FirstDraftTestEditor): readonly string[] {
@@ -591,6 +1575,38 @@ function readColumnIds(editor: FirstDraftTestEditor): readonly string[] {
     table.metadata,
     editor.getChildBlockIds(firstRowId).length,
   ).ids;
+}
+
+function readTableState(editor: FirstDraftTestEditor) {
+  const table = editor.getBlock(tableId);
+  if (!table) throw new Error("Missing test table");
+  const rowIds = editor.getChildBlockIds(tableId);
+  return {
+    table: {
+      id: table.id,
+      type: table.type,
+      metadata: table.metadata,
+    },
+    columnIds: readColumnIds(editor),
+    rows: rowIds.map((rowId) => {
+      const row = editor.getBlock(rowId);
+      return {
+        id: rowId,
+        type: row?.type,
+        metadata: row?.metadata,
+        cells: editor.getChildBlockIds(rowId).map((cellId) => {
+          const cell = editor.getBlock(cellId);
+          return {
+            id: cellId,
+            type: cell?.type,
+            metadata: cell?.metadata,
+            content: editor.readBlockContent(cellId, "tableCell"),
+            plainText: editor.readBlockPlainText(cellId, "tableCell"),
+          };
+        }),
+      };
+    }),
+  };
 }
 
 function expectRectangularTable(
@@ -605,16 +1621,26 @@ function expectRectangularTable(
   }
 }
 
-function expectSelection(editor: FirstDraftTestEditor, blockId: BlockId): void {
+function expectClearedSelection(
+  editor: FirstDraftTestEditor,
+  change: EditorSemanticChange,
+): void {
   expect(editor.selectionController.getCanonicalSnapshot()).toMatchObject({
-    kind: "document",
-    snapshot: {
-      endpoints: {
-        anchor: { blockId, textOffset: 0 },
-        head: { blockId, textOffset: 0 },
-      },
-    },
+    kind: "none",
   });
+  expect(change.selectionAfter).toEqual({ kind: "none" });
+}
+
+function applyChange(
+  editor: FirstDraftTestEditor,
+  change: EditorSemanticChange,
+): void {
+  expect(
+    editor.applyRemoteTransaction({
+      transaction: convertEditorTransactionToTransport(change),
+      authorSelection: { kind: "no-author-selection" },
+    }),
+  ).toMatchObject({ status: "applied" });
 }
 
 function legacyCounterIdentitySnapshot(): EditorInstanceSnapshot {

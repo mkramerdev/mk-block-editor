@@ -4,6 +4,8 @@ import {
   memo,
   useCallback,
   useLayoutEffect,
+  useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
   type ReactNode,
@@ -11,30 +13,39 @@ import {
 import type { VersionedBlock } from "@repo/editor-core/document";
 import type { BlockId } from "@repo/editor-core/kernel";
 import type { SelectionController } from "@repo/editor-react/selection";
-import type {
-  AnyEditorRuntimePort,
-  EditorRuntimePort,
-} from "../../runtime/document/render-port.ts";
-import { BlockShell } from "../blocks/block-shell.tsx";
-import { SelectionProvider } from "../selection/context/selection-context.tsx";
-import { SelectionPaintLayer } from "../selection/paint/selection-paint-layer.tsx";
-import { useGlobalSelection } from "../selection/controller/use-global-selection.ts";
-import type { TransientPointerSelectionPaint } from "../selection/paint/selection-paint-layer.tsx";
-import type { EditorBlockDomRegistryRegistrar } from "../blocks/block-dom-registry.ts";
-import type { EditorDefinition } from "../../runtime/definition/contracts.ts";
 import type { EditorContentRuntime } from "@repo/editor-core/content";
+import type { EditableEditorDefinition } from "../../runtime/definition/contracts.ts";
 import type {
-  Editor,
+  EditableEditor,
   EditorDocumentLayerRenderContext,
   EditorDocumentProps,
 } from "../../runtime/document/contracts.ts";
+import type { EditableEditorRuntimePort } from "../../runtime/document/render-port.ts";
+import { BlockShell } from "../blocks/block-shell.tsx";
+import type { EditorBlockDomRegistryRegistrar } from "../blocks/block-dom-registry.ts";
 import { EditorDocumentGeometryRegistrationProvider } from "../geometry/editor-document-geometry-context.tsx";
+import { SelectionProvider } from "../selection/context/selection-context.tsx";
+import { useGlobalSelection } from "../selection/controller/use-global-selection.ts";
+import {
+  createEditorTextGestureArbitration,
+  EditorTextGestureArbitrationProvider,
+} from "../selection/controller/text-gesture-arbitration.tsx";
+import {
+  SelectionPaintLayer,
+  type TransientPointerSelectionPaint,
+} from "../selection/paint/selection-paint-layer.tsx";
 import { createEditorDocumentLayerInteractionController } from "../../runtime/document/document-layer-interactions.ts";
+import { createEditorCaretVisibilityController } from "../selection/controller/caret-visibility.ts";
 
-export interface BlockListProps<TEditor extends Editor = Editor> {
-  definition: EditorDefinition;
+export interface BlockListProps<
+  TEditor extends EditableEditor = EditableEditor,
+> {
+  definition: EditableEditorDefinition;
   contentRuntime: EditorContentRuntime;
-  editor: EditorRuntimePort<TEditor>;
+  editor: EditableEditorRuntimePort<TEditor>;
+  interactionEnabled?: boolean;
+  childOrderProjection?: EditorDocumentProps<TEditor>["childOrderProjection"];
+  rootLeadingContent?: ReactNode;
   renderDocumentLayers: EditorDocumentProps<TEditor>["renderDocumentLayers"];
   onSelectionDragStart: EditorDocumentProps<TEditor>["onSelectionDragStart"];
   onSelectionDragUpdate: EditorDocumentProps<TEditor>["onSelectionDragUpdate"];
@@ -42,32 +53,29 @@ export interface BlockListProps<TEditor extends Editor = Editor> {
   invalidateSelectionOnBlockShapeChange?: boolean;
 }
 
-function BlockListRuntime<TEditor extends Editor>(
-  props: BlockListProps<TEditor>,
-) {
+export function BlockList<TEditor extends EditableEditor>({
+  definition,
+  contentRuntime,
+  editor,
+  interactionEnabled = true,
+  childOrderProjection,
+  rootLeadingContent,
+  renderDocumentLayers,
+  onSelectionDragStart,
+  onSelectionDragUpdate,
+  onSelectionDragEnd,
+}: BlockListProps<TEditor>) {
   const [listElement, setListElement] = useState<HTMLDivElement | null>(null);
-  const {
-    definition,
-    contentRuntime,
-    editor,
-    renderDocumentLayers,
-    onSelectionDragStart,
-    onSelectionDragUpdate,
-    onSelectionDragEnd,
-  } = props;
-  const runtimeEditor = editor as AnyEditorRuntimePort;
   const [documentLayerInteractions] = useState(
     createEditorDocumentLayerInteractionController,
   );
-  // This controller is owned by the BlockList render lifetime. Document-layer
-  // effects own and unsubscribe their registrations; after a true unmount the
-  // controller is unreachable. Do not dispose it from an effect cleanup:
-  // Strict Mode replays cleanup/setup while retaining this same state value.
+  const [textGestureArbitration] = useState(createEditorTextGestureArbitration);
   const selectionController = editor.selectionController;
   const blockDomReader = editor.geometryRegistration.blockDomReader;
   const blockDomRegistrar = editor.geometryRegistration.blockDomRegistrar;
   const [transientPointerPaint, setTransientPointerPaint] =
     useState<TransientPointerSelectionPaint | null>(null);
+
   useLayoutEffect(
     () =>
       listElement
@@ -75,11 +83,19 @@ function BlockListRuntime<TEditor extends Editor>(
         : undefined,
     [editor, listElement],
   );
+  useLayoutEffect(() => {
+    if (!interactionEnabled || !listElement) return;
+    const controller = createEditorCaretVisibilityController({
+      editor,
+      list: listElement,
+    });
+    return () => controller.dispose();
+  }, [editor, interactionEnabled, listElement]);
   const globalSelection = useGlobalSelection({
     definition,
     listElement,
     blockDom: blockDomReader,
-    editor: runtimeEditor,
+    editor,
     contentRuntime,
     selectionController,
   });
@@ -93,136 +109,150 @@ function BlockListRuntime<TEditor extends Editor>(
     [contentRuntime, editor],
   );
   const context: EditorDocumentLayerRenderContext<TEditor> = {
-    editor: editor as TEditor,
+    editor,
     selection: selectionController.canonical,
     readBlockPlainText,
     interactions: documentLayerInteractions.port,
   };
   const DocumentRuntimeMount = editor.DocumentRuntimeMount;
+
   return (
     <EditorDocumentGeometryRegistrationProvider
       registration={editor.geometryRegistration}
     >
       <SelectionProvider endpoint={selectionController.endpoint}>
-        <div
-          ref={setListElement}
-          className="editor-web-block-list"
-          data-editor-block-list-root="true"
-          data-testid="block-editor-document"
-          role="list"
-          aria-label="Document blocks"
-        >
-          <RootBlockList
-            editor={runtimeEditor}
-            selectionController={selectionController}
-            blockDomRegistrar={blockDomRegistrar}
-          />
-          <EditorDocumentLayerStack>
-            <SelectionPaintLayer
-              editor={editor as TEditor}
-              transientPointerPaint={transientPointerPaint}
+        <EditorTextGestureArbitrationProvider value={textGestureArbitration}>
+          <div
+            ref={setListElement}
+            className="editor-web-block-list"
+            data-editor-block-list-root="true"
+            data-testid="block-editor-document"
+            role="list"
+            aria-label="Document blocks"
+          >
+            {rootLeadingContent}
+            <RootChildSequence
+              editor={editor}
+              childOrderProjection={childOrderProjection}
+              selectionController={selectionController}
+              blockDomRegistrar={blockDomRegistrar}
             />
-            <EditorDocumentLayerHost
-              render={renderDocumentLayers}
-              context={context}
-            />
-          </EditorDocumentLayerStack>
-          {DocumentRuntimeMount ? (
-            <DocumentRuntimeMount
-              listElement={listElement}
-              blockDom={blockDomReader}
-              textAnchorResolver={globalSelection.textAnchorResolver}
-              captureStructuralSelection={
-                globalSelection.captureStructuralSelection
-              }
-              composition={globalSelection.composition}
-              documentLayerKeyboard={documentLayerInteractions.keyboard}
-              onTransientPointerPaintChange={setTransientPointerPaint}
-              onSelectionDragStart={onSelectionDragStart}
-              onSelectionDragUpdate={onSelectionDragUpdate}
-              onSelectionDragEnd={onSelectionDragEnd}
-            />
-          ) : null}
-        </div>
+            <div data-editor-document-layer-stack="true">
+              <SelectionPaintLayer
+                editor={editor}
+                transientPointerPaint={transientPointerPaint}
+              />
+              {renderDocumentLayers ? (
+                <div data-editor-document-layer-host="true">
+                  {renderDocumentLayers(context)}
+                </div>
+              ) : null}
+            </div>
+            {interactionEnabled ? (
+              <DocumentRuntimeMount
+                listElement={listElement}
+                blockDom={blockDomReader}
+                textAnchorResolver={globalSelection.textAnchorResolver}
+                captureStructuralSelection={
+                  globalSelection.captureStructuralSelection
+                }
+                composition={globalSelection.composition}
+                documentLayerKeyboard={documentLayerInteractions.keyboard}
+                textGestureArbitration={textGestureArbitration}
+                onTransientPointerPaintChange={setTransientPointerPaint}
+                onSelectionDragStart={onSelectionDragStart}
+                onSelectionDragUpdate={onSelectionDragUpdate}
+                onSelectionDragEnd={onSelectionDragEnd}
+              />
+            ) : null}
+          </div>
+        </EditorTextGestureArbitrationProvider>
       </SelectionProvider>
     </EditorDocumentGeometryRegistrationProvider>
   );
 }
 
-export const BlockList = BlockListRuntime;
-
-function EditorDocumentLayerStack({
-  children,
-}: {
-  readonly children: ReactNode;
-}) {
-  return <div data-editor-document-layer-stack="true">{children}</div>;
-}
-
-function EditorDocumentLayerHost<TEditor extends Editor>({
-  render,
-  context,
-}: {
-  readonly render: EditorDocumentProps<TEditor>["renderDocumentLayers"];
-  readonly context: EditorDocumentLayerRenderContext<TEditor>;
-}) {
-  if (!render) return null;
-  return <div data-editor-document-layer-host="true">{render(context)}</div>;
-}
-
-interface BlockTraversalProps {
-  readonly editor: AnyEditorRuntimePort;
+interface SequenceProps {
+  readonly editor: EditableEditorRuntimePort;
   readonly selectionController: SelectionController;
   readonly blockDomRegistrar: EditorBlockDomRegistryRegistrar;
+  readonly childOrderProjection?: EditorDocumentProps["childOrderProjection"];
 }
 
-interface BlockEntryProps extends BlockTraversalProps {
-  readonly blockId: BlockId;
-  readonly expectedParentId: BlockId | null;
-  readonly isRootBlock?: boolean;
-}
-
-function RootBlockListRuntime({
-  editor,
-  selectionController,
-  blockDomRegistrar,
-}: BlockTraversalProps) {
-  const childBlockIds = useRootBlockIds(editor);
-  const partitions = useSequencePartitions(childBlockIds);
-  return partitions.map((partition) => (
-    <BlockSequencePartition
-      key={partition.id}
-      blockIds={partition.blockIds}
+function RootChildSequenceRuntime(props: SequenceProps) {
+  const blockIds = useRootBlockIds(props.editor);
+  return blockIds.map((blockId) => (
+    <SubscribedBlockShell
+      key={blockId}
+      {...props}
+      blockId={blockId}
       expectedParentId={null}
-      editor={editor}
-      selectionController={selectionController}
-      blockDomRegistrar={blockDomRegistrar}
       isRootBlock={true}
     />
   ));
 }
 
-/** Owns only root-sequence membership and cannot be entered by parent state. */
-const RootBlockList = memo(RootBlockListRuntime);
+/** Owns only the root child-ID sequence subscription. */
+const RootChildSequence = memo(RootChildSequenceRuntime);
 
-const BlockEntry = memo(function BlockEntry({
+function ChildSequenceRuntime({
+  parentId,
+  ...props
+}: SequenceProps & { readonly parentId: BlockId }) {
+  const blockIds = useProjectedChildBlockIds(
+    props.editor,
+    parentId,
+    props.childOrderProjection,
+  );
+  return blockIds.map((blockId) => (
+    <SubscribedBlockShell
+      key={blockId}
+      {...props}
+      blockId={blockId}
+      expectedParentId={parentId}
+    />
+  ));
+}
+
+/** Owns one wrapper's child-ID order and creates no DOM or fragment. */
+const ChildSequence = memo(ChildSequenceRuntime);
+
+interface SubscribedBlockShellProps extends SequenceProps {
+  readonly blockId: BlockId;
+  readonly expectedParentId: BlockId | null;
+  readonly isRootBlock?: boolean;
+}
+
+const SubscribedBlockShell = memo(function SubscribedBlockShell({
   blockId,
   expectedParentId,
+  isRootBlock = false,
   editor,
   selectionController,
   blockDomRegistrar,
-  isRootBlock = false,
-}: BlockEntryProps) {
+  childOrderProjection,
+}: SubscribedBlockShellProps) {
   const block = useSubscribedBlock(editor, blockId);
-  const definition = block ? editor.definition.blocks[block.type] : undefined;
-  const isWrapperBlock = definition?.kind === "wrapper";
-  if (
-    !block ||
-    block.tombstone ||
-    (block.parentId ?? null) !== expectedParentId
-  ) {
-    return null;
-  }
+  const descendantSequence = useMemo(
+    () => (
+      <ChildSequence
+        parentId={blockId}
+        editor={editor}
+        childOrderProjection={childOrderProjection}
+        selectionController={selectionController}
+        blockDomRegistrar={blockDomRegistrar}
+      />
+    ),
+    [
+      blockId,
+      editor,
+      childOrderProjection,
+      selectionController,
+      blockDomRegistrar,
+    ],
+  );
+  if (!isCurrentCanonicalChild(block, expectedParentId)) return null;
+  const definition = editor.definition.blocks[block.type];
   return (
     <BlockShell
       block={block}
@@ -231,168 +261,74 @@ const BlockEntry = memo(function BlockEntry({
       blockDomRegistrar={blockDomRegistrar}
       rootLayout={isRootBlock ? (definition?.rootLayout ?? "normal") : null}
     >
-      {isWrapperBlock ? (
-        <ChildBlockSequence
-          parentId={block.id}
-          editor={editor}
-          selectionController={selectionController}
-          blockDomRegistrar={blockDomRegistrar}
-        />
-      ) : undefined}
+      {definition?.kind === "wrapper" ? descendantSequence : undefined}
     </BlockShell>
   );
 });
 
-/** Owns exactly one wrapper membership subscription, independently of its shell. */
-function ChildBlockSequenceRuntime({
-  parentId,
-  editor,
-  selectionController,
-  blockDomRegistrar,
-}: BlockTraversalProps & { readonly parentId: BlockId }) {
-  const childBlockIds = useChildBlockIds(editor, parentId);
-  const partitions = useSequencePartitions(childBlockIds);
-  return partitions.map((partition) => (
-    <BlockSequencePartition
-      key={partition.id}
-      blockIds={partition.blockIds}
-      expectedParentId={parentId}
-      editor={editor}
-      selectionController={selectionController}
-      blockDomRegistrar={blockDomRegistrar}
-    />
-  ));
+function isCurrentCanonicalChild(
+  block: VersionedBlock | null,
+  expectedParentId: BlockId | null,
+): block is VersionedBlock {
+  return Boolean(
+    block && !block.tombstone && (block.parentId ?? null) === expectedParentId,
+  );
 }
 
-/** Owns only one wrapper's child-sequence membership. */
-const ChildBlockSequence = memo(ChildBlockSequenceRuntime);
-
-interface SequencePartition {
-  readonly id: number;
-  readonly blockIds: readonly BlockId[];
+function useRootBlockIds(editor: EditableEditorRuntimePort): readonly BlockId[] {
+  return useSyncExternalStore(
+    (listener) => editor.subscribeRootBlockIds(listener),
+    () => editor.getRootBlockIds(),
+    () => editor.getRootBlockIds(),
+  );
 }
 
-interface BlockSequencePartitionProps extends BlockTraversalProps {
-  readonly blockIds: readonly BlockId[];
-  readonly expectedParentId: BlockId | null;
-  readonly isRootBlock?: boolean;
+function useProjectedChildBlockIds(
+  editor: EditableEditorRuntimePort,
+  parentId: BlockId,
+  projection: EditorDocumentProps["childOrderProjection"],
+): readonly BlockId[] {
+  const cached = useRef<readonly BlockId[]>([]);
+  const subscribe = useCallback(
+    (listener: () => void) => {
+      const unsubscribeCanonical = editor.subscribeChildBlockIds(
+        parentId,
+        listener,
+      );
+      const unsubscribeProjection = projection?.subscribe(parentId, listener);
+      return () => {
+        unsubscribeProjection?.();
+        unsubscribeCanonical();
+      };
+    },
+    [editor, parentId, projection],
+  );
+  const getSnapshot = useCallback(() => {
+    const canonical = editor.getChildBlockIds(parentId);
+    const requested = projection?.getProjectedChildIds(parentId, canonical);
+    const accepted =
+      requested && isExactBlockIdPermutation(canonical, requested)
+        ? requested
+        : canonical;
+    if (sameBlockSequence(cached.current, accepted)) return cached.current;
+    cached.current = accepted;
+    return accepted;
+  }, [editor, parentId, projection]);
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
-function BlockSequencePartitionRuntime(props: BlockSequencePartitionProps) {
-  const {
-    blockIds,
-    expectedParentId,
-    editor,
-    selectionController,
-    blockDomRegistrar,
-    isRootBlock = false,
-  } = props;
-  return blockIds.map((blockId) => (
-    <BlockEntry
-      key={blockId}
-      blockId={blockId}
-      expectedParentId={expectedParentId}
-      editor={editor}
-      selectionController={selectionController}
-      blockDomRegistrar={blockDomRegistrar}
-      isRootBlock={isRootBlock}
-    />
-  ));
-}
-
-const BlockSequencePartition = memo(BlockSequencePartitionRuntime);
-
-const INITIAL_SEQUENCE_PARTITION_SIZE = 8;
-
-function useSequencePartitions(
-  blockIds: readonly BlockId[],
-): readonly SequencePartition[] {
-  const [ownership, setOwnership] = useState<{
-    nextId: number;
-    blockIds: readonly BlockId[];
-    partitions: readonly SequencePartition[];
-  }>(() => ({
-    nextId: Math.ceil(blockIds.length / INITIAL_SEQUENCE_PARTITION_SIZE),
-    blockIds,
-    partitions: initialSequencePartitions(blockIds),
-  }));
-  if (ownership.blockIds === blockIds) return ownership.partitions;
-  const nextOwnership = reconcileSequencePartitions(ownership, blockIds);
-  setOwnership(nextOwnership);
-  return nextOwnership.partitions;
-}
-
-function initialSequencePartitions(
-  blockIds: readonly BlockId[],
-): readonly SequencePartition[] {
-  const partitions: SequencePartition[] = [];
-  for (
-    let offset = 0;
-    offset < blockIds.length;
-    offset += INITIAL_SEQUENCE_PARTITION_SIZE
-  ) {
-    partitions.push({
-      id: partitions.length,
-      blockIds: blockIds.slice(
-        offset,
-        offset + INITIAL_SEQUENCE_PARTITION_SIZE,
-      ),
-    });
-  }
-  return partitions;
-}
-
-function reconcileSequencePartitions(
-  previous: {
-    readonly nextId: number;
-    readonly blockIds: readonly BlockId[];
-    readonly partitions: readonly SequencePartition[];
-  },
-  blockIds: readonly BlockId[],
-): {
-  readonly nextId: number;
-  readonly blockIds: readonly BlockId[];
-  readonly partitions: readonly SequencePartition[];
-} {
-  if (sameBlockSequence(previous.blockIds, blockIds)) {
-    return { ...previous, blockIds };
-  }
-  const priorPartitionByBlockId = new Map<BlockId, number>();
-  previous.partitions.forEach((partition, partitionIndex) => {
-    partition.blockIds.forEach((blockId) =>
-      priorPartitionByBlockId.set(blockId, partitionIndex),
-    );
-  });
-  const assigned: BlockId[][] = previous.partitions.map(() => []);
-  let partitionIndex = 0;
-  for (const blockId of blockIds) {
-    const priorIndex = priorPartitionByBlockId.get(blockId);
-    if (priorIndex !== undefined && priorIndex > partitionIndex) {
-      partitionIndex = priorIndex;
-    }
-    if (assigned.length === 0) assigned.push([]);
-    assigned[Math.min(partitionIndex, assigned.length - 1)]!.push(blockId);
-  }
-  let nextId = previous.nextId;
-  const partitions: SequencePartition[] = [];
-  for (let index = 0; index < assigned.length; index += 1) {
-    const nextIds = assigned[index]!;
-    if (nextIds.length === 0) continue;
-    const prior = previous.partitions[index];
-    partitions.push(
-      prior && sameBlockSequence(prior.blockIds, nextIds)
-        ? prior
-        : {
-            id: prior?.id ?? nextId++,
-            blockIds: nextIds,
-          },
-    );
-  }
-  return {
-    nextId,
-    blockIds,
-    partitions,
-  };
+export function isExactBlockIdPermutation(
+  canonical: readonly BlockId[],
+  projected: readonly BlockId[],
+): boolean {
+  if (canonical.length !== projected.length) return false;
+  const canonicalIds = new Set(canonical);
+  if (canonicalIds.size !== canonical.length) return false;
+  const projectedIds = new Set(projected);
+  return (
+    projectedIds.size === projected.length &&
+    projected.every((blockId) => canonicalIds.has(blockId))
+  );
 }
 
 function sameBlockSequence(
@@ -405,27 +341,8 @@ function sameBlockSequence(
   );
 }
 
-function useRootBlockIds(editor: AnyEditorRuntimePort): readonly BlockId[] {
-  return useSyncExternalStore(
-    (listener) => editor.subscribeRootBlockIds(listener),
-    () => editor.getRootBlockIds(),
-    () => editor.getRootBlockIds(),
-  );
-}
-
-function useChildBlockIds(
-  editor: AnyEditorRuntimePort,
-  parentId: BlockId,
-): readonly BlockId[] {
-  return useSyncExternalStore(
-    (listener) => editor.subscribeChildBlockIds(parentId, listener),
-    () => editor.getChildBlockIds(parentId),
-    () => editor.getChildBlockIds(parentId),
-  );
-}
-
 function useSubscribedBlock(
-  editor: AnyEditorRuntimePort,
+  editor: EditableEditorRuntimePort,
   blockId: BlockId,
 ): VersionedBlock | null {
   return useSyncExternalStore(

@@ -15,7 +15,7 @@ const selectionController = {} as never;
 function block(id = "shell-block" as BlockId, parentId: BlockId | null = null) {
   return createVersionedBlockRecord({
     id,
-    type: "paragraph",
+    type: "textBlock",
     parentId,
     version: {
       metadataVersion: "1",
@@ -33,7 +33,7 @@ function renderShell(
   const editor = {
     definition: {
       blocks: {
-        paragraph: { kind: "text", type: "paragraph", shellElement },
+        textBlock: { kind: "text", type: "textBlock", shellElement },
       },
     },
   } as never;
@@ -69,7 +69,7 @@ describe("BlockShell structural boundary", () => {
     expect(shell).toMatchObject({
       dataset: expect.objectContaining({
         editorBlockId: block.id,
-        editorBlockType: "paragraph",
+        editorBlockType: "textBlock",
         editorParentId: "",
         editorRootLayout: "full",
         editorSelectionBounds: "true",

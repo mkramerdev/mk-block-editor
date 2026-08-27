@@ -1,185 +1,58 @@
 import type { BlockType } from "../document/model/block.ts";
 import type { BlockDefinition } from "../definitions/block-definition.ts";
 
+/** Product-neutral definitions shared by generic graph tests. */
 export const testBlockDefinitions: Readonly<
   Record<BlockType, BlockDefinition>
 > = {
-  paragraph: {
+  textBlock: { kind: "text", type: "textBlock" },
+  alternateTextBlock: {
     kind: "text",
-    rootLayout: "normal",
-    type: "paragraph",
-    split: { default: "paragraph" },
+    type: "alternateTextBlock",
+    data: { variant: "alternate" },
   },
-  heading: {
+  childTextBlock: { kind: "text", type: "childTextBlock" },
+  alternateChildTextBlock: {
     kind: "text",
-    rootLayout: "normal",
-    type: "heading",
-    data: { level: 1 },
-    split: { default: "paragraph" },
+    type: "alternateChildTextBlock",
   },
-  quote: {
+  atomicBlock: { kind: "atomic", type: "atomicBlock" },
+  alternateAtomicBlock: {
+    kind: "atomic",
+    type: "alternateAtomicBlock",
+    data: { source: "" },
+  },
+  fixedWrapper: {
     kind: "wrapper",
-    rootLayout: "normal",
-    type: "quote",
-    content: { required: ["paragraph"] },
+    type: "fixedWrapper",
+    content: { required: ["textBlock"] },
     contentBoundary: false,
   },
-  code: {
+  wrapperBlock: {
     kind: "wrapper",
-    rootLayout: "normal",
-    type: "code",
-    content: { required: ["paragraph"] },
-    contentBoundary: false,
-    data: { language: "plaintext" },
-  },
-  childText: {
-    kind: "text",
-    rootLayout: "normal",
-    type: "childText",
-  },
-  checkedChildText: {
-    kind: "text",
-    rootLayout: "normal",
-    type: "checkedChildText",
-  },
-  itemWrapper: {
-    kind: "wrapper",
-    rootLayout: "normal",
-    type: "itemWrapper",
-    content: { required: ["childText"] },
-    contentBoundary: false,
-  },
-  numberedItemWrapper: {
-    kind: "wrapper",
-    rootLayout: "normal",
-    type: "numberedItemWrapper",
-    content: { required: ["childText"] },
-    contentBoundary: false,
-  },
-  checkedItemWrapper: {
-    kind: "wrapper",
-    rootLayout: "normal",
-    type: "checkedItemWrapper",
-    content: { required: ["checkedChildText"] },
-    contentBoundary: false,
-    data: { checked: false },
-  },
-  divider: { kind: "atomic", rootLayout: "normal", type: "divider" },
-  image: {
-    kind: "atomic",
-    rootLayout: "normal",
-    type: "image",
-    data: { src: "" },
-  },
-  video: {
-    kind: "atomic",
-    rootLayout: "normal",
-    type: "video",
-    data: { src: "" },
-  },
-  audio: {
-    kind: "atomic",
-    rootLayout: "normal",
-    type: "audio",
-    data: { src: "" },
-  },
-  file: {
-    kind: "atomic",
-    rootLayout: "normal",
-    type: "file",
-    data: { fileId: "" },
-  },
-  embed: {
-    kind: "atomic",
-    rootLayout: "normal",
-    type: "embed",
-    data: { url: "" },
-  },
-  callout: {
-    kind: "wrapper",
-    rootLayout: "normal",
-    type: "callout",
+    type: "wrapperBlock",
     content: { required: ["block"], additional: "block" },
     contentBoundary: false,
-    defaultContent: "paragraph",
+    defaultContent: "textBlock",
   },
-  placeholder: {
-    kind: "atomic",
-    rootLayout: "normal",
-    type: "placeholder",
-  },
-  toggleHeading: {
+  nestedWrapper: {
     kind: "wrapper",
-    rootLayout: "normal",
-    type: "toggleHeading",
-    content: { required: ["heading", "toggleHeadingBody"] },
-    contentBoundary: false,
-  },
-  toggleHeadingBody: {
-    kind: "wrapper",
-    rootLayout: "normal",
-    type: "toggleHeadingBody",
-    content: { required: ["block"], additional: "block" },
-    contentBoundary: false,
-    defaultContent: "placeholder",
-  },
-  toggleListItem: {
-    kind: "wrapper",
-    rootLayout: "normal",
-    type: "toggleListItem",
-    content: { required: ["paragraph", "toggleListItemBody"] },
-    contentBoundary: false,
-  },
-  toggleListItemBody: {
-    kind: "wrapper",
-    rootLayout: "normal",
-    type: "toggleListItemBody",
-    content: { required: ["block"], additional: "block" },
-    contentBoundary: false,
-    defaultContent: "placeholder",
-  },
-  columns: {
-    kind: "wrapper",
-    rootLayout: "normal",
-    type: "columns",
-    content: { required: ["column"], additional: "column" },
-    contentBoundary: false,
-    defaultContent: "column",
-  },
-  column: {
-    kind: "wrapper",
-    rootLayout: "normal",
-    type: "column",
+    type: "nestedWrapper",
     content: { required: ["block"], additional: "block" },
     contentBoundary: true,
-    defaultContent: "paragraph",
+    defaultContent: "textBlock",
   },
-  tabs: {
+  childWrapper: {
     kind: "wrapper",
-    rootLayout: "normal",
-    type: "tabs",
-    content: { required: ["tabPane"], additional: "tabPane" },
+    type: "childWrapper",
+    content: { required: ["childTextBlock"] },
     contentBoundary: false,
-    defaultContent: "tabPane",
   },
-  tabPane: {
+  containerWrapper: {
     kind: "wrapper",
-    rootLayout: "normal",
-    type: "tabPane",
+    type: "containerWrapper",
     content: { required: ["block"], additional: "block" },
     contentBoundary: false,
-    defaultContent: "placeholder",
-  },
-  canvas: {
-    kind: "atomic",
-    rootLayout: "full",
-    type: "canvas",
-    data: { width: 0 },
-  },
-  database: {
-    kind: "atomic",
-    rootLayout: "full",
-    type: "database",
-    data: { width: 0, viewId: "" },
+    defaultContent: "atomicBlock",
   },
 };

@@ -88,7 +88,7 @@ function session(
     triggerId: "mention",
     trigger: "@",
     blockId,
-    blockType: "paragraph",
+    blockType: "textBlock",
     range: { from: 0, to: 1 + query.length },
     query,
     revision,

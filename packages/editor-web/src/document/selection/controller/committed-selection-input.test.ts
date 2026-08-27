@@ -1,17 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { asBlockId } from "@repo/editor-core/kernel";
 import { createEditorLogicalSelectionPoint } from "@repo/editor-react/selection";
-import type { EditorRuntimePort } from "../../../runtime/document/render-port.ts";
+import type { EditableEditorRuntimePort } from "../../../runtime/document/render-port.ts";
 import { createTestEditorSnapshot } from "../../../tests/editor-snapshot-fixtures.ts";
 import { testEditableEditorDefinition } from "../../../tests/test-editor-definition.ts";
 import { initializeTestEditableEditor } from "../../../tests/test-editor-initializers.ts";
-import type { EditorDefinition } from "../../../runtime/definition/contracts.ts";
+import type { EditableEditorDefinition } from "../../../runtime/definition/contracts.ts";
 import { createWebSelectionTextAnchorAtOffset } from "../anchors/text-anchor.ts";
 import { applyTextInsertionToCommittedSelection } from "./committed-selection-input.ts";
 
 const firstId = asBlockId("01890f07-1c00-7000-8000-000000000971");
 const secondId = asBlockId("01890f07-1c00-7000-8000-000000000972");
-const editors: EditorRuntimePort[] = [];
+const editors: EditableEditorRuntimePort[] = [];
 
 afterEach(() => {
   for (const editor of editors.splice(0)) editor.dispose();
@@ -36,7 +36,7 @@ describe("applyTextInsertionToCommittedSelection", () => {
 
     expect(result).toEqual({ accepted: true, changed: true });
     expect(editor.getRootBlockIds()).toEqual([firstId]);
-    expect(editor.readBlockPlainText(firstId, "paragraph")).toBe("@ef");
+    expect(editor.readBlockPlainText(firstId, "textBlock")).toBe("@ef");
     expect(editor.canUndo).toBe(true);
     expect(editor.getTypingTriggerSession()).toMatchObject({
       triggerId: "mention",
@@ -70,8 +70,8 @@ describe("applyTextInsertionToCommittedSelection", () => {
       changed: false,
       reason: "stale-selection",
     });
-    expect(editor.readBlockPlainText(firstId, "paragraph")).toBe("abc");
-    expect(editor.readBlockPlainText(secondId, "paragraph")).toBe("def");
+    expect(editor.readBlockPlainText(firstId, "textBlock")).toBe("abc");
+    expect(editor.readBlockPlainText(secondId, "textBlock")).toBe("def");
     expect(editor.canUndo).toBe(false);
     expect(editor.getTypingTriggerSession()).toBeNull();
   });
@@ -91,7 +91,7 @@ describe("applyTextInsertionToCommittedSelection", () => {
         provenance: null,
       }),
     ).toEqual({ accepted: true, changed: true });
-    expect(editor.readBlockPlainText(firstId, "paragraph")).toBe("a日本🙂ef");
+    expect(editor.readBlockPlainText(firstId, "textBlock")).toBe("a日本🙂ef");
     const canonical = editor.selectionController.canonical.getSnapshot();
     expect(
       canonical.kind === "document"
@@ -123,14 +123,14 @@ describe("applyTextInsertionToCommittedSelection", () => {
         },
       }),
     ).toEqual({ accepted: true, changed: true });
-    expect(editor.readBlockPlainText(firstId, "paragraph")).toBe(
+    expect(editor.readBlockPlainText(firstId, "textBlock")).toBe(
       `${baseline}日本🙂`,
     );
 
     expect(editor.undo()).toEqual({ status: "applied" });
-    expect(editor.readBlockPlainText(firstId, "paragraph")).toBe(baseline);
+    expect(editor.readBlockPlainText(firstId, "textBlock")).toBe(baseline);
     expect(editor.redo()).toEqual({ status: "applied" });
-    expect(editor.readBlockPlainText(firstId, "paragraph")).toBe(
+    expect(editor.readBlockPlainText(firstId, "textBlock")).toBe(
       `${baseline}日本🙂`,
     );
   });
@@ -138,28 +138,28 @@ describe("applyTextInsertionToCommittedSelection", () => {
 
 function createEditor(
   options: {
-    readonly typingTriggers?: EditorDefinition["typingTriggers"];
+    readonly typingTriggers?: EditableEditorDefinition["typingTriggers"];
     readonly onChange?: (change: unknown) => void;
     readonly firstText?: string;
   } = {},
-): EditorRuntimePort {
+): EditableEditorRuntimePort {
   const editor = initializeTestEditableEditor({
     definition: {
       ...testEditableEditorDefinition,
       typingTriggers: options.typingTriggers ?? [],
     },
     snapshot: createTestEditorSnapshot([
-      { id: firstId, type: "paragraph", text: options.firstText ?? "abc" },
-      { id: secondId, type: "paragraph", text: "def" },
+      { id: firstId, type: "textBlock", text: options.firstText ?? "abc" },
+      { id: secondId, type: "textBlock", text: "def" },
     ]),
     onChange: options.onChange,
-  }) as EditorRuntimePort;
+  }) as EditableEditorRuntimePort;
   editors.push(editor);
   return editor;
 }
 
 function commitCrossBlockSelection(
-  editor: EditorRuntimePort,
+  editor: EditableEditorRuntimePort,
   firstOffset = 1,
   secondOffset = 1,
 ) {
@@ -179,7 +179,7 @@ function commitCrossBlockSelection(
 }
 
 function commitCollapsedSelection(
-  editor: EditorRuntimePort,
+  editor: EditableEditorRuntimePort,
   blockId: typeof firstId,
   offset: number,
 ) {
@@ -198,14 +198,14 @@ function commitCollapsedSelection(
 }
 
 function point(
-  editor: EditorRuntimePort,
+  editor: EditableEditorRuntimePort,
   blockId: typeof firstId,
   offset: number,
 ) {
   const anchor = createWebSelectionTextAnchorAtOffset({
     contentRuntime: editor.contentRuntime,
     blockId,
-    blockType: "paragraph",
+    blockType: "textBlock",
     textOffset: offset,
   });
   if (!anchor.ok) throw new Error(anchor.message);

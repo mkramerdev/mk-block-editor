@@ -6,30 +6,34 @@
   "description": "Block-local DOM ProseMirror layer for the web editor. Owns per-block state/view factories, plugins, keymaps, inline node views, and DOM helpers.",
   "exports": {
     "./block-editor": {
-      "types": "./src/api/block-editor.ts",
+      "types": "./dist/api/block-editor.d.ts",
       "import": "./dist/api/block-editor.js"
     },
     "./schema": {
-      "types": "./src/api/schema.ts",
+      "types": "./dist/api/schema.d.ts",
       "import": "./dist/api/schema.js"
     },
     "./keymap": {
-      "types": "./src/api/keymap.ts",
+      "types": "./dist/api/keymap.d.ts",
       "import": "./dist/api/keymap.js"
     },
     "./caret": {
-      "types": "./src/api/caret.ts",
+      "types": "./dist/api/caret.d.ts",
       "import": "./dist/api/caret.js"
     },
     "./clipboard": {
-      "types": "./src/api/clipboard.ts",
+      "types": "./dist/api/clipboard.d.ts",
       "import": "./dist/api/clipboard.js"
     },
     "./prosemirror": {
-      "types": "./src/api/prosemirror.ts",
+      "types": "./dist/api/prosemirror.d.ts",
       "import": "./dist/api/prosemirror.js"
     }
   },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "pnpm run clean && tsc -p tsconfig.build.json",
     "dev:compiler": "tsc -p tsconfig.build.json --watch",

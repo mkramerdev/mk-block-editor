@@ -1,23 +1,26 @@
+import {
+  FIRST_DRAFT_HEADING_LEVELS,
+  type FirstDraftHeadingLevel,
+} from "../heading-level.ts";
+
 export type FirstDraftSlashActionCategory =
   | "Text"
   | "Lists"
   | "Toggles"
-  | "Layout"
-  | "Media";
+  | "Layout";
 
 export type FirstDraftSlashActionKind =
   | { readonly type: "paragraph" }
-  | { readonly type: "heading"; readonly level: number }
+  | { readonly type: "heading"; readonly level: FirstDraftHeadingLevel }
   | { readonly type: "bulletList" }
   | { readonly type: "orderedList" }
   | { readonly type: "checklist" }
   | { readonly type: "quote" }
   | { readonly type: "code" }
   | { readonly type: "callout" }
-  | { readonly type: "toggleHeading"; readonly level: number }
+  | { readonly type: "toggleHeading"; readonly level: FirstDraftHeadingLevel }
   | { readonly type: "toggleListItem" }
   | { readonly type: "divider" }
-  | { readonly type: "bookmark" }
   | { readonly type: "columns"; readonly count: 2 | 3 | 4 }
   | { readonly type: "tabs" }
   | { readonly type: "table" };
@@ -48,8 +51,7 @@ function action(
   });
 }
 
-const headings = Array.from({ length: 6 }, (_, index) => {
-  const level = index + 1;
+const headings = FIRST_DRAFT_HEADING_LEVELS.map((level) => {
   return action(
     `heading-${level}`,
     `Heading ${level}`,
@@ -59,8 +61,7 @@ const headings = Array.from({ length: 6 }, (_, index) => {
   );
 });
 
-const toggleHeadings = Array.from({ length: 6 }, (_, index) => {
-  const level = index + 1;
+const toggleHeadings = FIRST_DRAFT_HEADING_LEVELS.map((level) => {
   return action(
     `toggle-heading-${level}`,
     `Toggle Heading ${level}`,
@@ -134,13 +135,6 @@ export const firstDraftSlashActionCatalog: readonly FirstDraftSlashAction[] =
       "Text",
       ["divider", "separator", "line", "hr"],
       { type: "divider" },
-    ),
-    action(
-      "bookmark",
-      "Bookmark",
-      "Media",
-      ["bookmark", "link", "url", "web"],
-      { type: "bookmark" },
     ),
     action(
       "columns-2",

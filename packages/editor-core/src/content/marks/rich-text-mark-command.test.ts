@@ -17,11 +17,9 @@ import {
 } from "./rich-text-mark-command.ts";
 
 const textDefinitions: Readonly<Record<BlockType, BlockDefinition>> = {
-  paragraph: {
+  textBlock: {
     kind: "text",
-    type: "paragraph",
-    rootLayout: "normal",
-    renderer: () => null,
+    type: "textBlock",
   },
 };
 const testInlineMarks = [boldMarkDefinition, linkMarkDefinition] as const;
@@ -43,7 +41,7 @@ describe("rich text inline mark commands", () => {
 
     expect(
       readInlineMarkCommandStateFromRichTextDocument(
-        "paragraph",
+        "textBlock",
         content,
         "strong",
         { from: 0, to: 3 },
@@ -55,7 +53,7 @@ describe("rich text inline mark commands", () => {
     ).toMatchObject({ canExecute: true, active: false, mixed: true });
 
     const added = applyInlineMarkUpdateToRichTextDocument(
-      "paragraph",
+      "textBlock",
       content,
       "strong",
       { from: 0, to: 3 },
@@ -67,7 +65,7 @@ describe("rich text inline mark commands", () => {
     expect(added.changed).toBe(true);
     expect(
       readInlineMarkCommandStateFromRichTextDocument(
-        "paragraph",
+        "textBlock",
         added.content,
         "strong",
         { from: 0, to: 3 },
@@ -79,7 +77,7 @@ describe("rich text inline mark commands", () => {
     ).toMatchObject({ active: true, mixed: false });
 
     const removed = applyInlineMarkUpdateToRichTextDocument(
-      "paragraph",
+      "textBlock",
       added.content,
       "strong",
       { from: 0, to: 3 },
@@ -90,7 +88,7 @@ describe("rich text inline mark commands", () => {
     );
     expect(
       readInlineMarkCommandStateFromRichTextDocument(
-        "paragraph",
+        "textBlock",
         removed.content,
         "strong",
         { from: 0, to: 3 },
@@ -104,13 +102,13 @@ describe("rich text inline mark commands", () => {
 
   it("supports value-bearing link marks through the same sanitizer and command path", () => {
     const content = createBlockRichTextContentFromPlainText(
-      "paragraph",
+      "textBlock",
       "link",
     );
 
     expect(
       applyInlineMarkUpdateToRichTextDocument(
-        "paragraph",
+        "textBlock",
         content,
         "link",
         { from: 0, to: 4 },
@@ -123,7 +121,7 @@ describe("rich text inline mark commands", () => {
     ).toMatchObject({ canExecute: false, reason: "invalid-attrs" });
 
     const linked = applyInlineMarkUpdateToRichTextDocument(
-      "paragraph",
+      "textBlock",
       content,
       "link",
       { from: 0, to: 4 },
@@ -152,7 +150,7 @@ describe("rich text inline mark commands", () => {
     });
     expect(
       readInlineMarkCommandStateFromRichTextDocument(
-        "paragraph",
+        "textBlock",
         linked.content,
         "link",
         { from: 0, to: 4 },
@@ -167,7 +165,7 @@ describe("rich text inline mark commands", () => {
     });
 
     const unlinked = applyInlineMarkUpdateToRichTextDocument(
-      "paragraph",
+      "textBlock",
       linked.content,
       "link",
       { from: 0, to: 4 },
@@ -192,12 +190,12 @@ describe("rich text inline mark commands", () => {
       defaultAttrs: { href: "" },
     } satisfies InlineMarkDefinition<"link">;
     const content = createBlockRichTextContentFromPlainText(
-      "paragraph",
+      "textBlock",
       "link",
     );
 
     const linked = applyInlineMarkUpdateToRichTextDocument(
-      "paragraph",
+      "textBlock",
       content,
       "link",
       { from: 0, to: 4 },
@@ -230,7 +228,7 @@ describe("rich text inline mark commands", () => {
     });
     expect(
       readInlineMarkCommandStateFromRichTextDocument(
-        "paragraph",
+        "textBlock",
         linked.content,
         "link",
         { from: 0, to: 4 },
@@ -257,20 +255,20 @@ describe("rich text inline mark commands", () => {
     }[] = [
       {
         name: "empty range",
-        content: createBlockRichTextContentFromPlainText("paragraph", "text"),
+        content: createBlockRichTextContentFromPlainText("textBlock", "text"),
         range: { from: 1, to: 1 },
         changed: false,
       },
       {
         name: "whitespace-only range",
-        content: createBlockRichTextContentFromPlainText("paragraph", "   "),
+        content: createBlockRichTextContentFromPlainText("textBlock", "   "),
         range: { from: 0, to: 3 },
         changed: false,
         reason: "empty-range",
       },
       {
         name: "text range",
-        content: createBlockRichTextContentFromPlainText("paragraph", "text"),
+        content: createBlockRichTextContentFromPlainText("textBlock", "text"),
         range: { from: 0, to: 4 },
         changed: true,
         firstTextMarked: true,
@@ -313,7 +311,7 @@ describe("rich text inline mark commands", () => {
 
     for (const testCase of cases) {
       const result = applyInlineMarkUpdateToRichTextDocument(
-        "paragraph",
+        "textBlock",
         testCase.content,
         "strong",
         testCase.range,
@@ -359,13 +357,13 @@ describe("rich text inline mark commands", () => {
 
   it("does not split astral text units while applying marks", () => {
     const content = createBlockRichTextContentFromPlainText(
-      "paragraph",
+      "textBlock",
       "a😀b",
     );
 
     expect(
       applyInlineMarkUpdateToRichTextDocument(
-        "paragraph",
+        "textBlock",
         content,
         "strong",
         { from: 1, to: 2 },
@@ -392,13 +390,13 @@ describe("rich text inline mark commands", () => {
 
   it("rejects marks absent from the supplied inline mark definitions", () => {
     const content = createBlockRichTextContentFromPlainText(
-      "paragraph",
+      "textBlock",
       "mark",
     );
 
     expect(
       readInlineMarkCommandStateFromRichTextDocument(
-        "paragraph",
+        "textBlock",
         content,
         "link",
         { from: 0, to: 4 },
@@ -410,7 +408,7 @@ describe("rich text inline mark commands", () => {
     ).toMatchObject({ canExecute: false, reason: "missing-mark" });
     expect(
       applyInlineMarkUpdateToRichTextDocument(
-        "paragraph",
+        "textBlock",
         content,
         "link",
         { from: 0, to: 4 },
@@ -431,14 +429,10 @@ describe("rich text inline mark commands", () => {
       customText: {
         kind: "text",
         type: "customText",
-        rootLayout: "normal",
-        renderer: () => null,
       },
       customShell: {
         kind: "atomic",
         type: "customShell",
-        rootLayout: "normal",
-        renderer: () => null,
       },
     };
     const content = createBlockRichTextContentFromPlainText(

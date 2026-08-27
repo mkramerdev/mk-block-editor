@@ -4,10 +4,14 @@ import {
   isRichTextDocument,
   richTextDocumentContentSize,
 } from "@repo/editor-core/content/rich-text";
+import type { BlockDefinition } from "@repo/editor-core/definitions";
+import type { BlockType } from "@repo/editor-core/document";
 import {
   createCanonicalBlockFragment,
+  createCanonicalBlockFragmentCandidate,
   createCanonicalBlockRecord,
   type CanonicalBlockFragment,
+  type CanonicalBlockFragmentCandidate,
   type CanonicalBlockRecord,
 } from "@repo/editor-core/editing";
 import type {
@@ -150,7 +154,7 @@ export const firstDraftTableClipboardCodecs: EditorContentCodecs = {
 
 export function materializeFirstDraftTableCellRange(
   input: MaterializeInput,
-): CanonicalBlockFragment | null {
+): CanonicalBlockFragmentCandidate | null {
   const table = input.getBlock(input.hostBlockId);
   const decoded = decodeTableRangeSelection(input.selection);
   const range = decoded
@@ -198,7 +202,12 @@ export function materializeFirstDraftTableCellRange(
       );
     }
   }
-  return finalize(records, root.id, input.blockDefinitions);
+  return createCanonicalBlockFragmentCandidate({
+    blocks: records,
+    rootBlockIds: [root.id],
+    start: { kind: "block", blockId: root.id },
+    end: { kind: "block", blockId: root.id },
+  });
 }
 
 function selectedCells(
@@ -298,7 +307,7 @@ function rectangularTsv(text: string): readonly (readonly string[])[] | null {
 
 function plainTextTableFragment(
   matrix: readonly (readonly string[])[],
-  definitions: MaterializeInput["blockDefinitions"],
+  definitions: Readonly<Record<BlockType, BlockDefinition>>,
 ): CanonicalBlockFragment | null {
   const columns = createFirstDraftTableColumnIds(matrix[0]!.length);
   const root = createCanonicalBlockRecord({
@@ -395,7 +404,7 @@ function parseSemanticTable(
 function finalize(
   records: readonly CanonicalBlockRecord[],
   rootId: BlockId,
-  definitions: MaterializeInput["blockDefinitions"],
+  definitions: Readonly<Record<BlockType, BlockDefinition>>,
 ): CanonicalBlockFragment | null {
   try {
     return createCanonicalBlockFragment({

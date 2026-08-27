@@ -113,7 +113,7 @@ describe("logical operation body validation", () => {
       validateEditorLogicalOperationBody({
         kind: "insertInlineContent",
         blockId,
-        blockType: "paragraph",
+        blockType: "textBlock",
         target: { kind: "text" },
         position: { blockId, offset: 0 },
         content: [{ type: "text", text: "A" }],
@@ -142,7 +142,7 @@ describe("logical operation body validation", () => {
       validateEditorLogicalOperationBody({
         kind: "insertInlineContent",
         blockId,
-        blockType: "paragraph",
+        blockType: "textBlock",
         target: { kind: "nested-content", groupIndex: 0, itemIndex: 0 },
         position: { blockId, offset: 0 },
         content: [{ type: "text", text: "A" }],
@@ -214,7 +214,7 @@ describe("logical operation body validation", () => {
       validateEditorLogicalOperationBody({
         kind: "addInlineMark",
         blockId,
-        blockType: "paragraph",
+        blockType: "textBlock",
         target: { kind: "text" },
         range: { from: { blockId, offset: 0 }, to: { blockId, offset: 1 } },
         markName: "annotation",
@@ -248,7 +248,7 @@ describe("logical operation body validation", () => {
       validateEditorLogicalOperationBody({
         kind: "replaceInlineRange",
         blockId,
-        blockType: "paragraph",
+        blockType: "textBlock",
         target: { kind: "text" },
         range: { from: { blockId, offset: 0 }, to: { blockId, offset: 1 } },
         content: [
@@ -269,7 +269,7 @@ describe("logical operation body validation", () => {
       validateEditorLogicalOperationBody({
         kind: "setInlineEntity",
         blockId,
-        blockType: "paragraph",
+        blockType: "textBlock",
         target: { kind: "text" },
         range: { from: { blockId, offset: 0 }, to: { blockId, offset: 1 } },
         entity: {
@@ -333,7 +333,7 @@ describe("logical operation body validation", () => {
       validateEditorLogicalOperationBody({
         kind: "addInlineMark",
         blockId,
-        blockType: "paragraph",
+        blockType: "textBlock",
         target: { kind: "text" },
         range: { from: { blockId, offset: 0 }, to: { blockId, offset: 1 } },
         markName: "annotation",
@@ -350,7 +350,7 @@ describe("logical operation body validation", () => {
       validateEditorLogicalOperationBody({
         kind: "setInlineEntity",
         blockId,
-        blockType: "paragraph",
+        blockType: "textBlock",
         target: { kind: "text" },
         range: { from: { blockId, offset: 0 }, to: { blockId, offset: 1 } },
         entity: new (class EntityPayload {
@@ -401,7 +401,7 @@ function validInlineOperation() {
   return {
     kind: "insertInlineContent",
     blockId,
-    blockType: "paragraph",
+    blockType: "textBlock",
     target: { kind: "text" },
     position: { blockId, offset: 0 },
     content: [{ type: "text", text: "A" }],
@@ -418,7 +418,7 @@ function validBlockGraphOperation() {
       upsertedBlocks: [
         {
           id: blockId2,
-          type: "paragraph",
+          type: "textBlock",
           parentId: null,
           metadataVersion: "meta-1",
           contentVersion: null,

@@ -2,6 +2,7 @@ import {
   createContext,
   createElement,
   useContext,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import type {
@@ -61,25 +62,60 @@ export interface RemoteTableSelectionSegment {
   readonly edges: SelectionPaintSegmentEdges;
 }
 
-const Context = createContext<TableSelectionValue>({
+const emptyTableSelection: TableSelectionValue = {
   selectedIds: new Set(),
   paintSegments: new Map(),
   remoteSegments: new Map(),
-});
+};
+
+export interface TableSelectionStore {
+  readonly getSnapshot: () => TableSelectionValue;
+  readonly subscribe: (listener: () => void) => () => void;
+  readonly publish: (value: TableSelectionValue) => void;
+}
+
+export function createTableSelectionStore(
+  initial: TableSelectionValue = emptyTableSelection,
+): TableSelectionStore {
+  let snapshot = initial;
+  const listeners = new Set<() => void>();
+  return {
+    getSnapshot: () => snapshot,
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    publish(value) {
+      if (Object.is(snapshot, value)) return;
+      snapshot = value;
+      listeners.forEach((listener) => listener());
+    },
+  };
+}
+
+const Context = createContext<TableSelectionStore | null>(null);
 
 export function TableSelectionProvider({
-  value,
+  store,
   children,
 }: {
-  readonly value: TableSelectionValue;
+  readonly store: TableSelectionStore;
   readonly children: ReactNode;
 }) {
-  return createElement(Context.Provider, { value }, children);
+  return createElement(Context.Provider, { value: store }, children);
 }
 
 export function useTableSelectionState() {
-  return useContext(Context);
+  const store = useContext(Context);
+  return useSyncExternalStore(
+    store?.subscribe ?? emptySubscribe,
+    store?.getSnapshot ?? readEmptyTableSelection,
+    store?.getSnapshot ?? readEmptyTableSelection,
+  );
 }
+
+const emptySubscribe = () => () => undefined;
+const readEmptyTableSelection = () => emptyTableSelection;
 
 export function tableRangeSelectionModel(): BlockSelectionModel {
   return {
@@ -153,6 +189,14 @@ export function readTableRangeSelection(
   tableId: BlockId,
   graph: TableGraph,
 ): TableRange | null {
+  const selection = readTableRangeSelectionPayload(canonical, tableId);
+  return selection ? resolveTableRange(graph, tableId, selection) : null;
+}
+
+export function readTableRangeSelectionPayload(
+  canonical: CanonicalLocalSelection,
+  tableId: BlockId,
+): TableRangeSelection | null {
   if (
     canonical.kind !== "block-internal" ||
     canonical.snapshot.internal?.blockId !== tableId ||
@@ -161,10 +205,7 @@ export function readTableRangeSelection(
   ) {
     return null;
   }
-  const selection = decodeTableRangeSelection(
-    canonical.snapshot.internal.snapshot,
-  );
-  return selection ? resolveTableRange(graph, tableId, selection) : null;
+  return decodeTableRangeSelection(canonical.snapshot.internal.snapshot);
 }
 
 export function createTableRangeCoverage(
@@ -219,6 +260,31 @@ export function rangeSelectionPaintSegments(
     range.anchor.cellId,
     range.head.cellId,
   );
+}
+
+export function selectionPaintSegmentsForIds(
+  graph: TableGraph,
+  tableId: BlockId,
+  selectedIds: ReadonlySet<BlockId>,
+): ReadonlyMap<BlockId, SelectionPaintSegmentEdges> {
+  const selected = (cellId: BlockId | undefined) =>
+    cellId !== undefined && selectedIds.has(cellId);
+  const rows = graph
+    .getChildBlockIds(tableId)
+    .map((rowId) => graph.getChildBlockIds(rowId));
+  const segments = new Map<BlockId, SelectionPaintSegmentEdges>();
+  rows.forEach((cells, rowIndex) => {
+    cells.forEach((cellId, columnIndex) => {
+      if (!selectedIds.has(cellId)) return;
+      segments.set(cellId, {
+        top: !selected(rows[rowIndex - 1]?.[columnIndex]),
+        right: !selected(cells[columnIndex + 1]),
+        bottom: !selected(rows[rowIndex + 1]?.[columnIndex]),
+        left: !selected(cells[columnIndex - 1]),
+      });
+    });
+  });
+  return segments;
 }
 
 export function visualTopLeftCellId(

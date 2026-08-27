@@ -115,7 +115,7 @@ function createGraph(input: {
   ][]) {
     blocks.set(blockId, {
       id: blockId,
-      type: model.projection.category === "text" ? "paragraph" : "callout",
+      type: model.projection.category === "text" ? "paragraph" : "containerWrapper",
       parentId: parentById.get(blockId) ?? null,
       metadataVersion: "1",
       contentVersion:

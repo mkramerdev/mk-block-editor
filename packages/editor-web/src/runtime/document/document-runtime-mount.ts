@@ -8,6 +8,7 @@ import type {
 } from "@repo/editor-react/selection";
 import type { EditorDocumentLayerKeyboardDispatcher } from "./document-layer-interactions.ts";
 import type { EditorSelectionDragCallback } from "./contracts.ts";
+import type { EditorTextGestureArbitration } from "../../document/selection/controller/text-gesture-arbitration.tsx";
 
 export interface EditorDocumentRuntimeMountProps {
   readonly listElement: HTMLDivElement | null;
@@ -16,6 +17,7 @@ export interface EditorDocumentRuntimeMountProps {
   readonly captureStructuralSelection: CaptureStructuralSelection;
   readonly composition: SelectionCompositionSessionSnapshot | null;
   readonly documentLayerKeyboard: EditorDocumentLayerKeyboardDispatcher;
+  readonly textGestureArbitration: EditorTextGestureArbitration;
   readonly onTransientPointerPaintChange: (
     paint: TransientPointerSelectionPaint | null,
   ) => void;

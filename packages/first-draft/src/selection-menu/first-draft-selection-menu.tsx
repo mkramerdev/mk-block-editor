@@ -17,7 +17,6 @@ import type {
   EditorSelectionInlineMarkFormatState,
 } from "@repo/editor-react/selection";
 import type { EditableEditor } from "@repo/editor-web/editor";
-import type { ReadEditor } from "@repo/editor-web/read-runtime";
 import { FirstDraftIcon } from "../ui/icon.tsx";
 import { linkIcon } from "../ui/icons.ts";
 import {
@@ -35,7 +34,7 @@ import {
 } from "./selection-menu-position.ts";
 
 export interface FirstDraftSelectionMenuProps {
-  readonly editor: EditableEditor | ReadEditor;
+  readonly editor: EditableEditor;
 }
 
 const actions = Object.freeze([
@@ -53,9 +52,7 @@ const actions = Object.freeze([
 export function FirstDraftSelectionMenu({
   editor,
 }: FirstDraftSelectionMenuProps) {
-  return editor.editable ? (
-    <EditableFirstDraftSelectionMenu editor={editor} />
-  ) : null;
+  return <EditableFirstDraftSelectionMenu editor={editor} />;
 }
 
 function EditableFirstDraftSelectionMenu({

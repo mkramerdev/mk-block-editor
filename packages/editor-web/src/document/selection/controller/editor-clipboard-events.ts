@@ -6,7 +6,7 @@ import {
   resolveCanonicalEditComposition,
 } from "@repo/editor-react/editor";
 import {
-  materializeEditorSelectionFragment,
+  materializeEditorSelectionFragmentCandidate,
   type EditorSelectionTextAnchorResolver,
   type SelectionController,
 } from "@repo/editor-react/selection";
@@ -16,18 +16,16 @@ import {
   createCollisionSafeBlockIdAllocator,
   reidentifyCanonicalBlockFragment,
 } from "@repo/editor-core/editing";
-import type { EditorDefinition } from "../../../runtime/definition/contracts.ts";
+import type { EditableEditorDefinition } from "../../../runtime/definition/contracts.ts";
 import type { EditableEditorRuntimePort } from "../../../runtime/document/render-port.ts";
 import { createDefinitionClipboardBoundary } from "../../../clipboard/editor-boundary.ts";
 import type { CaptureStructuralSelection } from "./browser-selection-types.ts";
 import { createEditorClipboardEventHandlers } from "./clipboard-event-coordinator.ts";
 import { resolveEditorClipboardEventOwnership } from "./clipboard-event-ownership.ts";
 
-const fallbackClipboardByEditor = new WeakMap<object, DataTransfer>();
-
 export interface UseEditableClipboardEventsOptions {
   readonly listElement: HTMLElement | null;
-  readonly definition: EditorDefinition;
+  readonly definition: EditableEditorDefinition;
   readonly contentResources: EditorContentRuntimeResources;
   readonly editor: EditableEditorRuntimePort;
   readonly contentRuntime: EditorContentRuntime;
@@ -73,11 +71,10 @@ export function useEditableClipboardEvents({
               getParentId: (blockId) => editor.getParentId(blockId),
               readBlockContent: (blockId, blockType) =>
                 contentRuntime.readBlockProjection(blockId, blockType),
-              blockDefinitions: definition.blocks,
             });
-            if (fragment) return { ok: true as const, fragment };
+            if (fragment) return fragment;
           }
-          return materializeEditorSelectionFragment({
+          const materialized = materializeEditorSelectionFragmentCandidate({
             snapshot,
             graph: editor,
             graphRevision: editor.getSelectionGraphRevision(),
@@ -90,6 +87,7 @@ export function useEditableClipboardEvents({
             resolveVisibleChildBlockIds:
               definition.selectionFragment?.resolveVisibleChildBlockIds,
           });
+          return materialized.ok ? materialized.candidate : null;
         },
       }),
     [
@@ -113,8 +111,8 @@ export function useEditableClipboardEvents({
         committedSelection: selectionController.getCommittedSnapshot(),
         isCommittedSelectionCurrent: (snapshot) =>
           selectionController.isCommittedSnapshotCurrent(snapshot),
-        ownsNativeTarget: (target) => editor.ownsNativeFocusTarget(target),
-        ownsActiveElement: (document) => editor.ownsActiveElement(document),
+        resolveNativeFocusTarget: (target) =>
+          editor.resolveNativeFocusTarget(target),
       });
     const captureSelectionSnapshot = (
       ownership: Extract<
@@ -173,14 +171,28 @@ export function useEditableClipboardEvents({
       return structural ? { kind: "structural" as const, ...structural } : null;
     };
     const commands = {
-      cut: (range: import("@repo/editor-core/editing").StructuralEditRange) =>
-        editor.executeStructuralRangeDeletion(range, {
+      cut: (range: import("@repo/editor-core/editing").StructuralEditRange) => {
+        const productPlan =
+          definition.selectionFragment?.planStructuralRangeDeletion?.({
+            intent: "cut",
+            range,
+            graph: editor,
+            readBlockContent: (blockId, blockType) =>
+              contentRuntime.readBlockProjection(blockId, blockType),
+          }) ?? null;
+        return productPlan
+          ? editor.executeStructuralTransaction(productPlan, {
+              provenance: null,
+              selectionPresentation: "native-before-removal",
+            })
+          : editor.executeStructuralRangeDeletion(range, {
           intent: "cut",
           provenance: null,
           selectionPresentation: "native-final-selection",
           resolveVisibleChildBlockIds:
             definition.selectionFragment?.resolveVisibleChildBlockIds,
-        }),
+            });
+      },
       paste: (
         captured: NonNullable<ReturnType<typeof captureSelection>>,
         fragment: import("@repo/editor-core/editing").CanonicalBlockFragment,
@@ -250,55 +262,8 @@ export function useEditableClipboardEvents({
         paste: (target, fragment) => commands.paste(target.capture, fragment),
       },
     });
-    let nativeCutCompleted = false;
-    let nativePasteCompleted = false;
-    const keyDown = (event: KeyboardEvent) => {
-      if (
-        event.defaultPrevented ||
-        event.altKey ||
-        (!event.ctrlKey && !event.metaKey)
-      )
-        return;
-      const key = event.key.toLowerCase();
-      if (key !== "c" && key !== "x" && key !== "v") return;
-      const ownership = resolveOwnership(event);
-      if (ownership.kind !== "selection") return;
-
-      if (key === "c") {
-        const snapshot = captureSelectionSnapshot(ownership);
-        const memory = createMemoryClipboardData();
-        if (snapshot && boundary.writeSelection(memory, snapshot)) {
-          fallbackClipboardByEditor.set(editor, memory);
-        }
-        return;
-      }
-      if (key === "x") {
-        nativeCutCompleted = false;
-        const captured = captureCutSelection(ownership);
-        const memory = createMemoryClipboardData();
-        if (!captured || !boundary.writeSelection(memory, captured.snapshot)) {
-          return;
-        }
-        fallbackClipboardByEditor.set(editor, memory);
-        if (!captured.isCurrent()) return;
-        if (editor.ownsActiveElement(doc)) {
-          if (captured.kind === "internal") captured.cut();
-          else commands.cut(captured.range);
-          return;
-        }
-        return;
-      }
-      const captured = captureSelection(ownership);
-      const memory = fallbackClipboardByEditor.get(editor) ?? null;
-      if (!captured || !memory) return;
-      const fragment = boundary.readClipboardBlocks(memory);
-      if (!fragment) return;
-      if (!captured.isCurrent()) return;
-      event.preventDefault();
-      nativePasteCompleted = commands.paste(captured, fragment).ok;
-    };
     const cutCapture = (event: ClipboardEvent) => {
-      nativeCutCompleted = handlers.cut(event) || nativeCutCompleted;
+      handlers.cut(event);
     };
     const pasteCapture = (event: ClipboardEvent) => {
       const target = event.target instanceof Element ? event.target : null;
@@ -308,20 +273,26 @@ export function useEditableClipboardEvents({
       // both apply the same clipboard payload.
       if (target?.closest('[data-editor-block-internal-selection-host="true"]'))
         return;
-      nativePasteCompleted = handlers.paste(event) || nativePasteCompleted;
+      handlers.paste(event);
     };
     const pasteBubble = (event: ClipboardEvent) => {
-      nativePasteCompleted = handlers.paste(event) || nativePasteCompleted;
+      const target = event.target instanceof Element ? event.target : null;
+      if (
+        !target?.closest(
+          '[data-editor-block-internal-selection-host="true"]',
+        )
+      ) {
+        return;
+      }
+      handlers.paste(event);
     };
     doc.addEventListener("cut", cutCapture, true);
     doc.addEventListener("paste", pasteCapture, true);
     doc.addEventListener("paste", pasteBubble);
-    doc.addEventListener("keydown", keyDown, true);
     return () => {
       doc.removeEventListener("cut", cutCapture, true);
       doc.removeEventListener("paste", pasteCapture, true);
       doc.removeEventListener("paste", pasteBubble);
-      doc.removeEventListener("keydown", keyDown, true);
     };
   }, [
     boundary,
@@ -333,17 +304,4 @@ export function useEditableClipboardEvents({
     listElement,
     selectionController,
   ]);
-}
-
-function createMemoryClipboardData(): DataTransfer {
-  const values = new Map<string, string>();
-  return {
-    get types() {
-      return [...values.keys()];
-    },
-    getData: (format: string) => values.get(format) ?? "",
-    setData: (format: string, value: string) => {
-      values.set(format, value);
-    },
-  } as unknown as DataTransfer;
 }

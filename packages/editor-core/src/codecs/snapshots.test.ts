@@ -13,40 +13,30 @@ import {
   validateEditorInstanceSnapshot,
   validateEditorInstanceSnapshotAtBoundary,
 } from "./snapshots.ts";
-
-const renderer = () => null;
 const definitions: Readonly<Record<BlockType, BlockDefinition>> = {
-  paragraph: {
+  textBlock: {
     kind: "text",
-    type: "paragraph",
-    rootLayout: "normal",
-    renderer,
+    type: "textBlock",
   },
-  heading: { kind: "text", type: "heading", rootLayout: "normal", renderer },
-  textbox: { kind: "text", type: "textbox", rootLayout: "normal", renderer },
+  alternateTextBlock: { kind: "text", type: "alternateTextBlock" },
+  textbox: { kind: "text", type: "textbox" },
   collection: {
     kind: "wrapper",
     type: "collection",
-    rootLayout: "full",
-    renderer,
     contentBoundary: true,
     content: { required: ["collectionGroup"], additional: "collectionGroup" },
   },
   collectionGroup: {
     kind: "wrapper",
     type: "collectionGroup",
-    rootLayout: "full",
-    renderer,
     contentBoundary: true,
     content: { required: ["collectionText"], additional: "collectionText" },
   },
   collectionText: {
     kind: "text",
     type: "collectionText",
-    rootLayout: "normal",
-    renderer,
   },
-  divider: { kind: "atomic", type: "divider", rootLayout: "normal", renderer },
+  atomicBlock: { kind: "atomic", type: "atomicBlock" },
 };
 const options = { blockDefinitions: definitions };
 
@@ -58,7 +48,7 @@ describe("editor snapshot text content ownership", () => {
       blocks: {
         [blockId]: {
           id: blockId,
-          type: "paragraph",
+          type: "textBlock",
           parentId: null,
           tombstone: null,
           metadata: { nested: { label: "before" } },
@@ -114,7 +104,7 @@ describe("editor snapshot text content ownership", () => {
     ).toBe("AQ==");
   });
 
-  it.each(["paragraph", "heading", "textbox"] as const)(
+  it.each(["textBlock", "alternateTextBlock", "textbox"] as const)(
     "requires rich-text content for %s",
     (type) => {
       const snapshot = singleBlockSnapshot(type);
@@ -149,13 +139,13 @@ describe("editor snapshot text content ownership", () => {
 
   it.each([
     ["wrapper", tableSnapshot(), id(1)],
-    ["atomic", singleBlockSnapshot("divider"), id(1)],
+    ["atomic", singleBlockSnapshot("atomicBlock"), id(1)],
   ] as const)(
     "rejects text content on an %s block",
     (_label, snapshot, blockId) => {
       const content = {
         ...snapshot.content,
-        [blockId]: createBlockRichTextContentFromPlainText("paragraph", ""),
+        [blockId]: createBlockRichTextContentFromPlainText("textBlock", ""),
       };
       expect(
         validateEditorInstanceSnapshot({ ...snapshot, content }, options),
@@ -171,9 +161,9 @@ describe("editor snapshot text content ownership", () => {
   it.each([
     ["string", "plain text"],
     ["generic object", {}],
-    ["malformed rich text", { type: "doc", content: [{ type: "heading" }] }],
+    ["malformed rich text", { type: "doc", content: [{ type: "alternateTextBlock" }] }],
   ])("rejects %s content", (_label, value) => {
-    const snapshot = singleBlockSnapshot("paragraph");
+    const snapshot = singleBlockSnapshot("textBlock");
     expect(
       validateEditorInstanceSnapshot(
         { ...snapshot, content: { [id(1)]: value } },
@@ -183,7 +173,7 @@ describe("editor snapshot text content ownership", () => {
   });
 
   it("rejects content for missing and tombstoned blocks", () => {
-    const snapshot = singleBlockSnapshot("paragraph");
+    const snapshot = singleBlockSnapshot("textBlock");
     const missing = id(99);
     expect(
       validateEditorInstanceSnapshot(
@@ -191,7 +181,7 @@ describe("editor snapshot text content ownership", () => {
           ...snapshot,
           content: {
             ...snapshot.content,
-            [missing]: createBlockRichTextContentFromPlainText("paragraph", ""),
+            [missing]: createBlockRichTextContentFromPlainText("textBlock", ""),
           },
         },
         options,
@@ -208,14 +198,14 @@ describe("editor snapshot text content ownership", () => {
           ...snapshot,
           blocks: {
             ...snapshot.blocks,
-            [missing]: block(missing, "paragraph", null, {
+            [missing]: block(missing, "textBlock", null, {
               deletedAt: 1,
               reason: "user-delete",
             }),
           },
           content: {
             ...snapshot.content,
-            [missing]: createBlockRichTextContentFromPlainText("paragraph", ""),
+            [missing]: createBlockRichTextContentFromPlainText("textBlock", ""),
           },
         },
         options,
@@ -231,7 +221,7 @@ describe("editor snapshot text content ownership", () => {
         expect.stringContaining("unsupported type unknown"),
       ]),
     });
-    const marked = singleBlockSnapshot("paragraph");
+    const marked = singleBlockSnapshot("textBlock");
     expect(
       validateEditorInstanceSnapshot(marked, {
         blockDefinitions: definitions,
@@ -267,22 +257,22 @@ describe("editor snapshot text content ownership", () => {
   });
 
   it("applies the same ownership contract to block slices", () => {
-    const paragraph = block(id(1), "paragraph");
+    const textBlock = block(id(1), "textBlock");
     const wrapper = block(id(2), "collection");
     const base = {
       blockGraphVersion: INITIAL_BLOCK_GRAPH_VERSION,
-      affectedBlockIds: [paragraph.id, wrapper.id],
-      blocks: { [paragraph.id]: paragraph, [wrapper.id]: wrapper },
-      rootBlockIds: [paragraph.id, wrapper.id],
+      affectedBlockIds: [textBlock.id, wrapper.id],
+      blocks: { [textBlock.id]: textBlock, [wrapper.id]: wrapper },
+      rootBlockIds: [textBlock.id, wrapper.id],
       childIdsByParentId: {},
       content: {
-        [paragraph.id]: createBlockRichTextContentFromPlainText(
-          "paragraph",
+        [textBlock.id]: createBlockRichTextContentFromPlainText(
+          "textBlock",
           "",
         ),
       },
       contentCheckpoints: {
-        [paragraph.id]: {
+        [textBlock.id]: {
           kind: "checkpoint" as const,
           format: "test-content",
           version: 1,
@@ -300,7 +290,7 @@ describe("editor snapshot text content ownership", () => {
           content: {
             ...base.content,
             [wrapper.id]: createBlockRichTextContentFromPlainText(
-              "paragraph",
+              "textBlock",
               "",
             ),
           },
@@ -339,7 +329,7 @@ function singleBlockSnapshot(type: BlockType): EditorInstanceSnapshot {
       definition?.kind === "text" || type === "unknown"
         ? {
             [blockId]:
-              type === "paragraph"
+              type === "textBlock"
                 ? {
                     type: "doc",
                     content: [

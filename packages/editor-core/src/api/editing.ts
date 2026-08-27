@@ -15,15 +15,9 @@ export type {
 export { blockCreationSelectionTargetKind } from "../editing/block-editing/creation-selection.ts";
 export type { BlockCreationSelectionTargetKind } from "../editing/block-editing/creation-selection.ts";
 export {
-  planGenericEnter,
-  planTextSplitAtPlacement,
-} from "../editing/enter/plan-enter.ts";
-export { planBlockBoundaryBackspace } from "../editing/backspace/plan-backspace.ts";
-export { planBlockBoundaryDelete } from "../editing/delete/plan-delete.ts";
-export { planStructuralRangeDeletion } from "../editing/range-deletion/plan-range-deletion.ts";
-export {
   assertValidCanonicalBlockFragment,
   createCanonicalBlockFragment,
+  createCanonicalBlockFragmentCandidate,
   createCanonicalBlockRecord,
   duplicateCanonicalBlockSubtrees,
   materializeCanonicalBlockCreation,
@@ -32,10 +26,12 @@ export {
 } from "../editing/canonical-fragment.ts";
 export type {
   CanonicalBlockFragment,
+  CanonicalBlockFragmentCandidate,
   CanonicalBlockRecord,
   CanonicalFragmentBoundary,
   CanonicalFragmentValidationOptions,
   CreateCanonicalBlockFragmentOptions,
+  CreateCanonicalBlockFragmentCandidateOptions,
   CreateCanonicalBlockRecordOptions,
   DuplicateCanonicalBlockSubtreesOptions,
   MaterializeCanonicalBlockCreationOptions,
@@ -48,33 +44,10 @@ export {
 } from "../editing/backspace/previous-navigation.ts";
 export { findCanonicalSelectionTarget } from "../editing/boundary/canonical-navigation.ts";
 export type {
-  BlockBoundaryBackspaceContentSnapshot,
-  BlockBoundaryBackspaceSelection,
-  PlanBlockBoundaryBackspaceInput,
-  PlanBlockBoundaryBackspaceResult,
-} from "../editing/backspace/plan-backspace.ts";
-export type {
-  PlanBlockBoundaryDeleteInput,
-  PlanBlockBoundaryDeleteResult,
-} from "../editing/delete/plan-delete.ts";
-export type {
-  PlanStructuralRangeDeletionInput,
-  PlanStructuralRangeDeletionResult,
-  StructuralRangeDeletionIntent,
-} from "../editing/range-deletion/plan-range-deletion.ts";
-export type {
   CanonicalSelectionNavigationResult,
   CanonicalNavigationInput,
   PreviousMergeTargetResult,
 } from "../editing/backspace/previous-navigation.ts";
-export type {
-  GenericEnterContentSnapshot,
-  GenericEnterSelection,
-  PlanGenericEnterInput,
-  PlanGenericEnterResult,
-  PlanTextSplitAtPlacementInput,
-  PlanTextSplitAtPlacementResult,
-} from "../editing/enter/plan-enter.ts";
 export type {
   BlockTreeCreationPlan,
   PlannedBlockTreeNode,

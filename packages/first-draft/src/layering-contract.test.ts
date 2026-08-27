@@ -27,6 +27,19 @@ function zIndex(css: string, selector: string): number {
 }
 
 describe("First Draft editor layer ownership", () => {
+  it("moves block-list descendants into one isolated First Draft surface", () => {
+    const surface = declaration(firstDraftCss, ".first-draft-example");
+    const genericBlockList = declaration(editorCss, ".editor-web-block-list");
+    const firstDraftBlockList = declaration(
+      firstDraftCss,
+      ".first-draft-example .editor-web-block-list",
+    );
+
+    expect(surface).toMatch(/isolation:\s*isolate/u);
+    expect(genericBlockList).toMatch(/isolation:\s*isolate/u);
+    expect(firstDraftBlockList).toMatch(/isolation:\s*auto/u);
+  });
+
   it("keeps product surfaces below canonical range paint and text above it", () => {
     const hoverZone = zIndex(
       firstDraftCss,
@@ -58,6 +71,25 @@ describe("First Draft editor layer ownership", () => {
     expect(
       declaration(firstDraftCss, ".first-draft-example .table-block__grid"),
     ).not.toMatch(/z-index/u);
+    expect(
+      declaration(
+        firstDraftCss,
+        `:is(
+    .first-draft-example,
+    .first-draft-document-block-drag-overlay,
+    .first-draft-table-drag-overlay
+  )
+  .table-block__cell`,
+      ),
+    ).not.toMatch(
+      /z-index|isolation|transform|opacity\s*:\s*(?!1(?:\.0+)?(?:;|$))/u,
+    );
+    expect(
+      declaration(
+        firstDraftCss,
+        ".first-draft-example .table-block__cell:focus-within",
+      ),
+    ).not.toMatch(/z-index|isolation|transform|opacity/u);
   });
 
   it("elevates only controls and interactive overlays above editor text", () => {
@@ -75,7 +107,10 @@ describe("First Draft editor layer ownership", () => {
       firstDraftCss,
       ".first-draft-example .callout-block__picker",
     );
-    const calloutIcon = zIndex(firstDraftCss, ".callout-block__icon-wrap");
+    const calloutIcon = zIndex(
+      firstDraftCss,
+      ".first-draft-example .callout-block__icon-button",
+    );
     const documentLayers = zIndex(
       firstDraftCss,
       '.first-draft-example [data-editor-document-layer-host="true"]',
@@ -88,6 +123,9 @@ describe("First Draft editor layer ownership", () => {
     expect(picker).toBeGreaterThan(controls);
     expect(documentLayers).toBeGreaterThan(calloutIcon);
     expect(slashMenu).toBeGreaterThan(documentLayers);
+    expect(
+      declaration(firstDraftCss, ".callout-block__icon-wrap"),
+    ).not.toMatch(/z-index|isolation/u);
     expect(declaration(editorCss, ".editor-web-selection-paint-band")).toMatch(
       /pointer-events:\s*none/u,
     );

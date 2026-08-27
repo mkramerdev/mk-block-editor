@@ -48,6 +48,7 @@ import {
 import { finalizeCanonicalEditorCommit } from "./canonical-commit-finalizer.ts";
 import { NativeFocusCoordinator } from "./native-focus-coordinator.ts";
 import { InlineAtomPortalRegistry } from "../content/inline-atom-portal-registry.tsx";
+import type { ResolvedTextDomPresentation } from "../../document/blocks/text-dom-presentation.ts";
 
 export interface InitializeEditableEditorOptions {
   readonly compiledDefinition: CompiledCanonicalEditorDefinition<EditableEditorDefinition>;
@@ -60,6 +61,7 @@ export interface InitializeEditableEditorOptions {
 
 interface ConcreteEditor extends EditableEditorRuntimePort {
   registerCleanup(cleanup: () => void): void;
+  clearHistoryForContentReconciliation(): void;
 }
 
 interface EditableEditorCapability {
@@ -132,6 +134,7 @@ export function initializeEditableEditor({
     let editableCapability: EditableEditorCapability | null = null;
     let typingTriggerController: EditorTypingTriggerSessionController | null =
       null;
+    let additionalSelections: AdditionalSelectionManager | null = null;
     const createdEditor = new EditorImplementation({
       store,
       manifest: createInitialEditorManifestState({
@@ -161,7 +164,27 @@ export function initializeEditableEditor({
       resolveSelectionTextAnchor:
         createSelectionTextAnchorResolver(contentRuntime),
       createSelectionTextAnchor: (input) => {
-        const created = contentRuntime.tryCreateTextAnchorInLiveContext(input);
+        let created = contentRuntime.tryCreateTextAnchorInLiveContext(input);
+        if (!created.ok) {
+          let lease: ReturnType<typeof contentRuntime.acquireBlockContent>;
+          try {
+            lease = contentRuntime.acquireBlockContent(
+              input.blockId,
+              input.blockType,
+              "history",
+            );
+          } catch {
+            return { ok: false };
+          }
+          try {
+            created = contentRuntime.createTextAnchorInContext(lease, {
+              textOffset: input.textOffset,
+              affinity: input.affinity,
+            });
+          } finally {
+            lease.release();
+          }
+        }
         if (!created.ok) return { ok: false };
         const anchor = createEditorSelectionTextAnchor({
           codec: created.codec,
@@ -174,6 +197,32 @@ export function initializeEditableEditor({
               textOffset: created.textOffset,
             }
           : { ok: false };
+      },
+      resolveOperationAnchors: (input) => {
+        let lease: ReturnType<typeof contentRuntime.acquireBlockContent>;
+        try {
+          lease = contentRuntime.acquireBlockContent(
+            input.blockId,
+            input.blockType,
+            "history",
+          );
+        } catch {
+          return { ok: false };
+        }
+        try {
+          const textOffsets: number[] = [];
+          for (const anchor of input.anchors) {
+            const resolved = contentRuntime.resolveOperationAnchorInContext(
+              lease,
+              anchor,
+            );
+            if (!resolved.ok) return { ok: false };
+            textOffsets.push(resolved.textOffset);
+          }
+          return { ok: true, textOffsets };
+        } finally {
+          lease.release();
+        }
       },
       acquireTextContentAccess: (blockId) => {
         const block = editor.getBlock(blockId);
@@ -193,6 +242,7 @@ export function initializeEditableEditor({
       },
       onCanonicalCommit: (commit) => {
         if (editor.isDisposed()) return;
+        additionalSelections?.reResolve();
         finalizeCanonicalEditorCommit(commit, {
           editor,
           contentRuntime,
@@ -343,6 +393,11 @@ export function initializeEditableEditor({
               };
             },
           });
+    editor.registerCleanup(
+      contentRuntime.subscribeOperationAnchorInvalidation(() =>
+        editor.clearHistoryForContentReconciliation(),
+      ),
+    );
     editor.registerCleanup(() => contentRuntime.destroy());
     if (typingTriggerController) {
       editor.registerCleanup(() => typingTriggerController.dispose());
@@ -364,7 +419,7 @@ export function initializeEditableEditor({
       blockShellRegistryToken: null,
     };
 
-    const additionalSelections = new AdditionalSelectionManager({
+    additionalSelections = new AdditionalSelectionManager({
       compiledDefinition,
       graph: editor,
       contentRuntime,
@@ -515,6 +570,7 @@ export function initializeEditableEditor({
         readonly slot: HTMLElement;
         readonly className: string;
         readonly placeholder?: TextPlaceholder;
+        readonly textDomPresentation: ResolvedTextDomPresentation;
       }) {
         if (!editableCapability || editor.isDisposed()) {
           return { update: () => undefined, dispose: () => undefined };
@@ -562,7 +618,11 @@ export function initializeEditableEditor({
           editableCapability.text.registerHost(input);
         reconcileMountedTextRoot();
         return {
-          update(options: { readonly placeholder?: TextPlaceholder }) {
+          update(options: {
+            readonly className: string;
+            readonly placeholder?: TextPlaceholder;
+            readonly textDomPresentation: ResolvedTextDomPresentation;
+          }) {
             if (!disposed) {
               editableCapability?.text.updateHostOptions(
                 input.blockId,
@@ -633,21 +693,8 @@ export function initializeEditableEditor({
           target,
         );
       },
-      ownsNativeFocusTarget(target: EventTarget | null) {
-        return editableCapability?.nativeFocus.ownsTarget(target) ?? false;
-      },
-      ownsActiveElement(document: Document) {
-        return (
-          editableCapability?.nativeFocus.ownsActiveElement(document) ?? false
-        );
-      },
-      ownsActiveTextTarget(blockId: BlockId) {
-        return (
-          editableCapability?.nativeFocus.ownsRegisteredTarget(
-            blockId,
-            "text",
-          ) ?? false
-        );
+      resolveNativeFocusTarget(target: EventTarget | null) {
+        return editableCapability?.nativeFocus.resolveTarget(target) ?? null;
       },
       requestTextPresentation(
         blockId: BlockId,
@@ -764,12 +811,32 @@ function createSelectionTextAnchorResolver(
     if (!point.textAnchor) {
       return { ok: false, reason: "invalid", blockId: point.blockId };
     }
-    const resolved = resolveTextAnchor({
+    let resolved = resolveTextAnchor({
       blockId: point.blockId,
       blockType: point.blockType,
       codec: point.textAnchor.codec,
       payload: point.textAnchor.payload,
     });
+    if (!resolved.ok) {
+      let lease: ReturnType<typeof contentRuntime.acquireBlockContent>;
+      try {
+        lease = contentRuntime.acquireBlockContent(
+          point.blockId,
+          point.blockType,
+          "history",
+        );
+      } catch {
+        return { ok: false, reason: "missing-text", blockId: point.blockId };
+      }
+      try {
+        resolved = contentRuntime.resolveTextAnchorInContext(lease, {
+          codec: point.textAnchor.codec,
+          payload: point.textAnchor.payload,
+        });
+      } finally {
+        lease.release();
+      }
+    }
     return resolved.ok
       ? {
           ok: true,
@@ -780,8 +847,7 @@ function createSelectionTextAnchorResolver(
         }
       : {
           ok: false,
-          reason:
-            resolved.reason === "not-live" ? "missing-text" : resolved.reason,
+          reason: resolved.reason,
           blockId: point.blockId,
           ...(("message" in resolved ? resolved.message : undefined) ===
           undefined

@@ -15,13 +15,17 @@ import {
 } from "../view-state.tsx";
 import { createFirstDraftEditorDefinition } from "../../first-draft-definition.tsx";
 import { createFirstDraftSnapshot } from "../../first-draft-fixture.ts";
-import { handleTransaction } from "../../transport/handle-transaction.ts";
+import { createFirstDraftOutboundPublisher } from "../../transport/outbound-publisher.ts";
 import {
   createTableRangeCoverage,
   tableInternalSelectionSubsystem,
 } from "./selection.ts";
 import { resolveFirstDraftTableColumnIds } from "./model.ts";
 import { FirstDraftBlockHoverProvider } from "../../block-controls/index.ts";
+import {
+  createFirstDraftTableActionMenuStore,
+  FirstDraftTableActionMenuProvider,
+} from "../../table-action-menu/index.ts";
 
 const id = asBlockId;
 const disposables: Array<{ dispose(): void }> = [];
@@ -45,11 +49,15 @@ describe("First Draft table-cell boundary commands", () => {
     );
     disposables.push(editor);
     const cellId = id("fd-table-cell-2-2");
+    const initialCellText = editor.readBlockPlainText(cellId, "tableCell");
     const priorEditBlockId = id("fd-paragraph-outro");
     const priorText = editor.readBlockPlainText(priorEditBlockId, "paragraph");
     editor.transaction(() => {
       expect(
-        editor.deleteText({ blockId: cellId, range: { from: 0, to: 3 } }),
+        editor.deleteText({
+          blockId: cellId,
+          range: { from: 0, to: initialCellText.length },
+        }),
       ).toBe(true);
       expect(
         editor.insertText({ blockId: priorEditBlockId, offset: 0, text: "X" }),
@@ -60,9 +68,13 @@ describe("First Draft table-cell boundary commands", () => {
     const structural = vi.spyOn(editor, "executeStructuralTransaction");
     const rendered = render(
       <FirstDraftViewStateProvider store={viewState}>
-        <FirstDraftBlockHoverProvider enabled={editor.editable}>
-          <EditorDocument editor={editor} />
-        </FirstDraftBlockHoverProvider>
+        <FirstDraftTableActionMenuProvider
+          store={createFirstDraftTableActionMenuStore()}
+        >
+          <FirstDraftBlockHoverProvider enabled={editor.editable}>
+            <EditorDocument editor={editor} />
+          </FirstDraftBlockHoverProvider>
+        </FirstDraftTableActionMenuProvider>
       </FirstDraftViewStateProvider>,
     );
     const rowId = editor.getBlock(cellId)?.parentId;
@@ -96,7 +108,9 @@ describe("First Draft table-cell boundary commands", () => {
     expect(structural).not.toHaveBeenCalled();
     expect(onChange).not.toHaveBeenCalled();
     expect(editor.undo()).toEqual({ status: "applied" });
-    expect(editor.readBlockPlainText(cellId, "tableCell")).toBe("Ada");
+    expect(editor.readBlockPlainText(cellId, "tableCell")).toBe(
+      initialCellText,
+    );
     expect(editor.readBlockPlainText(priorEditBlockId, "paragraph")).toBe(
       priorText,
     );
@@ -246,7 +260,7 @@ describe("First Draft table-cell boundary commands", () => {
       });
       expect(fixture.onChange).toHaveBeenCalledTimes(1);
       expect(fixture.structural).not.toHaveBeenCalled();
-      expect(fixture.editor.getChildBlockIds(tableId)).toHaveLength(3);
+      expect(fixture.editor.getChildBlockIds(tableId)).toHaveLength(4);
       for (const rowId of fixture.editor.getChildBlockIds(tableId)) {
         expect(fixture.editor.getChildBlockIds(rowId)).toHaveLength(3);
       }
@@ -256,20 +270,28 @@ describe("First Draft table-cell boundary commands", () => {
   it("publishes no collaboration or persistence work and reloads the same structure", () => {
     const frames: ArrayBuffer[] = [];
     const persistence = vi.fn();
-    const onChange = handleTransaction({
-      readyState: 1,
-      send(frame) {
-        frames.push(frame);
-        persistence(frame);
+    const publisher = createFirstDraftOutboundPublisher();
+    publisher.attachGeneration({
+      generationId: "table-boundary-generation",
+      socket: {
+        readyState: 1,
+        send(frame) {
+          frames.push(frame);
+          persistence(frame);
+        },
       },
+      createTransactionId: () => crypto.randomUUID(),
+      publishSelection: vi.fn(),
     });
+    publisher.generationCaughtUp();
     const viewState = createFirstDraftViewStateStore();
     const editor = initializeEditableEditor({
       definition: createFirstDraftEditorDefinition(viewState),
       snapshot: oneCellTableSnapshot(),
-      onChange,
+      onChange: (change) => publisher.submitFinalized(change),
     });
     disposables.push(editor);
+    disposables.push({ dispose: () => publisher.dispose() });
     const peer = initializeEditableEditor({
       definition: createFirstDraftEditorDefinition(
         createFirstDraftViewStateStore(),
@@ -284,9 +306,13 @@ describe("First Draft table-cell boundary commands", () => {
     );
     const rendered = render(
       <FirstDraftViewStateProvider store={viewState}>
-        <FirstDraftBlockHoverProvider enabled={editor.editable}>
-          <EditorDocument editor={editor} />
-        </FirstDraftBlockHoverProvider>
+        <FirstDraftTableActionMenuProvider
+          store={createFirstDraftTableActionMenuStore()}
+        >
+          <FirstDraftBlockHoverProvider enabled={editor.editable}>
+            <EditorDocument editor={editor} />
+          </FirstDraftBlockHoverProvider>
+        </FirstDraftTableActionMenuProvider>
       </FirstDraftViewStateProvider>,
     );
     const cellId = id("fd-table-cell-1-1");
@@ -336,7 +362,7 @@ describe("First Draft table-cell boundary commands", () => {
 
     fireEvent.pointerDown(addRow, { button: 0 });
     const rowIds = fixture.editor.getChildBlockIds(tableId);
-    expect(rowIds).toHaveLength(4);
+    expect(rowIds).toHaveLength(5);
     const appendedRowId = rowIds.at(-1)!;
     const appendedRowCellIds = fixture.editor.getChildBlockIds(appendedRowId);
     expect(appendedRowId).toMatch(
@@ -360,7 +386,7 @@ describe("First Draft table-cell boundary commands", () => {
       expect(cellIds).toHaveLength(4);
       appendedColumnCellIds.push(cellIds.at(-1)!);
     }
-    expect(new Set(appendedColumnCellIds).size).toBe(4);
+    expect(new Set(appendedColumnCellIds).size).toBe(5);
     const table = fixture.editor.getBlock(tableId);
     if (!table) throw new Error("Missing table after append");
     const columnIds = resolveFirstDraftTableColumnIds(table.metadata, 4).ids;
@@ -381,6 +407,75 @@ describe("First Draft table-cell boundary commands", () => {
     fireEvent.keyDown(resize, { key: "ArrowRight" });
     expect(Number(resize.getAttribute("aria-valuenow"))).toBe(widthBefore + 8);
   });
+
+  it("renders append controls in marked normal-flow frame zones", () => {
+    const fixture = renderFixture();
+    const tableId = id("fd-table");
+    const frame = fixture.container.querySelector<HTMLElement>(
+      `[data-editor-block-id='${tableId}'] .table-block__frame`,
+    );
+    if (!frame) throw new Error("Missing table frame");
+
+    const gridStack = frame.querySelector<HTMLElement>(
+      ":scope > .table-block__grid-stack",
+    );
+    const columnZone = frame.querySelector<HTMLElement>(
+      ":scope > .table-block__append-zone--column",
+    );
+    const rowZone = frame.querySelector<HTMLElement>(
+      ":scope > .table-block__append-zone--row",
+    );
+    const corner = frame.querySelector<HTMLElement>(
+      ":scope > .table-block__append-corner",
+    );
+
+    expect(gridStack).not.toBeNull();
+    expect(columnZone).not.toBeNull();
+    expect(rowZone).not.toBeNull();
+    expect(corner).not.toBeNull();
+    expect(frame.children).toHaveLength(4);
+    expect(columnZone?.dataset.editorUi).toBe("true");
+    expect(columnZone?.dataset.editorObjectUi).toBe("true");
+    expect(rowZone?.dataset.editorUi).toBe("true");
+    expect(rowZone?.dataset.editorObjectUi).toBe("true");
+    expect(corner?.getAttribute("aria-hidden")).toBe("true");
+
+    const addColumn = columnZone?.querySelector<HTMLButtonElement>(
+      ":scope > button[aria-label='Add table column']",
+    );
+    const addRow = rowZone?.querySelector<HTMLButtonElement>(
+      ":scope > button[aria-label='Add table row']",
+    );
+    expect(addColumn).not.toBeNull();
+    expect(addRow).not.toBeNull();
+    expect(addColumn?.tabIndex).toBe(0);
+    expect(addRow?.tabIndex).toBe(0);
+
+    addColumn?.focus();
+    expect(document.activeElement).toBe(addColumn);
+    addRow?.focus();
+    expect(document.activeElement).toBe(addRow);
+  });
+
+  it("appends exactly once for each keyboard-activated control", () => {
+    const fixture = renderFixture();
+    const tableId = id("fd-table");
+    const addRow = fixture.container.querySelector<HTMLButtonElement>(
+      `[data-editor-block-id='${tableId}'] button[aria-label='Add table row']`,
+    );
+    const addColumn = fixture.container.querySelector<HTMLButtonElement>(
+      `[data-editor-block-id='${tableId}'] button[aria-label='Add table column']`,
+    );
+    if (!addRow || !addColumn) throw new Error("Missing table append controls");
+
+    fireEvent.click(addRow, { detail: 0 });
+    expect(fixture.editor.getChildBlockIds(tableId)).toHaveLength(5);
+    fireEvent.click(addColumn, { detail: 0 });
+    for (const rowId of fixture.editor.getChildBlockIds(tableId)) {
+      expect(fixture.editor.getChildBlockIds(rowId)).toHaveLength(4);
+    }
+    expect(fixture.onChange).toHaveBeenCalledTimes(2);
+  });
 });
 
 function renderFixture(snapshot = createFirstDraftSnapshot()) {
@@ -397,9 +492,13 @@ function renderFixture(snapshot = createFirstDraftSnapshot()) {
   const structural = vi.spyOn(editor, "executeStructuralTransaction");
   const rendered = render(
     <FirstDraftViewStateProvider store={viewState}>
-      <FirstDraftBlockHoverProvider enabled={editor.editable}>
-        <EditorDocument editor={editor} />
-      </FirstDraftBlockHoverProvider>
+      <FirstDraftTableActionMenuProvider
+        store={createFirstDraftTableActionMenuStore()}
+      >
+        <FirstDraftBlockHoverProvider enabled={editor.editable}>
+          <EditorDocument editor={editor} />
+        </FirstDraftBlockHoverProvider>
+      </FirstDraftTableActionMenuProvider>
     </FirstDraftViewStateProvider>,
   );
   return { ...rendered, editor, onChange, structural };
@@ -418,6 +517,10 @@ function oneCellTableSnapshot(): EditorInstanceSnapshot {
     id("fd-table-cell-3-1"),
     id("fd-table-cell-3-2"),
     id("fd-table-cell-3-3"),
+    id("fd-table-row-4"),
+    id("fd-table-cell-4-1"),
+    id("fd-table-cell-4-2"),
+    id("fd-table-cell-4-3"),
   ]);
   const keepEntries = <Value,>(
     record: Readonly<Partial<Record<BlockId, Value>>>,

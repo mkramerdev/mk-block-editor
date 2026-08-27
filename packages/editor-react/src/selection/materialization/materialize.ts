@@ -1,7 +1,9 @@
 import type { BlockDefinition } from "@repo/editor-core/definitions";
 import {
   createCanonicalBlockFragment,
+  createCanonicalBlockFragmentCandidate,
   type CanonicalBlockFragment,
+  type CanonicalBlockFragmentCandidate,
   type CanonicalBlockRecord,
   type CanonicalFragmentBoundary,
 } from "@repo/editor-core/editing";
@@ -49,7 +51,7 @@ import {
 } from "./command-eligibility.ts";
 import { createEditorSelectionContentCompletenessChecker } from "../completeness/effective-content-completeness.ts";
 
-export interface MaterializeEditorSelectionFragmentOptions {
+export interface MaterializeEditorSelectionFragmentCandidateOptions {
   readonly snapshot: EditorSelectionSnapshot;
   readonly graph: EditorSelectionGraphReader;
   readonly graphRevision?: number;
@@ -70,8 +72,8 @@ export interface MaterializeEditorSelectionFragmentOptions {
   }) => readonly BlockId[];
 }
 
-export type MaterializeEditorSelectionFragmentResult =
-  | { readonly ok: true; readonly fragment: CanonicalBlockFragment }
+export type MaterializeEditorSelectionFragmentCandidateResult =
+  | { readonly ok: true; readonly candidate: CanonicalBlockFragmentCandidate }
   | {
       readonly ok: false;
       readonly reason:
@@ -200,7 +202,7 @@ export function resolveEditorSelectionSnapshotTextAnchors({
   };
 }
 
-export function materializeEditorSelectionFragment({
+export function materializeEditorSelectionFragmentCandidate({
   snapshot,
   graph,
   graphRevision,
@@ -209,7 +211,7 @@ export function materializeEditorSelectionFragment({
   textAnchorResolver,
   blockDefinitions,
   resolveVisibleChildBlockIds,
-}: MaterializeEditorSelectionFragmentOptions): MaterializeEditorSelectionFragmentResult {
+}: MaterializeEditorSelectionFragmentCandidateOptions): MaterializeEditorSelectionFragmentCandidateResult {
   const resolved = resolveEditorSelectionSnapshotTextAnchors({
     snapshot,
     graph,
@@ -234,7 +236,7 @@ export function materializeEditorSelectionFragment({
       blockDefinitions,
       resolveVisibleChildBlockIds,
     });
-    return { ok: true, fragment: builder.build() };
+    return { ok: true, candidate: builder.build() };
   } catch (error) {
     return {
       ok: false,
@@ -324,11 +326,11 @@ class SelectionFragmentBuilder {
     });
   }
 
-  build(): CanonicalBlockFragment {
-    const selectedRoots = this.options.graph
-      .getRootBlockIds()
-      .flatMap((rootId) => this.collectSelected(rootId));
-    const roots = this.wrapCanonicalListItemRuns(selectedRoots);
+  build(): CanonicalBlockFragmentCandidate {
+    const selectedRoots = this.materializationCandidates().flatMap((blockId) =>
+      this.collectSelected(blockId),
+    );
+    const roots = selectedRoots;
     if (roots.length === 0) throw new Error("selection materialized no blocks");
 
     const allocated = new Map<string, ReturnType<typeof createBlockRecord>>();
@@ -369,66 +371,38 @@ class SelectionFragmentBuilder {
       "end",
       allocated,
     );
-    return createCanonicalBlockFragment({
+    return createCanonicalBlockFragmentCandidate({
       blocks: records,
       rootBlockIds: roots.map((root) => allocated.get(root.key)!.id),
       start,
       end,
-      blockDefinitions: this.options.blockDefinitions,
     });
   }
 
-  private wrapCanonicalListItemRuns(
-    roots: readonly PendingFragmentNode[],
-  ): readonly PendingFragmentNode[] {
-    const result: PendingFragmentNode[] = [];
-    for (let index = 0; index < roots.length; ) {
-      const root = roots[index]!;
-      const source = this.options.graph.getBlock(root.key as BlockId);
-      const policy = source
-        ? this.options.blockDefinitions[source.type]?.list
-        : undefined;
-      const parent = source?.parentId
-        ? this.options.graph.getBlock(source.parentId)
-        : null;
-      if (
-        !source ||
-        policy?.kind !== "item" ||
-        !parent ||
-        parent.type !== policy.containerType
-      ) {
-        result.push(root);
-        index += 1;
-        continue;
+  private materializationCandidates(): readonly BlockId[] {
+    const rangeIds = new Set<BlockId>();
+    for (const rangeBlock of this.options.snapshot.rangeBlocks) {
+      if (rangeIds.has(rangeBlock.blockId)) {
+        throw new Error(`duplicate selection range block ${rangeBlock.blockId}`);
       }
-      const children: PendingFragmentNode[] = [root];
-      let cursor = index + 1;
-      while (cursor < roots.length) {
-        const candidate = roots[cursor]!;
-        const candidateSource = this.options.graph.getBlock(
-          candidate.key as BlockId,
-        );
-        if (
-          !candidateSource ||
-          candidateSource.parentId !== parent.id ||
-          candidateSource.type !== source.type
-        ) {
-          break;
-        }
-        children.push(candidate);
-        cursor += 1;
-      }
-      const metadata = normalizeBlockMetadata(parent.metadata);
-      result.push({
-        key: `${parent.id}:selected-list-run:${this.syntheticKey++}`,
-        type: parent.type,
-        ...(metadata === undefined ? {} : { metadata }),
-        children,
-        edge: "children",
-      });
-      index = cursor;
+      rangeIds.add(rangeBlock.blockId);
     }
-    return result;
+
+    return this.options.snapshot.rangeBlocks.flatMap((rangeBlock) => {
+      const visited = new Set<BlockId>([rangeBlock.blockId]);
+      let parentId = this.options.graph.getParentId(rangeBlock.blockId);
+      while (parentId !== null) {
+        if (visited.has(parentId)) {
+          throw new Error(
+            `cyclic parent chain for selection block ${rangeBlock.blockId}`,
+          );
+        }
+        if (rangeIds.has(parentId)) return [];
+        visited.add(parentId);
+        parentId = this.options.graph.getParentId(parentId);
+      }
+      return [rangeBlock.blockId];
+    });
   }
 
   private collectSelected(blockId: BlockId): readonly PendingFragmentNode[] {
@@ -489,6 +463,7 @@ class SelectionFragmentBuilder {
       range?.coverage === "complete-block" ||
       (selected && descriptor?.kind === "block") ||
       (inclusion === "complete-content" && completeContent) ||
+      (inclusion === "selected-children" && selectedChildIds.length > 0) ||
       (inclusion === "multiple-selected-children" &&
         selectedChildIds.length > 1);
     if (!structurallySelected) return null;

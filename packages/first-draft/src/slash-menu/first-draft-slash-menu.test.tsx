@@ -18,6 +18,30 @@ import type { EditableEditor } from "@repo/editor-web/editor";
 import type { EditorTypingTriggerSession } from "@repo/editor-web/typing-triggers";
 import { firstDraftBlockDefinitions } from "../first-draft-definition.tsx";
 import { FirstDraftSlashMenu } from "./first-draft-slash-menu.tsx";
+import { firstDraftSlashActionCatalog } from "./catalog.ts";
+
+const expectedIcons: ReadonlyMap<string, string> = new Map([
+  ["paragraph", "Type"],
+  ["heading-1", "Heading1"],
+  ["heading-2", "Heading2"],
+  ["heading-3", "Heading3"],
+  ["bullet-list", "List"],
+  ["numbered-list", "ListOrdered"],
+  ["checklist", "ListTodo"],
+  ["quote", "Quote"],
+  ["code", "CodeXml"],
+  ["callout", "Lightbulb"],
+  ["toggle-heading-1", "Heading1"],
+  ["toggle-heading-2", "Heading2"],
+  ["toggle-heading-3", "Heading3"],
+  ["toggle-list", "ListCollapse"],
+  ["divider", "Minus"],
+  ["columns-2", "Columns2"],
+  ["columns-3", "Columns3"],
+  ["columns-4", "Columns4"],
+  ["tabs", "Folder"],
+  ["table", "Table"],
+] as const);
 
 describe("FirstDraftSlashMenu", () => {
   beforeEach(() => {
@@ -45,9 +69,54 @@ describe("FirstDraftSlashMenu", () => {
     delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
   });
 
+  it("renders exactly one decorative mapped Lucide icon for every catalog action", () => {
+    const { editor } = editorFixture();
+    const interaction = interactionFixture();
+    render(
+      <FirstDraftSlashMenu
+        editor={editor}
+        geometry={editor.geometry}
+        interactions={interaction.port}
+      />,
+    );
+
+    expect([...expectedIcons.keys()]).toEqual(
+      firstDraftSlashActionCatalog.map(({ id }) => id),
+    );
+    screen.getByRole("listbox", { hidden: true }).style.visibility = "visible";
+    const options = screen.getAllByRole("option");
+    expect(options).toHaveLength(firstDraftSlashActionCatalog.length);
+    for (const [index, candidate] of firstDraftSlashActionCatalog.entries()) {
+      const option = options[index]!;
+      const icon = option.querySelector<HTMLElement>(
+        ":scope > .first-draft-slash-menu__icon",
+      );
+      const svgs = option.querySelectorAll("svg");
+      expect(icon?.dataset.firstDraftSlashActionIcon).toBe(
+        expectedIcons.get(candidate.id),
+      );
+      expect(icon?.getAttribute("aria-hidden")).toBe("true");
+      expect(svgs).toHaveLength(1);
+      expect(svgs[0]?.getAttribute("aria-hidden")).toBe("true");
+      expect(svgs[0]?.getAttribute("focusable")).toBe("false");
+      expect(option.querySelector(".first-draft-slash-menu__label")?.textContent).toBe(
+        candidate.label,
+      );
+      expect(
+        screen.getByRole("option", {
+          name: `${candidate.label}${candidate.category}`,
+        }),
+      ).toBe(option);
+    }
+  });
+
   it("uses one active state for arrows, pointer, Enter, and click", () => {
     const { editor, replace } = editorFixture();
     const interaction = interactionFixture();
+    const editorTextRoot = document.createElement("div");
+    editorTextRoot.tabIndex = 0;
+    document.body.append(editorTextRoot);
+    editorTextRoot.focus();
     render(
       <FirstDraftSlashMenu
         editor={editor}
@@ -64,8 +133,11 @@ describe("FirstDraftSlashMenu", () => {
     expect(selectedOptions(options)).toHaveLength(1);
     expect(options[0]?.getAttribute("aria-selected")).toBe("true");
 
+    const scrollIntoView = vi.mocked(HTMLElement.prototype.scrollIntoView);
+    scrollIntoView.mockClear();
     expect(interaction.dispatch("ArrowUp")).toBe("handled");
     expect(options.at(-1)?.getAttribute("aria-selected")).toBe("true");
+    expect(scrollIntoView).toHaveBeenLastCalledWith({ block: "nearest" });
     expect(interaction.dispatch("ArrowDown")).toBe("handled");
     expect(options[0]?.getAttribute("aria-selected")).toBe("true");
 
@@ -83,9 +155,12 @@ describe("FirstDraftSlashMenu", () => {
       ),
     ).toBe(true);
 
+    fireEvent.pointerDown(options[4]!);
     fireEvent.click(options[4]!);
     expect(replace).toHaveBeenCalledTimes(2);
-    expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalled();
+    expect(scrollIntoView).toHaveBeenCalled();
+    expect(document.activeElement).toBe(editorTextRoot);
+    editorTextRoot.remove();
   });
 
   it("claims arrows while the active session temporarily has no candidates", () => {
@@ -105,6 +180,7 @@ describe("FirstDraftSlashMenu", () => {
     expect(editor.selection.getSnapshot()).toBe(before);
     expect(editor.selection.getSnapshot()).toBe(selectionSnapshot);
     expect(screen.queryAllByRole("option", { hidden: true })).toHaveLength(0);
+    expect(screen.getByText("No matching blocks")).not.toBeNull();
   });
 
   it("handles Escape and valid Enter but leaves ordinary and modified input unhandled", () => {

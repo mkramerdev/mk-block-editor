@@ -1,35 +1,6 @@
 import type { BlockType } from "../document/model/block.ts";
 import type { BlockDefinition } from "./block-definition.ts";
 
-export interface RestorativeDefaultRelationship {
-  readonly defaultType: BlockType;
-  readonly replacementType: BlockType;
-}
-
-/**
- * Resolves the definition-level relationship used by wrappers whose empty
- * state is represented by one replaceable atomic child.
- */
-export function resolveRestorativeDefault(
-  blockDefinitions: Readonly<Record<BlockType, BlockDefinition>>,
-  definition: BlockDefinition,
-): RestorativeDefaultRelationship | null {
-  if (definition.kind !== "wrapper" || !definition.defaultContent) return null;
-  const defaultDefinition = blockDefinitions[definition.defaultContent];
-  if (
-    defaultDefinition?.kind !== "atomic" ||
-    defaultDefinition.replaceWith === undefined
-  ) {
-    return null;
-  }
-  const replacementDefinition = blockDefinitions[defaultDefinition.replaceWith];
-  if (replacementDefinition?.kind !== "text") return null;
-  return {
-    defaultType: definition.defaultContent,
-    replacementType: defaultDefinition.replaceWith,
-  };
-}
-
 export function blockDefinitionAcceptsChildren(
   definition: BlockDefinition,
 ): boolean {
@@ -154,18 +125,6 @@ export function blockDefinitionAcceptsSequence(
     const accepted = index < required.length ? required[index] : additional;
     if (accepted !== "block" && accepted !== childType) return false;
   }
-  const restorativeDefault = resolveRestorativeDefault(
-    blockDefinitions,
-    definition,
-  );
-  if (
-    restorativeDefault &&
-    childTypes.includes(restorativeDefault.defaultType) &&
-    (childTypes.length !== 1 ||
-      childTypes[0] !== restorativeDefault.defaultType)
-  ) {
-    return false;
-  }
   return true;
 }
 
@@ -182,20 +141,6 @@ export function blockDefinitionAcceptsInsertion(
     insertionIndex > currentChildTypes.length
   ) {
     return false;
-  }
-  const restorativeDefault = resolveRestorativeDefault(
-    blockDefinitions,
-    definition,
-  );
-  if (
-    restorativeDefault &&
-    currentChildTypes.length === 1 &&
-    currentChildTypes[0] === restorativeDefault.defaultType &&
-    childType !== restorativeDefault.defaultType
-  ) {
-    return blockDefinitionAcceptsSequence(blockDefinitions, definition, [
-      childType,
-    ]);
   }
   const candidate = [...currentChildTypes];
   candidate.splice(insertionIndex, 0, childType);

@@ -1,7 +1,8 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import { useRef, type CSSProperties } from "react";
 import type { BlockId } from "@repo/editor-core/kernel";
+import { useDraggable } from "@mk-drag-and-drop/react";
 import type { FirstDraftEditor } from "../first-draft-editor-contracts.ts";
 import { FirstDraftBlockControlHoverZone } from "./block-control-hover-zone.tsx";
 import {
@@ -10,29 +11,38 @@ import {
 } from "./block-hover-provider.tsx";
 import { FirstDraftIcon } from "../ui/icon.tsx";
 import { gripVerticalIcon, plusIcon } from "../ui/icons.ts";
+import { EDITOR_BLOCK_DND_GROUP } from "../block-drag-and-drop/stable-anchors.tsx";
+import type { FirstDraftHeadingLevel } from "../heading-level.ts";
+import {
+  insertFirstDraftAdjacentParagraph,
+  presentFirstDraftBlockOperationSelection,
+} from "../block-operations/adjacent-paragraph.ts";
+import {
+  useFirstDraftBlockActionMenuSnapshot,
+  useFirstDraftBlockActionMenuStore,
+} from "../block-action-menu/index.ts";
 
 export const FIRST_DRAFT_BLOCK_CONTROL_OFFSETS = {
-  paragraph: "1px",
+  paragraph: "4px",
   heading: {
     1: "36px",
-    2: "14px",
-    3: "0px",
-    4: "0px",
-    5: "0px",
-    6: "0px",
+    2: "18px",
+    3: "13px",
   },
   quote: "22px",
-  code: "1rem",
+  code: "2rem",
   listItem: "1px",
   checklist: "1px",
-  callout: "36px",
-  toggleHeading: "0.125rem",
-  toggleList: "3px",
-  tabs: "1rem",
+  callout: "32px",
+  toggleHeading: {
+    1: "36px",
+    2: "18px",
+    3: "13px",
+  },
+  toggleList: "8px",
+  tabs: "1.5rem",
   tabPane: "3px",
-  placeholder: "3px",
-  divider: "1rem",
-  bookmark: "0px",
+  divider: "18px",
   table: "0px",
 } as const satisfies Readonly<{
   readonly paragraph: CSSProperties["insetBlockStart"];
@@ -44,17 +54,15 @@ export const FIRST_DRAFT_BLOCK_CONTROL_OFFSETS = {
   readonly listItem: CSSProperties["insetBlockStart"];
   readonly checklist: CSSProperties["insetBlockStart"];
   readonly callout: CSSProperties["insetBlockStart"];
-  readonly toggleHeading: CSSProperties["insetBlockStart"];
+  readonly toggleHeading: Readonly<
+    Record<FirstDraftHeadingLevel, CSSProperties["insetBlockStart"]>
+  >;
   readonly toggleList: CSSProperties["insetBlockStart"];
   readonly tabs: CSSProperties["insetBlockStart"];
   readonly tabPane: CSSProperties["insetBlockStart"];
-  readonly placeholder: CSSProperties["insetBlockStart"];
   readonly divider: CSSProperties["insetBlockStart"];
-  readonly bookmark: CSSProperties["insetBlockStart"];
   readonly table: CSSProperties["insetBlockStart"];
 }>;
-
-export type FirstDraftHeadingLevel = 1 | 2 | 3 | 4 | 5 | 6;
 
 type FirstDraftBlockControlsStyle = CSSProperties & {
   readonly "--first-draft-block-controls-inset-block-start": CSSProperties["insetBlockStart"];
@@ -95,16 +103,13 @@ export function FirstDraftBlockControls({
           event.stopPropagation();
         }}
         onClick={(event) => {
-          const result = editor.insertBlock({
+          const result = insertFirstDraftAdjacentParagraph(
+            editor,
             blockId,
-            blockType: "paragraph",
-            selection: true,
-          });
+            "after",
+          );
           if (result.ok) {
-            presentCanonicalInsertedParagraph(
-              editor,
-              result.transaction.transaction.selection,
-            );
+            presentFirstDraftBlockOperationSelection(editor, result);
             event.preventDefault();
             event.stopPropagation();
           }
@@ -112,13 +117,7 @@ export function FirstDraftBlockControls({
       >
         <FirstDraftIcon aria-hidden="true" icon={plusIcon} />
       </button>
-      <span
-        className="first-draft-block-control-button first-draft-block-drag-handle"
-        aria-hidden="true"
-        draggable={false}
-      >
-        <FirstDraftIcon aria-hidden="true" icon={gripVerticalIcon} />
-      </span>
+      <FirstDraftBlockDragHandle blockId={blockId} />
     </div>
   );
 }
@@ -136,7 +135,12 @@ export function FirstDraftBlockChrome({
   readonly blockStartOffset?: CSSProperties["insetBlockStart"];
   readonly visible?: boolean;
 }) {
-  const active = useIsHoveredFirstDraftBlock(blockId);
+  const hovered = useIsHoveredFirstDraftBlock(blockId);
+  const blockActionMenu = useFirstDraftBlockActionMenuSnapshot();
+  const active =
+    blockActionMenu.kind === "open"
+      ? blockActionMenu.blockId === blockId
+      : hovered;
   const enabled = visible && editor?.editable === true;
   return (
     <>
@@ -152,26 +156,86 @@ export function FirstDraftBlockChrome({
   );
 }
 
-type FirstDraftBlockControlsEditor = Pick<FirstDraftEditor, "insertBlock"> &
-  Partial<Pick<FirstDraftEditor, "focusText" | "getBlock">>;
+type FirstDraftBlockControlsEditor = FirstDraftEditor;
 
-function presentCanonicalInsertedParagraph(
-  editor: FirstDraftBlockControlsEditor,
-  selection: {
-    readonly kind: string;
-    readonly blockId?: BlockId;
-    readonly offset?: number;
-  },
-): void {
-  if (
-    selection.kind !== "text-offset" ||
-    !selection.blockId ||
-    editor.getBlock?.(selection.blockId)?.type !== "paragraph" ||
-    !editor.focusText
-  )
-    return;
-  editor.focusText(selection.blockId, {
-    offset: selection.offset ?? 0,
-    preventScroll: true,
+export function FirstDraftBlockDragHandle({
+  blockId,
+}: {
+  readonly blockId: BlockId;
+}) {
+  const menuStore = useFirstDraftBlockActionMenuStore();
+  const menu = useFirstDraftBlockActionMenuSnapshot();
+  const open = menu.kind === "open" && menu.blockId === blockId;
+  const suppressKeyboardClick = useRef(false);
+  const draggable = useDraggable<HTMLButtonElement>({
+    draggableId: blockId,
+    group: EDITOR_BLOCK_DND_GROUP,
   });
+  return (
+    <button
+      {...draggable}
+      type="button"
+      className="first-draft-block-control-button first-draft-block-drag-handle"
+      aria-label="Drag block or open block actions"
+      aria-haspopup="menu"
+      aria-expanded={open}
+      aria-controls={open ? menuStore.menuId : undefined}
+      draggable={false}
+      data-dnd-drag-handle="true"
+      data-first-draft-draggable-block-id={blockId}
+      data-editor-ui="true"
+      onPointerDownCapture={(event) => {
+        draggable.onPointerDownCapture?.(event);
+        menuStore.clearSuppressedTriggerClick(blockId);
+      }}
+      onClick={(event) => {
+        event.stopPropagation();
+        if (
+          event.detail !== 0 &&
+          menuStore.consumeSuppressedTriggerClick(blockId)
+        ) {
+          event.preventDefault();
+          return;
+        }
+        if (suppressKeyboardClick.current && event.detail === 0) {
+          suppressKeyboardClick.current = false;
+          event.preventDefault();
+          return;
+        }
+        menuStore.toggle({
+          kind: "open",
+          blockId,
+          triggerElement: event.currentTarget,
+          cause: "pointer",
+        });
+      }}
+      onKeyDown={(event) => {
+        if (
+          event.key !== "Enter" &&
+          event.key !== " " &&
+          event.key !== "ArrowDown"
+        ) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        suppressKeyboardClick.current = true;
+        queueMicrotask(() => {
+          suppressKeyboardClick.current = false;
+        });
+        menuStore.open({
+          kind: "open",
+          blockId,
+          triggerElement: event.currentTarget,
+          cause: "keyboard",
+        });
+      }}
+    >
+      {/* The DOM runtime looks for a descendant marker before accepting the
+          draggable button itself as its pointer handle. */}
+      <span data-dnd-drag-handle="true" aria-hidden="true">
+        <FirstDraftIcon aria-hidden="true" icon={gripVerticalIcon} />
+      </span>
+    </button>
+  );
 }

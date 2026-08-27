@@ -8,7 +8,7 @@ describe("editor view inline formatting caret helpers", () => {
   it("does not dispatch when restoring an unchanged caret", () => {
     const state = createBlockLocalProseMirrorState({
       blockId: "01890f07-1c00-7000-8000-000000000001" as BlockId,
-      blockType: "paragraph",
+      blockType: "textBlock",
       doc: "",
     });
     const editorDom = document.createElement("div");
@@ -32,7 +32,7 @@ describe("editor view inline formatting caret helpers", () => {
     const blockId = "01890f07-1c00-7000-8000-000000000002" as BlockId;
     const state = createBlockLocalProseMirrorState({
       blockId,
-      blockType: "paragraph",
+      blockType: "textBlock",
       doc: "abcdef",
     });
     const editorDom = document.createElement("div");

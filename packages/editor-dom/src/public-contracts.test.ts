@@ -13,18 +13,15 @@ import { serializeBlockRichTextContentHtml } from "./clipboard/serialize/prosemi
 const markSchema = createBlockLocalProseMirrorSchema({
   inlineMarks: [boldMarkDefinition],
 });
-const renderer = () => null;
 const definitions: Readonly<Record<string, BlockDefinition>> = {
-  paragraph: {
+  textBlock: {
     kind: "text",
-    type: "paragraph",
-    renderer,
-    rootLayout: "normal",
+    type: "textBlock",
   },
 };
 const paragraphHtmlParser = createTextHtmlImportHandler({
   id: "contract.paragraph",
-  blockType: "paragraph",
+  blockType: "textBlock",
   tags: ["p"],
 });
 
@@ -40,7 +37,7 @@ describe("editor-dom public contracts", () => {
       },
     );
     expect(fragment?.blocks[0]).toMatchObject({
-      type: "paragraph",
+      type: "textBlock",
       plainText: "Hello Ada",
     });
     expect(fragment?.blocks[0]?.content).toMatchObject({
@@ -60,7 +57,7 @@ describe("editor-dom public contracts", () => {
       ],
     };
     expect(
-      serializeBlockRichTextContentHtml(rich, "paragraph", {
+      serializeBlockRichTextContentHtml(rich, "textBlock", {
         schema: markSchema,
       }),
     ).toContain("<strong");

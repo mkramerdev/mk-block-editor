@@ -1,9 +1,8 @@
 import {
+  editorStableSelectionsEqual,
   projectCanonicalSelectionToStable,
   type CanonicalLocalSelection,
   type EditorStableSelection,
-  type EditorTransactionSelection,
-  type StableDocumentSelectionPoint,
 } from "@repo/editor-react/selection";
 import {
   encodeFirstDraftMessage,
@@ -35,12 +34,17 @@ export interface FirstDraftPresenceEditor {
 }
 
 export interface FirstDraftPresenceAttachment {
-  publishCommittedSelection(selection: EditorStableSelection): void;
-  publishCommittedTransactionSelection(
-    selection: EditorTransactionSelection,
+  publishSelection(
+    selection: EditorStableSelection,
     transactionId?: string,
   ): void;
+  publishCurrentSelection(unlessEqual?: EditorStableSelection): boolean;
   dispose(): void;
+}
+
+export interface FirstDraftPresencePublicationRevisions {
+  presence: number;
+  selection: number;
 }
 
 export interface FirstDraftPresenceSession {
@@ -50,6 +54,8 @@ export interface FirstDraftPresenceSession {
 }
 
 export interface FirstDraftPresenceClientOptions {
+  readonly revisions: FirstDraftPresencePublicationRevisions;
+  readonly beforeStandaloneSelectionPublication: () => void;
   readonly onParticipants?: (
     participants: readonly FirstDraftParticipantPresence[],
   ) => void;
@@ -60,25 +66,16 @@ export interface FirstDraftPresenceClientOptions {
   }) => void;
 }
 
-const publicationRevisions = new WeakMap<
-  FirstDraftMessageDispatcher,
-  { presence: number; selection: number }
->();
-
 /** Publishes and consumes ephemeral presence over an already-open transaction socket. */
 export function attachFirstDraftPresence(
   connection: FirstDraftMessageDispatcher,
   editor: FirstDraftPresenceEditor,
   session: FirstDraftPresenceSession,
-  options: FirstDraftPresenceClientOptions = {},
+  options: FirstDraftPresenceClientOptions,
 ): FirstDraftPresenceAttachment {
   const socket = connection.socket;
   let disposed = false;
-  const revisions = publicationRevisions.get(connection) ?? {
-    presence: 0,
-    selection: 0,
-  };
-  publicationRevisions.set(connection, revisions);
+  const revisions = options.revisions;
   const participants = new Map<
     CollaborationSubjectKey,
     FirstDraftParticipantPresence
@@ -111,6 +108,7 @@ export function attachFirstDraftPresence(
     selection: EditorStableSelection,
     transactionId: string | null = null,
   ) => {
+    if (disposed) return false;
     const selectionRevision = revisions.selection++;
     const published = send({
       type: "first-draft-selection-update",
@@ -124,32 +122,6 @@ export function attachFirstDraftPresence(
     }
     return published;
   };
-  const publishCommittedTransactionSelection: FirstDraftPresenceAttachment["publishCommittedTransactionSelection"] =
-    (selection, transactionId) => {
-      if (selection.kind === "none") {
-        publishSelection(selection, transactionId ?? null);
-        return;
-      }
-      if (selection.selection.kind === "block-internal") {
-        publishSelection(selection, transactionId ?? null);
-        return;
-      }
-      const { direction, anchor, focus } = selection.selection;
-      const stableAnchor = stableTransactionPoint(anchor);
-      publishSelection(
-        {
-          kind: "selection",
-          selection: {
-            kind: "document",
-            direction,
-            anchor: stableAnchor,
-            focus:
-              focus === anchor ? stableAnchor : stableTransactionPoint(focus),
-          },
-        },
-        transactionId ?? null,
-      );
-    };
   const commitSelections = () => {
     editor.setSelections({
       entries: [...selections.values()]
@@ -221,20 +193,23 @@ export function attachFirstDraftPresence(
     }
   };
   const unsubscribeMessages = connection.subscribe(onMessage);
-  const publishCurrentSelection = () =>
-    publishSelection(
-      projectCanonicalSelectionToStable(editor.selection.getSnapshot()),
-    );
+  const publishCurrentSelection = (unlessEqual?: EditorStableSelection) => {
+    const current = projectCanonicalSelectionToStable(editor.selection.getSnapshot());
+    if (unlessEqual && editorStableSelectionsEqual(current, unlessEqual)) return false;
+    return publishSelection(current);
+  };
   const unsubscribeSelection = editor.subscribeStandaloneSelectionSettlements(
     (selection) => {
-      if (!disposed) publishSelection(selection);
+      if (!disposed) {
+        options.beforeStandaloneSelectionPublication();
+        publishSelection(selection);
+      }
     },
   );
   publishParticipant(true);
-  publishCurrentSelection();
   return Object.freeze({
-    publishCommittedSelection: publishSelection,
-    publishCommittedTransactionSelection,
+    publishSelection,
+    publishCurrentSelection,
     dispose() {
       if (disposed) return;
       disposed = true;
@@ -246,26 +221,6 @@ export function attachFirstDraftPresence(
       options.onParticipants?.([]);
     },
   });
-}
-
-function stableTransactionPoint(
-  point: Extract<
-    Extract<
-      EditorTransactionSelection,
-      { readonly kind: "selection" }
-    >["selection"],
-    { readonly kind: "document" }
-  >["anchor"],
-): StableDocumentSelectionPoint {
-  return point.kind === "text"
-    ? {
-        kind: "text",
-        blockId: point.blockId,
-        textOffset: point.textOffset,
-        textAnchor: point.textAnchor,
-        affinity: point.affinity,
-      }
-    : point;
 }
 
 function subjectKey(

@@ -1,6 +1,6 @@
 "use client";
 
-import { useSyncExternalStore, type ReactNode } from "react";
+import { createElement, useSyncExternalStore, type ReactNode } from "react";
 import type { JsonObject } from "@repo/editor-core/kernel";
 import { validateAndCloneInlineAtomMetadata } from "@repo/editor-core/content/inline-atoms";
 import {
@@ -9,16 +9,28 @@ import {
   type InlineMarkDefinition,
 } from "@repo/editor-core/content/marks";
 import type { VersionedBlock } from "@repo/editor-core/document";
-import { normalizeHeadingLevel } from "@repo/editor-core/document";
 import type { TextPlaceholder } from "@repo/editor-dom/block-editor";
 import type { RichTextDocumentNodeJson } from "@repo/editor-core/content/rich-text";
-import type { AnyEditorRuntimePort } from "../../runtime/document/render-port.ts";
+import type { EditableEditorRuntimePort } from "../../runtime/document/render-port.ts";
 import type { EditorContentRuntime } from "@repo/editor-core/content";
 import type { InlineAtomDefinition } from "../../runtime/definition/contracts.ts";
+import {
+  defaultTextDomPresentation,
+  type ResolvedTextDomPresentation,
+} from "./text-dom-presentation.ts";
 
 interface CanonicalTextProjectionOptions {
   block: VersionedBlock;
-  editor: AnyEditorRuntimePort;
+  editor: EditableEditorRuntimePort;
+}
+
+export interface CanonicalRichTextPresentationProps {
+  readonly block: VersionedBlock;
+  readonly content: RichTextDocumentNodeJson | null;
+  readonly inlineAtoms: readonly InlineAtomDefinition[];
+  readonly inlineMarks: readonly InlineMarkDefinition[];
+  readonly placeholder?: TextPlaceholder;
+  readonly textDomPresentation?: ResolvedTextDomPresentation;
 }
 
 export function useCanonicalTextProjection({
@@ -42,48 +54,60 @@ export function useCanonicalTextProjection({
 }
 
 export function CanonicalRichTextChildren({
-  block,
   text,
   leaves,
   placeholder,
+  textDomPresentation = defaultTextDomPresentation,
 }: {
   block: VersionedBlock;
   text: string;
   leaves: readonly ReadTextLeaf[];
   placeholder?: TextPlaceholder;
+  textDomPresentation?: ResolvedTextDomPresentation;
 }) {
   const content = renderReadTextLeaves(leaves);
   const trailingBreak =
     text.length === 0 || text.endsWith("\n") ? (
-      <br data-editor-read-trailing-break="true" aria-hidden="true" />
+      <br data-editor-canonical-trailing-break="true" aria-hidden="true" />
     ) : null;
-  switch (block.type) {
-    case "heading": {
-      const level = normalizeHeadingLevel(block.metadata?.level);
-      const Heading = `h${level}` as "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
-      const placeholderAttrs = readPlaceholderAttributes(text, placeholder);
-      return (
-        <Heading
-          {...placeholderAttrs}
-          data-block-node="heading"
-          data-level={String(level)}
-        >
-          {content}
-          {trailingBreak}
-        </Heading>
-      );
-    }
-    default:
-      return (
-        <p
-          {...readPlaceholderAttributes(text, placeholder)}
-          data-block-node="paragraph"
-        >
-          {content}
-          {trailingBreak}
-        </p>
-      );
-  }
+  return createElement(
+    textDomPresentation.element,
+    {
+      ...textDomPresentation.attributes,
+      ...readPlaceholderAttributes(text, placeholder),
+      "data-block-node": "paragraph",
+    },
+    content,
+    trailingBreak,
+  );
+}
+
+/**
+ * Stateless canonical rich-text presentation for an already captured block.
+ * It owns no editor runtime, subscription, registration, or editable host.
+ */
+export function CanonicalRichTextPresentation({
+  block,
+  content,
+  inlineAtoms,
+  inlineMarks,
+  placeholder,
+  textDomPresentation = defaultTextDomPresentation,
+}: CanonicalRichTextPresentationProps) {
+  const canonical = readTextModelFromProjection(
+    block.tombstone === null ? content : null,
+    new Map(inlineAtoms.map((definition) => [definition.type, definition])),
+    inlineMarks,
+  );
+  return (
+    <CanonicalRichTextChildren
+      block={block}
+      text={canonical.text}
+      leaves={canonical.leaves}
+      placeholder={placeholder}
+      textDomPresentation={textDomPresentation}
+    />
+  );
 }
 
 function readPlaceholderAttributes(
@@ -139,7 +163,7 @@ interface ReadInlineAtomLeaf extends ReadTextLeafBase {
 type ReadTextLeaf = ReadPlainTextLeaf | ReadHardBreakLeaf | ReadInlineAtomLeaf;
 
 function readTextModelFromProjection(
-  content: ReturnType<EditorContentRuntime["readBlockProjection"]>,
+  content: ReturnType<EditorContentRuntime["readBlockProjection"]> | null,
   inlineAtoms: ReadonlyMap<string, InlineAtomDefinition>,
   inlineMarks: readonly InlineMarkDefinition[],
 ): CanonicalTextModel {

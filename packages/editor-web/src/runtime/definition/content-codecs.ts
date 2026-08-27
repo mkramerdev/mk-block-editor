@@ -34,14 +34,14 @@ export function compileEditorContentCodecs(
   codecs: EditorContentCodecs | undefined,
 ): CompiledEditorContentCodecs {
   if (codecs !== undefined && (!codecs || typeof codecs !== "object")) {
-    throw new Error("EditorDefinition.contentCodecs must be an object.");
+    throw new Error("EditableEditorDefinition.contentCodecs must be an object.");
   }
   const unsupported = Object.keys(codecs ?? {}).filter(
     (field) => !allowedContentCodecFields.has(field),
   );
   if (unsupported.length > 0) {
     throw new Error(
-      `EditorDefinition.contentCodecs includes unsupported fields: ${unsupported.join(", ")}.`,
+      `EditableEditorDefinition.contentCodecs includes unsupported fields: ${unsupported.join(", ")}.`,
     );
   }
   const htmlImportHandlers = compileHandlerList(

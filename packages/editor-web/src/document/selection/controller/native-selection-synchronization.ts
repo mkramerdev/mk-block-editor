@@ -14,7 +14,7 @@ import {
   type SelectionCompositionSessionSnapshot,
 } from "@repo/editor-react/selection";
 import type { EditorContentRuntime } from "@repo/editor-core/content";
-import type { AnyEditorRuntimePort } from "../../../runtime/document/render-port.ts";
+import type { EditableEditorRuntimePort } from "../../../runtime/document/render-port.ts";
 import {
   editorBlockShellSelector,
   editorEditableTextRootSelector,
@@ -29,10 +29,15 @@ import {
   applyNativeSelectionPaintMode,
   clearNativeSelectionPaintMode,
 } from "./selection-paint.ts";
+import {
+  claimEditorNativeSelectionOwnership,
+  editorMayImportNativeSelection,
+  registerEditorNativeSelectionOwnership,
+} from "./native-selection-ownership.ts";
 
 export interface UseNativeSelectionSynchronizationOptions {
   readonly listElement: HTMLElement | null;
-  readonly editor: AnyEditorRuntimePort;
+  readonly editor: EditableEditorRuntimePort;
   readonly contentRuntime: EditorContentRuntime;
   readonly selectionController: SelectionController;
   readonly presentation: {
@@ -43,9 +48,9 @@ export interface UseNativeSelectionSynchronizationOptions {
 }
 
 /**
- * Owns the browser Selection boundary. Exact activation projection is
- * acknowledged; subsequent selections inside the active real text view are
- * canonical input. Unmappable and cross-scope browser selections are rejected.
+ * Owns the browser Selection boundary. Collapsed active-view carets update the
+ * canonical mirror. Non-collapsed ranges only acknowledge an exact canonical
+ * projection; divergent browser ranges are reconciled without publication.
  */
 export function useNativeSelectionSynchronization({
   listElement,
@@ -60,6 +65,7 @@ export function useNativeSelectionSynchronization({
     const currentPresentation = selectionController.getPresentationSnapshot();
     if (!list || currentPresentation.composition) return;
     if (list.dataset.editorCanonicalSelectionClearPending === "true") return;
+    if (!editorMayImportNativeSelection(list)) return;
     if (nativeInteractiveControlOwnsSelection(list)) return;
     const selection = list.ownerDocument.getSelection();
     if (!selection?.anchorNode || !selection.focusNode) return;
@@ -74,33 +80,23 @@ export function useNativeSelectionSynchronization({
       selectionController.endpoint.getSnapshot().phase === "dragging";
     if (canonicalPointerOwnsSelection) {
       if (
-        editor.editable &&
         !selection.isCollapsed &&
-        domSelectionTouchesEditableTextRoot(selection, list) &&
-        !domSelectionIsOwnedByEditableInternalSelectionHost(selection, list)
+        domSelectionTouchesEditableTextRoot(selection, list)
       ) {
         // Browser engines can still report a compatibility-mouse range even
         // when the canonical pointer boundary canceled its default actions.
         // Collapse it synchronously inside selectionchange, before the next
         // paint, without publishing or disturbing the in-progress endpoints.
-        restoreCanonicalInputProjection(editor, selectionController);
+        restoreCanonicalInputProjection(list, editor, selectionController);
       }
       return;
     }
 
     const canonical = selectionController.getCanonicalSnapshot();
-    if (
-      canonical.kind === "block-internal" &&
-      canonical.snapshot.internal &&
-      domSelectionBelongsToBlock(selection, canonical.snapshot.internal.blockId)
-    )
-      return;
-
-    const editableTextSelection =
-      editor.editable && domSelectionTouchesEditableTextRoot(selection, list);
-    const internalHostTextSelection =
-      editableTextSelection &&
-      domSelectionIsOwnedByEditableInternalSelectionHost(selection, list);
+    const editableTextSelection = domSelectionTouchesEditableTextRoot(
+      selection,
+      list,
+    );
     if (
       editableTextSelection &&
       domSelectionMatchesCanonicalInputProjection(
@@ -112,8 +108,12 @@ export function useNativeSelectionSynchronization({
     ) {
       return;
     }
-    if (editableTextSelection && !internalHostTextSelection) {
-      restoreCanonicalInputProjection(editor, selectionController);
+    if (editableTextSelection && !selection.isCollapsed) {
+      if (canonical.kind === "document") {
+        restoreCanonicalInputProjection(list, editor, selectionController);
+      } else {
+        selection.removeAllRanges();
+      }
       return;
     }
 
@@ -134,7 +134,7 @@ export function useNativeSelectionSynchronization({
         selectionController,
         leases,
         selection.isCollapsed,
-        internalHostTextSelection,
+        editableTextSelection && selection.isCollapsed,
       );
       const focus = selection.isCollapsed
         ? anchor
@@ -146,7 +146,7 @@ export function useNativeSelectionSynchronization({
             selectionController,
             leases,
             false,
-            internalHostTextSelection,
+            false,
           );
       if (!anchor || !focus) return;
       const graphRevision = editor.getSelectionGraphRevision();
@@ -181,6 +181,7 @@ export function useNativeSelectionSynchronization({
       if (!list || !(target instanceof Element)) return;
       const textRoot = target.closest(editorEditableTextRootSelector);
       if (!textRoot || !list.contains(textRoot)) return;
+      claimEditorNativeSelectionOwnership(list, "focus");
       const selection = list.ownerDocument.getSelection();
       if (
         selection?.anchorNode &&
@@ -194,7 +195,7 @@ export function useNativeSelectionSynchronization({
       ) {
         return;
       }
-      restoreCanonicalInputProjection(editor, selectionController);
+      restoreCanonicalInputProjection(list, editor, selectionController);
     },
     [editor, listElement, selectionController],
   );
@@ -202,6 +203,8 @@ export function useNativeSelectionSynchronization({
   useLayoutEffect(() => {
     if (!listElement) return;
     const doc = listElement.ownerDocument;
+    const unregisterNativeSelectionOwnership =
+      registerEditorNativeSelectionOwnership(listElement);
     const selectionchange = () => commitBrowserSelection();
     const focusin = (event: FocusEvent) =>
       reconcileFocusedTextSelection(event.target);
@@ -210,66 +213,43 @@ export function useNativeSelectionSynchronization({
     return () => {
       doc.removeEventListener("selectionchange", selectionchange);
       listElement.removeEventListener("focusin", focusin);
+      unregisterNativeSelectionOwnership();
     };
   }, [commitBrowserSelection, listElement, reconcileFocusedTextSelection]);
 
   useLayoutEffect(() => {
     if (!listElement) return;
-    applyNativeSelectionPaintMode(
-      listElement,
-      presentation.nativeSelectionPaintMode,
-    );
+    const reflectPresentation = () =>
+      applyNativeSelectionPaintMode(
+        listElement,
+        selectionController.getPresentationSnapshot().nativeSelectionPaintMode,
+      );
+    reflectPresentation();
+    const unsubscribe =
+      selectionController.presentation.subscribe(reflectPresentation);
+    return () => {
+      unsubscribe();
+      clearNativeSelectionPaintMode(listElement);
+    };
+  }, [listElement, selectionController]);
+
+  useLayoutEffect(() => {
+    if (!listElement) return;
     if (
       !presentation.composition &&
       selectionController.endpoint.getSnapshot().phase !== "dragging" &&
       presentation.nativeSelectionPaintMode === "hidden-for-global-selection" &&
-      !nativeInteractiveControlOwnsSelection(listElement) &&
-      !selectionIsOwnedByEditableInternalSelectionHost(
-        listElement.ownerDocument.getSelection(),
-        listElement,
-      )
+      !nativeInteractiveControlOwnsSelection(listElement)
     )
-      restoreCanonicalInputProjection(editor, selectionController);
-    return () => clearNativeSelectionPaintMode(listElement);
+      restoreCanonicalInputProjection(listElement, editor, selectionController);
   }, [editor, listElement, presentation, selectionController]);
-}
-
-function domSelectionIsOwnedByEditableInternalSelectionHost(
-  selection: Selection,
-  list: HTMLElement,
-): boolean {
-  if (!selection.anchorNode || !selection.focusNode) return false;
-  const rootFor = (node: Node): HTMLElement | null => {
-    const element = node instanceof Element ? node : node.parentElement;
-    return (
-      element?.closest<HTMLElement>(editorEditableTextRootSelector) ?? null
-    );
-  };
-  const anchorRoot = rootFor(selection.anchorNode);
-  const focusRoot = rootFor(selection.focusNode);
-  if (!anchorRoot || anchorRoot !== focusRoot || !list.contains(anchorRoot)) {
-    return false;
-  }
-  return Boolean(
-    anchorRoot.closest('[data-editor-block-internal-selection-host="true"]'),
-  );
-}
-
-function selectionIsOwnedByEditableInternalSelectionHost(
-  selection: Selection | null,
-  list: HTMLElement,
-): boolean {
-  return Boolean(
-    selection &&
-    domSelectionIsOwnedByEditableInternalSelectionHost(selection, list),
-  );
 }
 
 function domSelectionMatchesCanonicalInputProjection(
   selection: Selection,
   list: HTMLElement,
   controller: SelectionController,
-  editor: AnyEditorRuntimePort,
+  editor: EditableEditorRuntimePort,
 ): boolean {
   if (!selection.anchorNode || !selection.focusNode) return false;
   const rootFor = (node: Node) =>
@@ -309,6 +289,22 @@ function domSelectionMatchesCanonicalInputProjection(
   const canonicalSelection = canonical.snapshot.documentSelection;
   const anchor = canonicalSelection.anchor;
   const focus = canonicalSelection.focus;
+  const projectedCrossBlockFocusCaret = Boolean(
+    selection.isCollapsed &&
+    anchor &&
+    focus &&
+    anchor.blockId !== focus.blockId &&
+    focus.blockId === blockId &&
+    focus.textOffset === focusOffset &&
+    editor.acknowledgeTextActivation?.(
+      blockId,
+      anchorRoot,
+      focusOffset,
+      selection.focusNode,
+      selection.focusOffset,
+    ),
+  );
+  if (projectedCrossBlockFocusCaret) return true;
   const matches = Boolean(
     anchor &&
     focus &&
@@ -319,7 +315,7 @@ function domSelectionMatchesCanonicalInputProjection(
     (selection.isCollapsed ||
       canonicalSelection.direction === domSelectionDirection(selection)),
   );
-  if (matches && editor.editable) {
+  if (matches) {
     editor.acknowledgeTextActivation?.(
       blockId,
       anchorRoot,
@@ -344,10 +340,10 @@ function domSelectionTouchesEditableTextRoot(
 }
 
 function restoreCanonicalInputProjection(
-  editor: AnyEditorRuntimePort,
+  list: HTMLElement,
+  editor: EditableEditorRuntimePort,
   controller: SelectionController,
 ): void {
-  if (!editor.editable) return;
   const canonical = controller.getCanonicalSnapshot();
   if (canonical.kind !== "document") return;
   const anchor = canonical.snapshot.documentSelection.anchor;
@@ -355,7 +351,12 @@ function restoreCanonicalInputProjection(
   if (!anchor || !focus || !pointUsesContentSelectionEndpoint(focus)) {
     return;
   }
-  if (!editor.ownsActiveTextTarget(focus.blockId)) return;
+  const nativeFocus = editor.resolveNativeFocusTarget(
+    list.ownerDocument.activeElement,
+  );
+  if (nativeFocus?.kind !== "text" || nativeFocus.blockId !== focus.blockId)
+    return;
+  claimEditorNativeSelectionOwnership(list, "projection");
   editor.nativeSelectionSynchronization.reconcileTextSelection(
     focus.blockId,
     anchor.blockId === focus.blockId ? anchor.textOffset : focus.textOffset,
@@ -386,7 +387,7 @@ function nativeInteractiveControlOwnsSelection(list: HTMLElement): boolean {
 function logicalPointFromDomSelection(
   node: Node,
   offset: number,
-  editor: AnyEditorRuntimePort,
+  editor: EditableEditorRuntimePort,
   contentRuntime: EditorContentRuntime,
   selectionController: SelectionController,
   leases: Map<BlockId, EditorBlockContentLease>,
@@ -414,7 +415,6 @@ function logicalPointFromDomSelection(
   const projectedOffset = textOffsetFromDomPoint(textRoot, node, offset);
   if (projectedOffset === null) return null;
   const mountedOffset =
-    editor.editable &&
     collapsed &&
     textRoot.contains(textRoot.ownerDocument.activeElement)
       ? editor.readTextSelectionOffset(target.block.id)
@@ -441,7 +441,7 @@ function logicalPointFromDomSelection(
 }
 
 function createContentSelectionPoint(
-  editor: AnyEditorRuntimePort,
+  editor: EditableEditorRuntimePort,
   contentRuntime: EditorContentRuntime,
   target: EditorBlockSelectionTarget,
   textOffset: number,
@@ -485,22 +485,4 @@ function pointUsesContentSelectionEndpoint(
   point: EditorLogicalSelectionPoint | null,
 ): boolean {
   return Boolean(point && isEditorSelectionTextAnchor(point.textAnchor));
-}
-
-function domSelectionBelongsToBlock(
-  selection: Selection,
-  blockId: BlockId,
-): boolean {
-  const anchor =
-    selection.anchorNode instanceof Element
-      ? selection.anchorNode
-      : selection.anchorNode?.parentElement;
-  const focus =
-    selection.focusNode instanceof Element
-      ? selection.focusNode
-      : selection.focusNode?.parentElement;
-  return Boolean(
-    anchor?.closest(`[data-editor-block-id="${CSS.escape(blockId)}"]`) &&
-    focus?.closest(`[data-editor-block-id="${CSS.escape(blockId)}"]`),
-  );
 }

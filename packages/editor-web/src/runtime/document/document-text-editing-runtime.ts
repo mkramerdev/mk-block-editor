@@ -14,6 +14,11 @@ import {
   SharedTextEditor,
   type SharedTextEditorHost,
 } from "./shared-text-editor.ts";
+import { textOffsetFromDomPoint } from "../../document/selection/hit-testing/text-hit-testing.ts";
+import {
+  sameTextDomPresentation,
+  type ResolvedTextDomPresentation,
+} from "../../document/blocks/text-dom-presentation.ts";
 
 interface TextHostRegistration extends SharedTextEditorHost {
   readonly token: symbol;
@@ -27,6 +32,7 @@ export interface RegisterTextEditingHostInput {
   readonly slot: HTMLElement;
   readonly className: string;
   readonly placeholder?: TextPlaceholder;
+  readonly textDomPresentation: ResolvedTextDomPresentation;
 }
 
 interface NativeSelectionAcknowledgement {
@@ -47,6 +53,13 @@ export type TextPresentationResult =
       readonly status: "rejected";
       readonly reason: "stale-selection" | "composition-pinned";
     };
+
+function samePlaceholder(
+  left: TextPlaceholder | undefined,
+  right: TextPlaceholder | undefined,
+): boolean {
+  return left?.text === right?.text && left?.visibility === right?.visibility;
+}
 
 class ActiveTextSession {
   readonly blockId: BlockId;
@@ -245,8 +258,7 @@ export class DocumentTextEditingRuntime {
     const requestedHost = this.hosts.get(blockId);
     if (
       !this.isValidRequest(request) ||
-      (requestedHost !== undefined &&
-        requestedHost.shell.closest('[hidden], [aria-hidden="true"]') !== null)
+      (requestedHost !== undefined && !isTextHostPresentable(requestedHost.shell))
     ) {
       return { status: "rejected", reason: "stale-selection" };
     }
@@ -372,13 +384,32 @@ export class DocumentTextEditingRuntime {
   updateHostOptions(
     blockId: BlockId,
     shell: HTMLElement,
-    options: { readonly placeholder?: TextPlaceholder },
+    options: {
+      readonly className: string;
+      readonly placeholder?: TextPlaceholder;
+      readonly textDomPresentation: ResolvedTextDomPresentation;
+    },
   ): void {
     const host = this.hosts.get(blockId);
     if (!host || host.shell !== shell) return;
-    const next = { ...host, placeholder: options.placeholder };
+    if (
+      host.className === options.className &&
+      samePlaceholder(host.placeholder, options.placeholder) &&
+      sameTextDomPresentation(
+        host.textDomPresentation,
+        options.textDomPresentation,
+      )
+    ) {
+      return;
+    }
+    const next = {
+      ...host,
+      className: options.className,
+      placeholder: options.placeholder,
+      textDomPresentation: options.textDomPresentation,
+    };
     this.hosts.set(blockId, next);
-    this.sharedEditor.updateHostOptions(next, options.placeholder);
+    this.sharedEditor.updateHostOptions(next);
   }
 
   acknowledgeNativeSelection(
@@ -391,18 +422,29 @@ export class DocumentTextEditingRuntime {
     const session = this.session;
     const acknowledgement = session?.acknowledgement ?? null;
     const host = this.hosts.get(blockId);
+    const view = this.sharedEditor.readView();
+    const native = root.ownerDocument.getSelection();
     if (
       !session ||
       !host ||
       !acknowledgement ||
-      acknowledgement.acknowledged ||
+      !view ||
+      view.dom !== root ||
+      !session.isInputReady(view) ||
+      !isTextHostPresentable(host.shell) ||
       acknowledgement.blockId !== blockId ||
       acknowledgement.root !== root ||
-      acknowledgement.expectedNativePoint?.node !== nativeNode ||
-      acknowledgement.expectedNativePoint.offset !== nativeOffset ||
       acknowledgement.projectionIdentity !== host.projectionIdentity ||
       !session.ownsActivation(acknowledgement.activationIdentity) ||
       acknowledgement.canonicalTextOffset !== canonicalOffset ||
+      !native?.isCollapsed ||
+      native.anchorNode !== nativeNode ||
+      native.focusNode !== nativeNode ||
+      native.anchorOffset !== nativeOffset ||
+      native.focusOffset !== nativeOffset ||
+      (nativeNode !== root && !root.contains(nativeNode)) ||
+      textOffsetFromDomPoint(root, nativeNode, nativeOffset) !==
+        canonicalOffset ||
       !this.canonicalMatches(
         blockId,
         acknowledgement.canonicalSelectionRevision,
@@ -410,6 +452,14 @@ export class DocumentTextEditingRuntime {
       )
     ) {
       return false;
+    }
+    const expected = acknowledgement.expectedNativePoint;
+    if (expected?.node !== nativeNode || expected.offset !== nativeOffset) {
+      if (!acknowledgement.acknowledged) return false;
+      acknowledgement.expectedNativePoint = {
+        node: nativeNode,
+        offset: nativeOffset,
+      };
     }
     acknowledgement.acknowledged = true;
     return true;
@@ -495,8 +545,7 @@ export class DocumentTextEditingRuntime {
     const host = this.hosts.get(session.blockId);
     if (!request || !host) return;
     if (
-      !host.shell.isConnected ||
-      host.shell.closest('[hidden], [aria-hidden="true"]') !== null ||
+      !isTextHostPresentable(host.shell) ||
       !this.options.ownsRegisteredTarget(session.blockId, host.shell) ||
       !this.isValidRequest(request)
     ) {
@@ -533,7 +582,27 @@ export class DocumentTextEditingRuntime {
       return;
     }
     const native = view.dom.ownerDocument.getSelection();
-    if (!native?.focusNode) return;
+    if (
+      !native?.isCollapsed ||
+      !native.focusNode ||
+      (native.focusNode !== view.dom && !view.dom.contains(native.focusNode)) ||
+      textOffsetFromDomPoint(
+        view.dom,
+        native.focusNode,
+        native.focusOffset,
+      ) !==
+        activation.canonicalTextOffset
+    ) {
+      return;
+    }
+    // Focusing an installed contenteditable may normalize an equivalent DOM
+    // point (for example, from the root boundary to its first text node).
+    // Record that final browser-owned node as the current activation's exact
+    // projection before acknowledging it.
+    session.expectNativePoint({
+      status: "projected",
+      nativePoint: { node: native.focusNode, offset: native.focusOffset },
+    });
     this.acknowledgeNativeSelection(
       activation.blockId,
       view.dom,
@@ -660,4 +729,19 @@ export class DocumentTextEditingRuntime {
         }
       : null;
   }
+}
+
+function isTextHostPresentable(shell: HTMLElement): boolean {
+  if (!shell.isConnected) return false;
+  const view = shell.ownerDocument.defaultView;
+  for (let current: HTMLElement | null = shell; current; current = current.parentElement) {
+    if (
+      current.hidden ||
+      current.getAttribute("aria-hidden") === "true" ||
+      view?.getComputedStyle(current).display === "none"
+    ) {
+      return false;
+    }
+  }
+  return true;
 }

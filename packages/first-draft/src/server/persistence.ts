@@ -1,5 +1,5 @@
 import type { EditorTransportTransaction } from "../transport/transport-types.ts";
-import type { ValidatedFirstDraftBootstrap } from "../read-model/bootstrap.ts";
+import type { ValidatedFirstDraftBootstrap } from "../bootstrap/bootstrap.ts";
 
 export interface AcceptFirstDraftTransactionInput {
   readonly documentId: string;
@@ -76,6 +76,10 @@ export type LoadFirstDraftAcceptedTransactionsResult =
         | "revision-unavailable"
         | "invalid"
         | "unavailable";
+      readonly resynchronizationReason?:
+        | "revision-unavailable"
+        | "revision-ahead"
+        | "invalid-history";
       readonly message: string;
     };
 

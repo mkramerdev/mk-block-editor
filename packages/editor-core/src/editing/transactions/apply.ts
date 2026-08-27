@@ -419,7 +419,6 @@ function applyDeleteRange(
       ),
   );
   const removalRoots: BlockId[] = [];
-  const normalizationBlockIds = new Set<BlockId>();
   const laterInsertionParentIds = new Set<BlockId | null>(
     state.operations
       .slice(index + 1)
@@ -437,7 +436,6 @@ function applyDeleteRange(
 
   for (const selected of range.blocks) {
     const block = liveBlock(state.blocks, selected.blockId, index);
-    if (block.parentId !== null) normalizationBlockIds.add(block.parentId);
     const definition = context.blockDefinitions[block.type]!;
     if (selected.kind === "text") {
       if (definition.kind !== "text") {
@@ -565,13 +563,6 @@ function applyDeleteRange(
       context,
     );
   }
-  normalizeAfterStructuralRemoval(
-    index,
-    state,
-    context,
-    normalizationBlockIds,
-    laterInsertionParentIds,
-  );
   const deletionSelection = resolveDeleteSelection(
     provisionalSelection,
     range,
@@ -613,32 +604,36 @@ function applyJoinTextBlocks(
   assertJoinDoesNotCrossContentBoundary(left, right, index, state, context);
   const leftContent = readContent(state, context, left.id, left.type);
   const rightContent = readContent(state, context, right.id, right.type);
+  const joinOffset =
+    state.contentSizes.get(left.id) ??
+    richTextDocumentContentSize(leftContent.content);
+  const rightInlineContent = richTextBlockInlineContent(rightContent.content);
 
-  const joinOffset = applyAppendTextBlockContent(
-    {
-      kind: "appendTextBlockContent",
-      destinationBlockId: left.id,
-      sourceBlockId: right.id,
-      expectedDestinationContentVersion: left.contentVersion,
-      expectedSourceContentVersion: right.contentVersion,
-      operation: {
-        kind: "insertInlineContent",
-        blockId: left.id,
-        blockType: left.type,
-        target: { kind: "text" },
-        position: {
+  if (rightInlineContent.length > 0) {
+    applyAppendTextBlockContent(
+      {
+        kind: "appendTextBlockContent",
+        destinationBlockId: left.id,
+        sourceBlockId: right.id,
+        expectedDestinationContentVersion: left.contentVersion,
+        expectedSourceContentVersion: right.contentVersion,
+        operation: {
+          kind: "insertInlineContent",
           blockId: left.id,
-          offset:
-            state.contentSizes.get(left.id) ??
-            richTextDocumentContentSize(leftContent.content),
+          blockType: left.type,
+          target: { kind: "text" },
+          position: {
+            blockId: left.id,
+            offset: joinOffset,
+          },
+          content: rightInlineContent,
         },
-        content: richTextBlockInlineContent(rightContent.content),
       },
-    },
-    index,
-    state,
-    context,
-  );
+      index,
+      state,
+      context,
+    );
+  }
   applyRemove(
     {
       kind: "removeBlocks",
@@ -649,12 +644,6 @@ function applyJoinTextBlocks(
     index,
     state,
     context,
-  );
-  normalizeAfterStructuralRemoval(
-    index,
-    state,
-    context,
-    right.parentId === null ? [] : [right.parentId],
   );
   state.selection = {
     kind: "text-offset",
@@ -1586,192 +1575,6 @@ function mustPreserveSelectedTextBlock(
     parentDefinition,
     withSurvivor,
   );
-}
-
-function normalizeAfterStructuralRemoval(
-  index: number,
-  state: MutableTransactionState,
-  context: StructuralTransactionContext,
-  directlyAffectedWrapperIds: ReadonlySet<BlockId> | readonly BlockId[],
-  laterInsertionParentIds: ReadonlySet<BlockId | null> = new Set(),
-): void {
-  const affectedWrapperIds = new Set<BlockId>();
-  for (const startingBlockId of directlyAffectedWrapperIds) {
-    let blockId: BlockId | null = startingBlockId;
-    while (blockId !== null && !affectedWrapperIds.has(blockId)) {
-      affectedWrapperIds.add(blockId);
-      blockId = state.blocks[blockId]?.parentId ?? null;
-    }
-  }
-  let changed = true;
-  while (changed) {
-    changed = false;
-    const ordered = [...currentCanonicalOrder(state, context)]
-      .reverse()
-      .filter((blockId) => affectedWrapperIds.has(blockId));
-    for (const blockId of ordered) {
-      const wrapper = state.blocks[blockId];
-      if (!wrapper || wrapper.tombstone) continue;
-      if (laterInsertionParentIds.has(wrapper.id)) continue;
-      const definition = context.blockDefinitions[wrapper.type];
-      if (definition?.kind !== "wrapper") continue;
-      const children = currentChildIds(state, context, wrapper.id).map(
-        (childId) => liveBlock(state.blocks, childId, index),
-      );
-
-      if (definition.compound && children.length > 0) {
-        const primaryChild = children[0]!;
-        if (
-          primaryChild.type === definition.compound.primaryTextChildType &&
-          context.blockDefinitions[primaryChild.type]?.kind === "text" &&
-          richTextDocumentContentSize(
-            readContent(state, context, primaryChild.id, primaryChild.type)
-              .content,
-          ) === 0
-        ) {
-          applyRemove(
-            {
-              kind: "removeBlocks",
-              blockIds: [wrapper.id],
-              includeDescendants: true,
-              expectedParents: { [wrapper.id]: wrapper.parentId },
-            },
-            index,
-            state,
-            context,
-          );
-          changed = true;
-          break;
-        }
-      }
-
-      const childTypes = children.map((child) => child.type);
-      if (
-        blockDefinitionAcceptsSequence(
-          context.blockDefinitions,
-          definition,
-          childTypes,
-        )
-      ) {
-        continue;
-      }
-      if (definition.underflow && children.length === 1) {
-        const survivingWrapper = children[0]!;
-        const survivingDefinition =
-          context.blockDefinitions[survivingWrapper.type];
-        if (survivingDefinition?.kind !== "wrapper") {
-          fail(
-            "invalid-structure",
-            index,
-            `underflow survivor ${survivingWrapper.id} is not a wrapper`,
-          );
-        }
-        const promotedIds = currentChildIds(
-          state,
-          context,
-          survivingWrapper.id,
-        );
-        if (promotedIds.length === 0) {
-          fail(
-            "invalid-structure",
-            index,
-            `underflow survivor ${survivingWrapper.id} has no contents`,
-          );
-        }
-        const wrapperSiblings = currentChildIds(
-          state,
-          context,
-          wrapper.parentId,
-        );
-        const wrapperIndex = wrapperSiblings.indexOf(wrapper.id);
-        if (wrapperIndex < 0) {
-          fail(
-            "invalid-structure",
-            index,
-            `underflow wrapper ${wrapper.id} is outside containment`,
-          );
-        }
-        if (wrapper.parentId !== null) {
-          const destinationParent = liveBlock(
-            state.blocks,
-            wrapper.parentId,
-            index,
-          );
-          const destinationDefinition =
-            context.blockDefinitions[destinationParent.type];
-          if (
-            !destinationDefinition ||
-            !blockDefinitionAcceptsSequence(
-              context.blockDefinitions,
-              destinationDefinition,
-              [
-                ...wrapperSiblings
-                  .slice(0, wrapperIndex)
-                  .map((id) => liveBlock(state.blocks, id, index).type),
-                ...promotedIds.map(
-                  (id) => liveBlock(state.blocks, id, index).type,
-                ),
-                ...wrapperSiblings
-                  .slice(wrapperIndex + 1)
-                  .map((id) => liveBlock(state.blocks, id, index).type),
-              ],
-            )
-          ) {
-            fail(
-              "invalid-structure",
-              index,
-              `underflow promotion from ${wrapper.type} violates destination content`,
-            );
-          }
-        }
-        applyMove(
-          {
-            kind: "moveBlocks",
-            blockIds: promotedIds,
-            sourcePlacement: {
-              parentId: survivingWrapper.id,
-              childIndex: 0,
-            },
-            destinationPlacement: {
-              parentId: wrapper.parentId,
-              childIndex: wrapperIndex,
-            },
-          },
-          index,
-          state,
-          context,
-        );
-        applyRemove(
-          {
-            kind: "removeBlocks",
-            blockIds: [wrapper.id],
-            includeDescendants: true,
-            expectedParents: { [wrapper.id]: wrapper.parentId },
-          },
-          index,
-          state,
-          context,
-        );
-        changed = true;
-        break;
-      }
-      if (children.length === 0) {
-        applyRemove(
-          {
-            kind: "removeBlocks",
-            blockIds: [wrapper.id],
-            includeDescendants: false,
-            expectedParents: { [wrapper.id]: wrapper.parentId },
-          },
-          index,
-          state,
-          context,
-        );
-        changed = true;
-        break;
-      }
-    }
-  }
 }
 
 function assertJoinDoesNotCrossContentBoundary(

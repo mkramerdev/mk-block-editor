@@ -24,23 +24,17 @@ const grandchildId = asBlockId("direct-children-grandchild");
 const unrelatedId = asBlockId("direct-children-unrelated");
 const insertedId = asBlockId("direct-children-inserted");
 
-const renderer = () => null;
 const definitions: Readonly<Record<BlockType, BlockDefinition>> = {
-  paragraph: {
+  textBlock: {
     kind: "text",
-    type: "paragraph",
-    rootLayout: "normal",
-    renderer,
-    split: { default: "paragraph" },
+    type: "textBlock",
   },
-  callout: {
+  wrapperBlock: {
     kind: "wrapper",
-    type: "callout",
-    rootLayout: "normal",
-    renderer,
+    type: "wrapperBlock",
     contentBoundary: false,
     content: { required: ["block"], additional: "block" },
-    defaultContent: "paragraph",
+    defaultContent: "textBlock",
   },
 };
 
@@ -140,7 +134,7 @@ describe("EditorImplementation direct-child projections", () => {
     recover(editor, ({ blocks, rootBlockIds, childIdsByParentId }) => ({
       blocks: {
         ...blocks,
-        [insertedId]: block(insertedId, "paragraph", parentAId),
+        [insertedId]: block(insertedId, "textBlock", parentAId),
       },
       rootBlockIds,
       childIdsByParentId: {
@@ -276,7 +270,7 @@ describe("EditorImplementation direct-child projections", () => {
     const manifest = editor.getManifestData();
     const tombstoned = createVersionedBlockRecord({
       id: childOneId,
-      type: "paragraph",
+      type: "textBlock",
       parentId: parentAId,
       version: {
         metadataVersion: "metadata-2",
@@ -390,14 +384,14 @@ describe("EditorImplementation direct-child projections", () => {
 
 function createProjectionEditor(): EditorImplementation {
   const blocks = [
-    block(parentAId, "callout"),
-    block(nestedParentId, "callout", parentAId),
-    block(grandchildId, "paragraph", nestedParentId),
-    block(childOneId, "paragraph", parentAId),
-    block(childTwoId, "paragraph", parentAId),
-    block(parentBId, "callout"),
-    block(childBId, "paragraph", parentBId),
-    block(unrelatedId, "paragraph"),
+    block(parentAId, "wrapperBlock"),
+    block(nestedParentId, "wrapperBlock", parentAId),
+    block(grandchildId, "textBlock", nestedParentId),
+    block(childOneId, "textBlock", parentAId),
+    block(childTwoId, "textBlock", parentAId),
+    block(parentBId, "wrapperBlock"),
+    block(childBId, "textBlock", parentBId),
+    block(unrelatedId, "textBlock"),
   ];
   return new EditorImplementation({
     store: createEditorExternalStore(createInitialEditorSessionState({})),
@@ -411,7 +405,7 @@ function createProjectionEditor(): EditorImplementation {
       },
     }),
     blockDefinitions: definitions,
-    defaultRootBlockType: "paragraph",
+    defaultRootBlockType: "textBlock",
     inlineMarks: [],
     readBlockContent: (_blockId, blockType) =>
       definitions[blockType]?.kind === "text"

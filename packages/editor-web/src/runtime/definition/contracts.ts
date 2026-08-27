@@ -5,21 +5,20 @@ import type { BlockType, VersionedBlock } from "@repo/editor-core/document";
 import type { BlockDefinition } from "@repo/editor-core/definitions";
 import type { BlockId } from "@repo/editor-core/kernel";
 import type {
-  CanonicalBlockFragment,
+  CanonicalBlockFragmentCandidate,
+  StructuralEditRange,
   StructuralDocumentValidator,
   StructuralTransactionPlan,
 } from "@repo/editor-core/editing";
+import type { EditorSelectionSnapshot } from "@repo/editor-react/selection";
 import type { EditorView } from "@repo/editor-dom/prosemirror";
+import type { RichTextDocumentNodeJson } from "@repo/editor-core/content/rich-text";
 import type { JsonObject } from "@repo/editor-core/kernel";
 import type { JsonValue } from "@repo/editor-core/kernel";
 import type { BlockSelectionCoverageResult } from "@repo/editor-core/selection";
 import type { EditorBlockCommandRequest } from "@repo/editor-react/editor";
 import type { ResolvedSelectionFocusTarget } from "../collaboration/contracts.ts";
-import type {
-  EditableEditor,
-  EditorReadRuntime,
-  ReadEditor,
-} from "../document/contracts.ts";
+import type { EditableEditor } from "../document/contracts.ts";
 import type { EditorWebBlockRenderer } from "../../document/blocks/block-renderer-contracts.ts";
 import type { EditorExternalStore } from "@repo/editor-react/store";
 import type {
@@ -33,19 +32,20 @@ import type {
   EditorPlainTextImportHandler,
 } from "../../clipboard/codec-contracts.ts";
 
-export type WebBlockDefinition<TEditor extends EditorReadRuntime> = Omit<
-  BlockDefinition,
-  "renderer"
-> & {
+export type WebBlockDefinition<
+  TEditor extends EditableEditor = EditableEditor,
+> = BlockDefinition & {
+  /** Web-only root layout presentation. */
+  readonly rootLayout: "normal" | "full";
   readonly renderer: EditorWebBlockRenderer<TEditor>;
   /** Web-only semantic element used by the registered structural BlockShell. */
   readonly shellElement?: "div" | "ol" | "ul" | "li";
 };
 
-export type ReadonlyBlockDefinitions<TEditor extends EditorReadRuntime> =
+export type ReadonlyBlockDefinitions<TEditor extends EditableEditor> =
   Readonly<Record<BlockType, WebBlockDefinition<TEditor>>>;
 
-interface EditorDefinitionBase<TEditor extends EditorReadRuntime> {
+interface EditorDefinitionBase<TEditor extends EditableEditor> {
   readonly blocks: ReadonlyBlockDefinitions<TEditor>;
   /** Definition-owned text block created when a structural edit removes every root. */
   readonly defaultRoot: BlockType;
@@ -61,14 +61,10 @@ interface EditorDefinitionBase<TEditor extends EditorReadRuntime> {
   readonly selectionFragment?: EditorSelectionFragmentDefinition;
 }
 
-export type ReadEditorDefinition = EditorDefinitionBase<ReadEditor>;
-
 export interface EditableEditorDefinition extends EditorDefinitionBase<EditableEditor> {
   readonly commands?: readonly EditorCommandDefinition[];
   readonly keybindings?: readonly EditorKeyBinding[];
 }
-
-export type EditorDefinition = ReadEditorDefinition | EditableEditorDefinition;
 
 export interface EditorSelectionFragmentDefinition {
   readonly resolveVisibleChildBlockIds: (input: {
@@ -76,6 +72,30 @@ export interface EditorSelectionFragmentDefinition {
     readonly blockType: BlockType;
     readonly childBlockIds: readonly BlockId[];
   }) => readonly BlockId[];
+  /** Product-owned refinement of a generic committed document-selection range. */
+  readonly resolveStructuralEditRange?: (input: {
+    readonly snapshot: EditorSelectionSnapshot;
+    readonly range: StructuralEditRange;
+    readonly graph: EditorBlockInternalSelectionGraph & {
+      getRootBlockIds(): readonly BlockId[];
+    };
+    readonly readBlockContent: (
+      blockId: BlockId,
+      blockType: BlockType,
+    ) => RichTextDocumentNodeJson | null;
+  }) => StructuralEditRange | null;
+  /** Product-owned structural plan for a committed range; null uses neutral deletion. */
+  readonly planStructuralRangeDeletion?: (input: {
+    readonly intent: "cut" | "delete";
+    readonly range: StructuralEditRange;
+    readonly graph: EditorBlockInternalSelectionGraph & {
+      getRootBlockIds(): readonly BlockId[];
+    };
+    readonly readBlockContent: (
+      blockId: BlockId,
+      blockType: BlockType,
+    ) => RichTextDocumentNodeJson | null;
+  }) => StructuralTransactionPlan | null;
 }
 
 export interface EditorBlockInternalSelectionGraph {
@@ -154,7 +174,7 @@ export interface EditorTypingTriggerActivationContext {
 export interface EditorBlockCommandExecutionContext<
   TEditor extends EditableEditor = EditableEditor,
 > {
-  readonly definition: EditorDefinition;
+  readonly definition: EditableEditorDefinition;
   readonly store: EditorExternalStore;
   readonly editor: TEditor;
   readonly blockId: BlockId;
@@ -170,6 +190,36 @@ export interface EditorBlockCommandExecutionContext<
   };
   readonly dispatchProseMirrorTransaction: EditorView["dispatch"];
   readonly request: EditorBlockCommandRequest;
+  /** Present only when the neutral text host emits a structural boundary. */
+  readonly structuralTextBoundary?: EditorStructuralTextBoundaryRequest;
+}
+
+export type EditorStructuralTextBoundaryIntent =
+  | "enter"
+  | "backspace"
+  | "delete"
+  | "tab"
+  | "shiftTab";
+
+export interface EditorStructuralTextBoundaryRequest {
+  readonly intent: EditorStructuralTextBoundaryIntent;
+  readonly focusedBlock: VersionedBlock;
+  readonly selection: { readonly from: number; readonly to: number };
+  readonly graph: EditorBlockInternalSelectionGraph & {
+    getRootBlockIds(): readonly BlockId[];
+  };
+  readonly readBlockContent: (
+    blockId: BlockId,
+    blockType: BlockType,
+  ) => RichTextDocumentNodeJson | null;
+  readonly readBlockPlainText: (
+    blockId: BlockId,
+    blockType: BlockType,
+  ) => string;
+  readonly executeStructuralTransaction: (
+    plan: StructuralTransactionPlan,
+  ) => { readonly ok: boolean };
+  readonly isComposing: boolean;
 }
 
 export type EditorCommandId = string;
@@ -185,7 +235,7 @@ export interface EditorKeyBinding {
 export interface EditorDocumentCommandExecutionContext<TPayload = unknown> {
   readonly commandId: EditorCommandId;
   readonly payload: TPayload | undefined;
-  readonly definition: EditorDefinition;
+  readonly definition: EditableEditorDefinition;
   readonly store: EditorExternalStore;
   readonly editor: EditableEditor;
 }
@@ -254,8 +304,7 @@ export interface EditorInternalSelectionFragmentMaterializer {
       blockId: BlockId,
       blockType: BlockType,
     ) => JsonObject | null;
-    readonly blockDefinitions: Readonly<Record<BlockType, BlockDefinition>>;
-  }) => CanonicalBlockFragment | null;
+  }) => CanonicalBlockFragmentCandidate | null;
 }
 
 export interface EditorInternalSelectionCutHandler {

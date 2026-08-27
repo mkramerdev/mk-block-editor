@@ -16,11 +16,17 @@ import {
   CanonicalRichTextChildren,
   useCanonicalTextProjection,
 } from "./canonical-text-projection.tsx";
+import {
+  resolveTextDomPresentation,
+  type ResolvedTextDomPresentation,
+  type TextDomPresentation,
+} from "./text-dom-presentation.ts";
 
 export interface EditableTextBlockPrimitiveProps {
   readonly block: VersionedBlock;
   readonly editor: EditableEditor;
   readonly placeholder?: TextPlaceholder;
+  readonly textDomPresentation?: TextDomPresentation;
   readonly rootAttributes?: Omit<HTMLAttributes<HTMLDivElement>, "children"> &
     Partial<Record<`data-${string}`, string | undefined>>;
 }
@@ -30,9 +36,10 @@ export function EditableTextBlockPrimitive({
   block,
   editor,
   placeholder,
+  textDomPresentation,
   rootAttributes,
 }: EditableTextBlockPrimitiveProps) {
-  const runtime = resolveEditorRuntimePort(editor) as EditableEditorRuntimePort;
+  const runtime = resolveEditorRuntimePort(editor);
   const canonical = useCanonicalTextProjection({ block, editor: runtime });
   const placeholderText = placeholder?.text;
   const placeholderVisibility = placeholder?.visibility;
@@ -43,12 +50,16 @@ export function EditableTextBlockPrimitive({
         : undefined,
     [placeholderText, placeholderVisibility],
   );
+  const stableTextDomPresentation = useStableTextDomPresentation(
+    textDomPresentation,
+  );
   const className = mergeClassNames(
     "editor-web-text",
     rootAttributes?.className,
   );
   const placeholderRef = useRef(stablePlaceholder);
   const classNameRef = useRef(className);
+  const textDomPresentationRef = useRef(stableTextDomPresentation);
   const registrationRef = useRef<ReturnType<
     EditableEditorRuntimePort["registerTextEditingHost"]
   > | null>(null);
@@ -73,8 +84,9 @@ export function EditableTextBlockPrimitive({
         shell,
         projection,
         slot,
-        className,
+        className: classNameRef.current,
         placeholder: placeholderRef.current,
+        textDomPresentation: textDomPresentationRef.current,
       });
       registrationRef.current = registration;
       return () => {
@@ -85,13 +97,18 @@ export function EditableTextBlockPrimitive({
         registration.dispose();
       };
     },
-    [block.id, className, runtime],
+    [block.id, runtime],
   );
   useLayoutEffect(() => {
     placeholderRef.current = stablePlaceholder;
     classNameRef.current = className;
-    registrationRef.current?.update({ placeholder: stablePlaceholder });
-  }, [className, stablePlaceholder]);
+    textDomPresentationRef.current = stableTextDomPresentation;
+    registrationRef.current?.update({
+      className,
+      placeholder: stablePlaceholder,
+      textDomPresentation: stableTextDomPresentation,
+    });
+  }, [className, stablePlaceholder, stableTextDomPresentation]);
   return (
     <div
       {...rootAttributes}
@@ -110,11 +127,29 @@ export function EditableTextBlockPrimitive({
           text={canonical.text}
           leaves={canonical.leaves}
           placeholder={stablePlaceholder}
+          textDomPresentation={stableTextDomPresentation}
         />
       </div>
       <div data-editor-text-slot="true" />
     </div>
   );
+}
+
+function useStableTextDomPresentation(
+  presentation: TextDomPresentation | undefined,
+): ResolvedTextDomPresentation {
+  const element = presentation?.element ?? "p";
+  const attributesKey = JSON.stringify(
+    Object.entries(presentation?.attributes ?? {}).sort(([left], [right]) =>
+      left.localeCompare(right),
+    ),
+  );
+  return useMemo(() => {
+    const attributes = Object.fromEntries(
+      JSON.parse(attributesKey) as readonly (readonly [string, string])[],
+    );
+    return resolveTextDomPresentation({ element, attributes });
+  }, [attributesKey, element]);
 }
 
 function mergeClassNames(

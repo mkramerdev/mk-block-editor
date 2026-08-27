@@ -6,12 +6,12 @@ describe("block record invariants", () => {
   it("creates canonical block records without unsupported ordering or version fields", () => {
     const block = createBlockRecord({
       id: "01890f07-1c00-7000-8000-000000002001" as BlockId,
-      type: "paragraph",
+      type: "textBlock",
     });
 
     expect(block).toMatchObject({
       id: "01890f07-1c00-7000-8000-000000002001",
-      type: "paragraph",
+      type: "textBlock",
       parentId: null,
     });
     expect(Object.prototype.hasOwnProperty.call(block, "depth")).toBe(false);

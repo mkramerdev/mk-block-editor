@@ -164,7 +164,7 @@ describe("canonical DOM text hit-testing offsets", () => {
   it("counts a terminal hard break but not its trailing layout sentinel", () => {
     const root = document.createElement("div");
     root.innerHTML =
-      'a<br><br class="ProseMirror-trailingBreak" data-editor-read-trailing-break="true">';
+      'a<br><br class="ProseMirror-trailingBreak" data-editor-canonical-trailing-break="true">';
     expect(textDomPointForOffset(root, 2, 2)).toEqual(
       textDomPointForOffset(root, 3, 2),
     );

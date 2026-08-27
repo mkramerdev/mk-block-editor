@@ -2,13 +2,13 @@
 
 import { useEffect, useMemo } from "react";
 import {
-  materializeEditorSelectionFragment,
+  materializeEditorSelectionFragmentCandidate,
   type EditorSelectionTextAnchorResolver,
   type SelectionController,
 } from "@repo/editor-react/selection";
 import type { EditorContentRuntime } from "@repo/editor-core/content";
-import type { EditorDefinition } from "../../../runtime/definition/contracts.ts";
-import type { AnyEditorRuntimePort } from "../../../runtime/document/render-port.ts";
+import type { EditableEditorDefinition } from "../../../runtime/definition/contracts.ts";
+import type { EditableEditorRuntimePort } from "../../../runtime/document/render-port.ts";
 import { createEditorClipboardBoundary } from "../../../clipboard/boundary.ts";
 import { createEditorCopyEventHandler } from "./clipboard-event-coordinator.ts";
 import { resolveEditorClipboardEventOwnership } from "./clipboard-event-ownership.ts";
@@ -16,8 +16,8 @@ import type { CaptureStructuralSelection } from "./browser-selection-types.ts";
 
 export function useCanonicalCopyEvents(options: {
   readonly listElement: HTMLElement | null;
-  readonly definition: EditorDefinition;
-  readonly editor: AnyEditorRuntimePort;
+  readonly definition: EditableEditorDefinition;
+  readonly editor: EditableEditorRuntimePort;
   readonly contentRuntime: EditorContentRuntime;
   readonly selectionController: SelectionController;
   readonly textAnchorResolver: EditorSelectionTextAnchorResolver;
@@ -59,11 +59,10 @@ export function useCanonicalCopyEvents(options: {
                     blockId,
                     blockType,
                   ),
-                blockDefinitions: options.definition.blocks,
               });
-              if (fragment) return { ok: true as const, fragment };
+              if (fragment) return fragment;
             }
-            return materializeEditorSelectionFragment({
+            const materialized = materializeEditorSelectionFragmentCandidate({
               snapshot,
               graph: options.editor,
               graphRevision: options.editor.getSelectionGraphRevision(),
@@ -77,6 +76,7 @@ export function useCanonicalCopyEvents(options: {
                 options.definition.selectionFragment
                   ?.resolveVisibleChildBlockIds,
             });
+            return materialized.ok ? materialized.candidate : null;
           },
         })
       : null;
@@ -100,12 +100,8 @@ export function useCanonicalCopyEvents(options: {
         committedSelection: options.selectionController.getCommittedSnapshot(),
         isCommittedSelectionCurrent: (snapshot) =>
           options.selectionController.isCommittedSnapshotCurrent(snapshot),
-        ownsNativeTarget: (target) =>
-          options.editor.editable
-            ? options.editor.ownsNativeFocusTarget(target)
-            : isNodeWithin(listElement, target),
-        ownsActiveElement: (document) =>
-          options.editor.editable && options.editor.ownsActiveElement(document),
+        resolveNativeFocusTarget: (target) =>
+          options.editor.resolveNativeFocusTarget(target),
       });
     const copy = createEditorCopyEventHandler({
       editorIdentity: options.editor,
@@ -128,17 +124,4 @@ export function useCanonicalCopyEvents(options: {
     doc.addEventListener("copy", copy, true);
     return () => doc.removeEventListener("copy", copy, true);
   }, [options, writer]);
-}
-
-function isNodeWithin(list: HTMLElement, target: EventTarget | null): boolean {
-  if (!target || typeof target !== "object" || !("ownerDocument" in target)) {
-    return false;
-  }
-  const candidate = target as Node;
-  const NodeConstructor = candidate.ownerDocument?.defaultView?.Node;
-  return Boolean(
-    NodeConstructor &&
-    candidate instanceof NodeConstructor &&
-    list.contains(candidate),
-  );
 }

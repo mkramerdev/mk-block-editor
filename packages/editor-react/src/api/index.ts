@@ -7,7 +7,7 @@ export type {
 
 export {
   createPlainTextCanonicalFragment,
-  materializeEditorSelectionFragment,
+  materializeEditorSelectionFragmentCandidate,
 } from "../selection/materialization/materialize.ts";
 export { getEditorSelectionCommandEligibility } from "../selection/materialization/command-eligibility.ts";
 export { resolveStructuralEditRange } from "../selection/editing/resolve-structural-edit-range.ts";

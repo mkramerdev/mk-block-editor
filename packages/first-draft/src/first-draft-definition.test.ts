@@ -29,6 +29,8 @@ import { createFirstDraftViewStateStore } from "./blocks/view-state.tsx";
 import { firstDraftBlockModelDefinitions } from "./server/block-definitions.ts";
 import { createFirstDraftSnapshot } from "./first-draft-fixture.ts";
 import { initializeTestEditableEditor } from "./test-editor.ts";
+import { serializeCanonicalFragmentHtml } from "@repo/editor-web/clipboard-runtime";
+import { createFirstDraftFixtureDocumentTemplate } from "./first-draft-document-template.ts";
 
 const listItemTypes = [
   "bulletListItem",
@@ -37,6 +39,106 @@ const listItemTypes = [
 ] as const;
 
 describe("First Draft definition ownership", () => {
+  it("models toggle bodies and tab panes as canonical empty-capable wrappers", () => {
+    for (const type of [
+      "toggleHeadingBody",
+      "toggleListItemBody",
+      "tabPane",
+    ] as const) {
+      expect(firstDraftBlockModelDefinitions[type]).toMatchObject({
+        kind: "wrapper",
+        content: { required: [], additional: "block" },
+      });
+      expect(firstDraftBlockModelDefinitions[type]).not.toHaveProperty(
+        "defaultContent",
+      );
+    }
+    expect(firstDraftBlockModelDefinitions).not.toHaveProperty("placeholder");
+    expect(firstDraftBlockDefinitions).not.toHaveProperty("placeholder");
+  });
+
+  it("imports only genuinely empty semantic body and pane wrappers as empty", () => {
+    const definition = createFirstDraftEditorDefinition(
+      createFirstDraftViewStateStore(),
+    );
+    const handler = definition.contentCodecs?.htmlImportHandlers?.find(
+      ({ id }) => id === "first-draft.semantic-wrapper-import",
+    );
+    if (!handler) throw new Error("Missing semantic wrapper import handler");
+    for (const [className, type] of [
+      ["first-draft-semantic-toggle-heading-body", "toggleHeadingBody"],
+      ["first-draft-semantic-toggle-list-item-body", "toggleListItemBody"],
+      ["first-draft-semantic-tab-pane", "tabPane"],
+    ] as const) {
+      const node = document.createElement("div");
+      node.className = className;
+      node.append(document.createTextNode("  \n"));
+      const fragment = handler.parse(node, {
+        blockDefinitions: definition.blocks,
+        parseChildren: () => null,
+      } as never);
+      expect(fragment?.blocks).toEqual([
+        expect.objectContaining({ type, parentId: null }),
+      ]);
+      expect(fragment?.rootBlockIds).toHaveLength(1);
+
+      node.append(document.createElement("span"));
+      expect(
+        handler.parse(node, {
+          blockDefinitions: definition.blocks,
+          parseChildren: () => null,
+        } as never),
+      ).toBeNull();
+    }
+  });
+
+  it("exports every product wrapper and atomic family through First Draft semantic handlers", () => {
+    const definition = createFirstDraftEditorDefinition(
+      createFirstDraftViewStateStore(),
+    );
+    const html = serializeCanonicalFragmentHtml(
+      createFirstDraftFixtureDocumentTemplate(),
+      {
+        blockDefinitions: definition.blocks,
+        inlineMarks: definition.inlineMarks ?? [],
+        inlineAtoms: definition.inlineAtoms,
+        htmlExportHandlers: definition.contentCodecs?.htmlExportHandlers,
+      },
+    );
+    expect(html).not.toBeNull();
+    for (const semanticClass of [
+      "first-draft-semantic-callout",
+      "first-draft-semantic-toggle-heading",
+      "first-draft-semantic-toggle-heading-body",
+      "first-draft-semantic-toggle-list-item",
+      "first-draft-semantic-toggle-list-item-body",
+      "first-draft-semantic-columns",
+      "first-draft-semantic-column",
+      "first-draft-semantic-tabs",
+      "first-draft-semantic-tab-pane",
+    ]) {
+      expect(html).toContain(`class="${semanticClass}"`);
+    }
+    expect(html).toContain("<h1>");
+    expect(html).toContain("<hr>");
+    expect(html).toContain("<blockquote>");
+    expect(html).toContain("<pre>");
+    expect(html).toContain("data-editor-checklist=\"true\"");
+    expect(html).toContain("<table>");
+    expect(html).not.toContain("first-draft-semantic-placeholder");
+  });
+
+  it("registers only the supported semantic heading elements", () => {
+    const definition = createFirstDraftEditorDefinition(
+      createFirstDraftViewStateStore(),
+    );
+    const headingImport = definition.contentCodecs?.htmlImportHandlers?.find(
+      (handler) => handler.id === "first-draft.heading-import",
+    );
+
+    expect(headingImport?.elements).toEqual(["h1", "h2", "h3"]);
+  });
+
   it("selects and destroys exactly one definition-provided Yjs runtime", () => {
     const viewState = createFirstDraftViewStateStore();
     const sourceDefinition = createFirstDraftEditorDefinition(viewState);
@@ -61,7 +163,7 @@ describe("First Draft definition ownership", () => {
     expect(selectedRuntime.getConsistencyState()).toBe("healthy");
     expect(
       editor.readBlockPlainText(asBlockId("fd-heading-1"), "heading"),
-    ).toBe("Northstar Editor: private beta brief");
+    ).toBe("Welcome to my Block Editor ✨");
     expect(
       editor.insertText({
         blockId: asBlockId("fd-heading-1"),
@@ -71,7 +173,7 @@ describe("First Draft definition ownership", () => {
     ).toBe(true);
     expect(
       selectedRuntime.readBlockPlainText(asBlockId("fd-heading-1"), "heading"),
-    ).toBe("Updated: Northstar Editor: private beta brief");
+    ).toBe("Updated: Welcome to my Block Editor ✨");
     const lease = selectedRuntime.acquireBlockContent(
       asBlockId("fd-heading-1"),
       "heading",
@@ -113,13 +215,13 @@ describe("First Draft definition ownership", () => {
   });
 
   it.each(listItemTypes)(
-    "keeps %s on the ignored wrapper selection contract",
+    "keeps %s on the First Draft wrapper selection contract",
     (type) => {
       const definition = blockDefinition(type);
       const selection = resolveDefinitionSelection(definition);
 
       expect(definition.kind).toBe("wrapper");
-      expect(definition.selection).toBeUndefined();
+      expect(definition.selection).toBeDefined();
       expect(selection).toMatchObject({
         id: "wrapper",
         coverage: { selected: "none" },
@@ -261,19 +363,6 @@ describe("First Draft definition ownership", () => {
     ).toEqual([firstPane]);
   });
 
-  it("declares wrapper-owned open-boundary range deletion policies", () => {
-    for (const type of ["callout", "quote", "code"] as const) {
-      expect(blockDefinition(type).rangeDeletion).toEqual({
-        kind: "unwrap-boundary-contents",
-      });
-    }
-    expect(blockDefinition("columns").rangeDeletion).toEqual({
-      kind: "unwrap-boundary-child",
-    });
-    expect(blockDefinition("tabs").rangeDeletion).toEqual({
-      kind: "unwrap-visible-boundary-child",
-    });
-  });
 });
 
 function resolveDefinitionSelection(definition: {

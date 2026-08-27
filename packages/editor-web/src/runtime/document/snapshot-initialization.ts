@@ -14,12 +14,12 @@ import type { BlockId } from "@repo/editor-core/kernel";
 import { validateStructuralDocument } from "@repo/editor-core/editing";
 import type { EditorContentRuntimeSource } from "@repo/editor-core/content";
 import { validateEditorInlineAtomOccurrence } from "../definition/inline-atoms.ts";
-import type { EditorDefinition } from "../definition/contracts.ts";
+import type { EditableEditorDefinition } from "../definition/contracts.ts";
 import type { CompiledCanonicalEditorDefinition } from "../definition/compiled-editor-definition.ts";
 
 export function createEditorContentStartup(
   snapshot: EditorInstanceSnapshot,
-  definition: EditorDefinition,
+  definition: EditableEditorDefinition,
   validatedSnapshot?: ValidatedEditorInstanceSnapshot,
 ): EditorContentRuntimeSource {
   if (validatedSnapshot && validatedSnapshot.snapshot !== snapshot) {
@@ -43,7 +43,7 @@ export function createEditorContentStartup(
 export function materializeVersionedEditorBlocks(
   blocks: Readonly<Record<BlockId, Block>>,
   blockGraphVersion: number,
-  blockDefinitions: EditorDefinition["blocks"],
+  blockDefinitions: EditableEditorDefinition["blocks"],
   previousBlocks: Readonly<Record<BlockId, VersionedBlock>> = {},
 ): Record<BlockId, VersionedBlock> {
   const metadataVersion = `v${blockGraphVersion}`;
@@ -123,7 +123,7 @@ function blockTypesForSnapshot(
 
 function assertSnapshotInlineMarksSupported(
   snapshot: EditorInstanceSnapshot,
-  definition: EditorDefinition,
+  definition: EditableEditorDefinition,
 ): void {
   const supportedInlineMarks = new Set(
     definition.inlineMarks.map((mark) => mark.name),
@@ -169,7 +169,6 @@ function validateSnapshotInlineAtoms(
       if (
         typeof entry.type === "string" &&
         entry.type !== "paragraph" &&
-        entry.type !== "heading" &&
         entry.type !== "text" &&
         entry.type !== "hard_break"
       ) {

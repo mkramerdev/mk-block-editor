@@ -1,13 +1,16 @@
 import type { BlockType } from "@repo/editor-core/document";
 import type { BlockDefinition } from "@repo/editor-core/definitions";
 import {
-  assertValidCanonicalBlockFragment,
   type CanonicalBlockFragment,
+  type CanonicalBlockFragmentCandidate,
 } from "@repo/editor-core/editing";
 import type { EditorSelectionSnapshot } from "@repo/editor-react/selection";
-import { serializeCanonicalFragmentHtml } from "./canonical-html-export.ts";
 import {
-  exportCanonicalFragmentPlainText,
+  serializeCanonicalFragmentHtml,
+  serializeValidatedCanonicalFragmentHtml,
+} from "./canonical-html-export.ts";
+import {
+  exportValidatedCanonicalFragmentPlainText,
   importCanonicalFragmentPlainText,
 } from "./canonical-plain-text.ts";
 import type {
@@ -23,19 +26,16 @@ import {
 } from "./limits.ts";
 import {
   parseCanonicalBlockFragmentWirePayload,
-  serializeCanonicalBlockFragmentWirePayload,
+  serializeValidatedCanonicalBlockFragmentWirePayload,
 } from "./wire-codec.ts";
+import { validateClipboardFragmentCandidate } from "./validated-fragment.ts";
 
 export interface EditorClipboardBoundaryOptions {
   readonly blockDefinitions: Readonly<Record<BlockType, BlockDefinition>>;
   readonly plainTextImportBlockType: BlockType;
   readonly materializeSelection: (
     selection: EditorSelectionSnapshot,
-  ) =>
-    | CanonicalBlockFragment
-    | null
-    | { readonly ok: true; readonly fragment: CanonicalBlockFragment }
-    | { readonly ok: false };
+  ) => CanonicalBlockFragmentCandidate | null;
   readonly inlineMarks?: Parameters<
     typeof serializeCanonicalFragmentHtml
   >[1]["inlineMarks"];
@@ -126,19 +126,19 @@ export function createEditorClipboardBoundary(
       clipboardData: DataTransfer,
       selection: EditorSelectionSnapshot,
     ) {
-      let fragment: CanonicalBlockFragment | null;
+      let candidate: CanonicalBlockFragmentCandidate | null;
       try {
-        fragment = readMaterializedFragment(
-          options.materializeSelection(selection),
-        );
+        candidate = options.materializeSelection(selection);
       } catch {
         return false;
       }
-      if (!fragment) return false;
+      if (!candidate) return false;
+      let validated;
       try {
-        assertValidCanonicalBlockFragment(fragment, {
-          blockDefinitions: options.blockDefinitions,
-        });
+        validated = validateClipboardFragmentCandidate(
+          candidate,
+          options.blockDefinitions,
+        );
       } catch {
         return false;
       }
@@ -146,54 +146,51 @@ export function createEditorClipboardBoundary(
       // Every representation is derived before the required first write.
       let plainText: string;
       try {
-        plainText = exportCanonicalFragmentPlainText(
-          fragment,
+        plainText = exportValidatedCanonicalFragmentPlainText(
+          validated,
           plainTextOptions,
         );
         if (utf8ByteLength(plainText) > limits.maxPlainTextBytes) return false;
       } catch {
         return false;
       }
-      let canonicalPayload: string | null = null;
+      let semanticHtml: string;
       try {
-        canonicalPayload = serializeCanonicalBlockFragmentWirePayload(
-          fragment,
-          wireOptions,
-        );
-      } catch {
-        canonicalPayload = null;
-      }
-      let html: string | null = null;
-      try {
-        const semanticHtml = serializeCanonicalFragmentHtml(fragment, {
+        const serialized = serializeValidatedCanonicalFragmentHtml(validated, {
           blockDefinitions: options.blockDefinitions,
           inlineMarks: options.inlineMarks ?? [],
           inlineAtoms: options.inlineAtoms ?? [],
           htmlExportHandlers,
         });
-        const candidate =
-          semanticHtml !== null && canonicalPayload !== null
-            ? embedCanonicalFragmentPayload(semanticHtml, canonicalPayload)
-            : semanticHtml;
-        html =
-          candidate !== null && utf8ByteLength(candidate) <= limits.maxHtmlBytes
-            ? candidate
-            : null;
+        if (serialized === null) return false;
+        semanticHtml = serialized;
       } catch {
-        html = null;
+        return false;
       }
+      let canonicalPayload: string;
+      try {
+        canonicalPayload = serializeValidatedCanonicalBlockFragmentWirePayload(
+          validated,
+          wireOptions,
+        );
+      } catch {
+        return false;
+      }
+      const html = embedCanonicalFragmentPayload(
+        semanticHtml,
+        canonicalPayload,
+      );
+      if (utf8ByteLength(html) > limits.maxHtmlBytes) return false;
 
       try {
         clipboardData.setData("text/plain", plainText);
       } catch {
         return false;
       }
-      if (html !== null) {
-        try {
-          clipboardData.setData("text/html", html);
-        } catch {
-          // Plain text is the required successful representation.
-        }
+      try {
+        clipboardData.setData("text/html", html);
+      } catch {
+        return false;
       }
       return true;
     },
@@ -242,14 +239,6 @@ function readPlainTextFragment(
   } catch {
     return null;
   }
-}
-
-function readMaterializedFragment(
-  result: ReturnType<EditorClipboardBoundaryOptions["materializeSelection"]>,
-): CanonicalBlockFragment | null {
-  if (!result) return null;
-  if ("blocks" in result) return result;
-  return result.ok ? result.fragment : null;
 }
 
 function readData(clipboardData: DataTransfer, format: string): string {

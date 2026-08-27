@@ -1,6 +1,6 @@
 export {
   createPlainTextCanonicalFragment,
-  materializeEditorSelectionFragment,
+  materializeEditorSelectionFragmentCandidate,
   resolveEditorSelectionSnapshotTextAnchors,
   resolveCommittedSelectionSnapshotTextAnchors,
 } from "../selection/materialization/materialize.ts";
@@ -126,7 +126,10 @@ export type {
   SelectionPublication,
   SelectionSettlementContext,
 } from "../selection/model/types.ts";
-export type { SelectionController } from "../selection/controller/controller.ts";
+export type {
+  SelectionController,
+  TextPointerGesturePresentationClaim,
+} from "../selection/controller/controller.ts";
 export type {
   CanonicalLocalSelection,
   EditorCanonicalSelectionReader,
@@ -164,8 +167,8 @@ export type {
   EditorSelectionCommandIneligibleReason,
 } from "../selection/materialization/command-eligibility.ts";
 export type {
-  MaterializeEditorSelectionFragmentOptions,
-  MaterializeEditorSelectionFragmentResult,
+  MaterializeEditorSelectionFragmentCandidateOptions,
+  MaterializeEditorSelectionFragmentCandidateResult,
   ResolveCommittedSelectionSnapshotTextAnchorsResult,
   ResolveEditorSelectionSnapshotTextAnchorsResult,
 } from "../selection/materialization/materialize.ts";

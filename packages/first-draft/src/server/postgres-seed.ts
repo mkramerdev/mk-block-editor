@@ -19,6 +19,28 @@ export async function seedFirstDraftPostgresDocument(input: {
   readonly snapshot: EditorInstanceSnapshot;
   readonly now?: number;
 }): Promise<SeedFirstDraftPostgresDocumentResult> {
+  return writeFirstDraftPostgresDocument(input, false);
+}
+
+/** Atomically restores exactly one named document without recreating its database. */
+export async function restoreFirstDraftPostgresDocument(input: {
+  readonly client: FirstDraftPostgresSchemaClient;
+  readonly documentId: string;
+  readonly snapshot: EditorInstanceSnapshot;
+  readonly now?: number;
+}): Promise<SeedFirstDraftPostgresDocumentResult> {
+  return writeFirstDraftPostgresDocument(input, true);
+}
+
+async function writeFirstDraftPostgresDocument(
+  input: {
+    readonly client: FirstDraftPostgresSchemaClient;
+    readonly documentId: string;
+    readonly snapshot: EditorInstanceSnapshot;
+    readonly now?: number;
+  },
+  replace: boolean,
+): Promise<SeedFirstDraftPostgresDocumentResult> {
   if (!isUuid(input.documentId)) {
     throw new TypeError("First Draft documentId must be a UUID");
   }
@@ -37,6 +59,12 @@ export async function seedFirstDraftPostgresDocument(input: {
 
   await input.client.query("BEGIN");
   try {
+    if (replace) {
+      await input.client.query(
+        "DELETE FROM public.editor_documents WHERE document_id = $1",
+        [input.documentId],
+      );
+    }
     await input.client.query(
       `INSERT INTO public.editor_documents(
          document_id, revision, created_at, updated_at

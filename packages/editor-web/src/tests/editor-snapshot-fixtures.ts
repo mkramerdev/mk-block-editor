@@ -46,8 +46,8 @@ export function createTestEditorSnapshot(
       contentById[blockId] = input.content;
     } else if (
       input.text !== undefined ||
-      input.type === "paragraph" ||
-      input.type === "heading"
+      input.type === "textBlock" ||
+      input.type === "alternateTextBlock"
     ) {
       contentById[blockId] = createBlockRichTextContentFromPlainText(
         input.type,

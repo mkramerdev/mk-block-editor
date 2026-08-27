@@ -13,7 +13,7 @@ const id = (suffix: number): BlockId =>
 const rootId = id(1);
 const root = createVersionedBlockRecord({
   id: rootId,
-  type: "paragraph",
+  type: "textBlock",
   version: { metadataVersion: "1", contentVersion: null },
 });
 
@@ -133,7 +133,7 @@ describe("block graph operation validation", () => {
     const operation = {
       kind: "insertInlineContent",
       blockId: rootId,
-      blockType: "paragraph",
+      blockType: "textBlock",
       target: { kind: "text" },
       position: { blockId: rootId, offset: 0 },
       content: [{ type: "text", text: "ordered" }],

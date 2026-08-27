@@ -70,9 +70,19 @@ rollback occurred.
 
 ## History and projection boundary
 
-Relative anchors preserve backward or forward association at insertion
-boundaries. The editor coordinator creates and resolves those anchors for
-history replay; this package does not own history policy or a Yjs undo stack.
+Operation anchors and selection anchors are separate contracts even though both
+serialize Yjs relative positions. Operation associations come from operation
+semantics. The shared editor-react history algorithm resolves one current
+replay plan, applies ordinary canonical operations, and captures a new opposite
+plan around the Yjs items created by that replay. Temporary block documents are
+rehydrated and released sequentially for multi-block history; serialized
+history retains no YDoc, Yjs type, lease, context, or `Y.UndoManager`.
+
+Redo intentionally creates new CRDT items. Fully received causal edits are
+positioned by refreshed relative anchors. Delayed delivery of an edit that was
+causally dependent on an identity already removed and recreated by local
+undo/redo remains unsupported because editor history does not preserve original
+CRDT item identities.
 
 Yjs observers capture expected commit output and guard against unexpected live
 mutation. They do not discover editor operations, publish transport messages,

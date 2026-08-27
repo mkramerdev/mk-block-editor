@@ -110,6 +110,18 @@ export function normalizeFirstDraftTableColumns(
   };
 }
 
+/** Resolves safe presentation widths through the same positional rules used by normalization. */
+export function resolveFirstDraftTablePresentationColumnWidths(
+  metadata: Readonly<Record<string, unknown>> | undefined,
+  resolution: FirstDraftTableColumnIdResolution,
+): Readonly<Record<string, number>> {
+  return remapFirstDraftTableColumnWidths(
+    metadata,
+    resolution,
+    resolution.ids,
+  );
+}
+
 function remapFirstDraftTableColumnWidths(
   metadata: Readonly<Record<string, unknown>> | undefined,
   resolution: FirstDraftTableColumnIdResolution,

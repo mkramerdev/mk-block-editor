@@ -8,7 +8,7 @@ const id = (suffix: number): BlockId =>
   asBlockId(`01890f07-1c00-7000-8000-${String(suffix).padStart(12, "0")}`);
 const block = (blockId: BlockId, parentId: BlockId | null = null): Block => ({
   id: blockId,
-  type: "paragraph",
+  type: "textBlock",
   parentId,
   tombstone: null,
 });

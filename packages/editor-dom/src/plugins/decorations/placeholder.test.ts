@@ -18,14 +18,14 @@ const activePlaceholder = {
   visibility: "active",
 } satisfies TextPlaceholder;
 const alwaysPlaceholder = {
-  text: "Heading",
+  text: "Alternate text",
   visibility: "always",
 } satisfies TextPlaceholder;
 
 describe("placeholder decorations", () => {
   it.each([
     ["paragraph", activePlaceholder],
-    ["heading", alwaysPlaceholder],
+    ["alternateTextBlock", alwaysPlaceholder],
   ] as const)("decorates an empty active %s", (nodeName, placeholder) => {
     const decorations = buildPlaceholderDecorations(
       createTextState(nodeName, ""),
@@ -45,7 +45,7 @@ describe("placeholder decorations", () => {
 
   it.each([
     ["paragraph", activePlaceholder],
-    ["heading", alwaysPlaceholder],
+    ["alternateTextBlock", alwaysPlaceholder],
   ] as const)(
     "does not decorate a non-empty active %s",
     (nodeName, placeholder) => {

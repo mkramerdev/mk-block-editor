@@ -20,7 +20,6 @@ export interface BlockPluginEditorOptions {
   placeholder?: TextPlaceholder;
   editable?: boolean;
   accessibilityLabel?: string;
-  headingLevel?: number;
 }
 
 export interface BlockPluginExtensionOptions {

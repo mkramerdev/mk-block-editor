@@ -23,11 +23,12 @@ import {
 } from "../runtime/content/content-runtime.ts";
 import { type EditableEditorDefinition } from "../api/editor-definition.ts";
 import { testEditableEditorDefinition } from "./test-editor-definition.ts";
-import { ReadTextBlockPrimitive as TextBlockPrimitive } from "../document/blocks/read-text-block-primitive.tsx";
-import type { EditorRuntimePort } from "../runtime/document/render-port.ts";
+import { InactiveTextBlockPrimitive as TextBlockPrimitive } from "../document/blocks/inactive-text-block-primitive.tsx";
+import type { EditableEditorRuntimePort } from "../runtime/document/render-port.ts";
 import { registerEditorRuntimePort } from "../runtime/document/runtime-port-registry.ts";
 import { compileCanonicalEditorDefinition } from "../runtime/definition/compiled-editor-definition.ts";
 import type { TextPlaceholder } from "@repo/editor-dom/block-editor";
+import type { TextDomPresentation } from "../document/blocks/text-dom-presentation.ts";
 
 function createEditorContentRuntime(
   source: Omit<
@@ -52,11 +53,11 @@ function createEditorContentRuntime(
 
 describe("TextBlockPrimitive canonical projection", () => {
   it("keeps the stable input projection subscribed to canonical content", () => {
-    const blockGraph = createBlockGraphFromTypes(["paragraph"]);
+    const blockGraph = createBlockGraphFromTypes(["textBlock"]);
     const blockId = testBlockId(0);
     const subscribeBlockProjection = vi.fn(() => vi.fn());
     const projection = createBlockRichTextContentFromPlainText(
-      "paragraph",
+      "textBlock",
       "active",
     );
     const contentRuntime = {
@@ -66,9 +67,9 @@ describe("TextBlockPrimitive canonical projection", () => {
 
     render(
       <TextBlockPrimitive
-        block={createReadBlock(blockGraph.blocks[blockId]!, blockId)}
-        editor={createReadRenderPort(
-          createReadRuntime(),
+        block={createInactiveBlock(blockGraph.blocks[blockId]!, blockId)}
+        editor={createInactiveRenderPort(
+          createInactiveEditorDouble(),
           contentRuntime,
           testEditableEditorDefinition,
         )}
@@ -79,7 +80,7 @@ describe("TextBlockPrimitive canonical projection", () => {
   });
 
   it("reads plain text snapshots without hydrating or observing a live Yjs block doc", () => {
-    const rendered = renderReadBlock("paragraph", "snapshot text");
+    const rendered = renderInactiveBlock("textBlock", "snapshot text");
 
     expect(rendered.container.textContent).toContain("snapshot text");
     expect(
@@ -119,8 +120,8 @@ describe("TextBlockPrimitive canonical projection", () => {
     try {
       const html = renderToString(
         <TextBlockPrimitive
-          block={createReadBlock(blockGraph.blocks[blockId]!, blockId)}
-          editor={createReadRenderPort(
+          block={createInactiveBlock(blockGraph.blocks[blockId]!, blockId)}
+          editor={createInactiveRenderPort(
             editor,
             contentRuntime,
             testEditableEditorDefinition,
@@ -134,8 +135,8 @@ describe("TextBlockPrimitive canonical projection", () => {
     }
   });
 
-  it("suppresses an active placeholder in an empty inactive paragraph", () => {
-    const rendered = renderReadBlock("paragraph", "", {
+  it("suppresses an active placeholder in an empty inactive textBlock", () => {
+    const rendered = renderInactiveBlock("textBlock", "", {
       placeholder: {
         text: "Type / for commands",
         visibility: "active",
@@ -143,20 +144,20 @@ describe("TextBlockPrimitive canonical projection", () => {
     });
 
     expect(rendered.container.textContent).toBe("");
-    const paragraph = rendered.container.querySelector(
+    const textBlock = rendered.container.querySelector(
       "p[data-block-node='paragraph']",
     );
-    expect(paragraph?.getAttribute("data-editor-placeholder")).toBeNull();
+    expect(textBlock?.getAttribute("data-editor-placeholder")).toBeNull();
     expect(
-      paragraph?.querySelectorAll(
-        'br[data-editor-read-trailing-break="true"][aria-hidden="true"]',
+      textBlock?.querySelectorAll(
+        'br[data-editor-canonical-trailing-break="true"][aria-hidden="true"]',
       ),
     ).toHaveLength(1);
     rendered.contentRuntime.destroy();
   });
 
-  it("preserves an always placeholder in an empty read-only paragraph", () => {
-    const rendered = renderReadBlock("paragraph", "", {
+  it("preserves an always placeholder in an empty inactive textBlock", () => {
+    const rendered = renderInactiveBlock("textBlock", "", {
       placeholder: {
         text: "Type / for commands",
         visibility: "always",
@@ -171,24 +172,12 @@ describe("TextBlockPrimitive canonical projection", () => {
     rendered.contentRuntime.destroy();
   });
 
-  it("suppresses an active placeholder in an empty read-only heading", () => {
-    const rendered = renderReadBlock("heading", "", {
-      placeholder: { text: "Heading", visibility: "active" },
-    });
 
-    expect(
-      rendered.container
-        .querySelector("h1[data-block-node='heading']")
-        ?.getAttribute("data-editor-placeholder"),
-    ).toBeNull();
-    rendered.contentRuntime.destroy();
-  });
-
-  it.each(["paragraph", "heading"] as const)(
+  it.each(["textBlock", "alternateTextBlock"] as const)(
     "never emits a placeholder attribute for a non-empty %s",
     (type) => {
       for (const visibility of ["active", "always"] as const) {
-        const rendered = renderReadBlock(type, "Populated", {
+        const rendered = renderInactiveBlock(type, "Populated", {
           placeholder: { text: "Placeholder", visibility },
         });
 
@@ -203,7 +192,7 @@ describe("TextBlockPrimitive canonical projection", () => {
   );
 
   it("does not emit a placeholder attribute for empty placeholder text", () => {
-    const rendered = renderReadBlock("paragraph", "", {
+    const rendered = renderInactiveBlock("textBlock", "", {
       placeholder: { text: "", visibility: "always" },
     });
 
@@ -216,20 +205,20 @@ describe("TextBlockPrimitive canonical projection", () => {
   });
 
   it("keeps a terminal hard break logical while adding one hidden layout sentinel", () => {
-    const rendered = renderReadBlock("paragraph", "");
+    const rendered = renderInactiveBlock("textBlock", "");
 
     reconcileReadProjection(rendered, [
       { type: "text", text: "First line" },
       { type: "hard_break" },
     ]);
 
-    const paragraph = rendered.container.querySelector<HTMLElement>(
+    const textBlock = rendered.container.querySelector<HTMLElement>(
       "p[data-block-node='paragraph']",
     )!;
-    const sentinels = paragraph.querySelectorAll(
-      'br[data-editor-read-trailing-break="true"]',
+    const sentinels = textBlock.querySelectorAll(
+      'br[data-editor-canonical-trailing-break="true"]',
     );
-    expect(readRenderedText(paragraph)).toBe("First line\n");
+    expect(readRenderedText(textBlock)).toBe("First line\n");
     expect(readRenderedText(rendered.container)).toBe("First line\n");
     expect(sentinels).toHaveLength(1);
     expect(sentinels[0]?.getAttribute("aria-hidden")).toBe("true");
@@ -240,7 +229,7 @@ describe("TextBlockPrimitive canonical projection", () => {
   });
 
   it("does not add a trailing layout sentinel for an interior hard break", () => {
-    const rendered = renderReadBlock("paragraph", "");
+    const rendered = renderInactiveBlock("textBlock", "");
 
     reconcileReadProjection(rendered, [
       { type: "text", text: "First line" },
@@ -255,14 +244,14 @@ describe("TextBlockPrimitive canonical projection", () => {
     ).toBe("First line\nSecond line");
     expect(
       rendered.container.querySelector(
-        'br[data-editor-read-trailing-break="true"]',
+        'br[data-editor-canonical-trailing-break="true"]',
       ),
     ).toBeNull();
     rendered.contentRuntime.destroy();
   });
 
   it("uses one layout sentinel for multiple terminal hard breaks", () => {
-    const rendered = renderReadBlock("paragraph", "");
+    const rendered = renderInactiveBlock("textBlock", "");
 
     reconcileReadProjection(rendered, [
       { type: "text", text: "First line" },
@@ -273,14 +262,14 @@ describe("TextBlockPrimitive canonical projection", () => {
     expect(readRenderedText(rendered.container)).toBe("First line\n\n");
     expect(
       rendered.container.querySelectorAll(
-        'br[data-editor-read-trailing-break="true"]',
+        'br[data-editor-canonical-trailing-break="true"]',
       ),
     ).toHaveLength(1);
     rendered.contentRuntime.destroy();
   });
 
   it("preserves marked and atomic inline ordering before a terminal hard break", () => {
-    const rendered = renderReadBlock("paragraph", "", {
+    const rendered = renderInactiveBlock("textBlock", "", {
       definition: testMentionDefinition,
     });
 
@@ -291,23 +280,89 @@ describe("TextBlockPrimitive canonical projection", () => {
       { type: "hard_break" },
     ]);
 
-    const paragraph = rendered.container.querySelector<HTMLElement>(
+    const textBlock = rendered.container.querySelector<HTMLElement>(
       "p[data-block-node='paragraph']",
     )!;
-    expect(readRenderedText(paragraph)).toBe("Bold @Ada Lovelace italic\n");
-    expect(paragraph.querySelector("strong")?.textContent).toBe("Bold ");
-    expect(paragraph.querySelector(".test-mention")?.textContent).toBe(
+    expect(readRenderedText(textBlock)).toBe("Bold @Ada Lovelace italic\n");
+    expect(textBlock.querySelector("strong")?.textContent).toBe("Bold ");
+    expect(textBlock.querySelector(".test-mention")?.textContent).toBe(
       "@Ada Lovelace",
     );
-    expect(paragraph.querySelector("em")?.textContent).toBe(" italic");
+    expect(textBlock.querySelector("em")?.textContent).toBe(" italic");
     expect(
-      paragraph.querySelectorAll('br[data-editor-read-trailing-break="true"]'),
+      textBlock.querySelectorAll('br[data-editor-canonical-trailing-break="true"]'),
     ).toHaveLength(1);
     rendered.contentRuntime.destroy();
   });
 
+  it("renders renderer-supplied semantic DOM around all canonical inline content", () => {
+    const rendered = renderInactiveBlock("alternateTextBlock", "", {
+      definition: testMentionDefinition,
+      placeholder: { text: "Semantic placeholder", visibility: "always" },
+      textDomPresentation: {
+        element: "h2",
+        attributes: { "data-neutral-presentation": "alternate" },
+      },
+    });
+
+    reconcileReadProjection(rendered, [
+      { type: "text", text: "Bold", marks: [{ type: "strong" }] },
+      {
+        type: "text",
+        text: " link",
+        marks: [{ type: "link", attrs: { href: "https://example.test" } }],
+      },
+      mentionNode(mentionCases[0]),
+      { type: "hard_break" },
+    ]);
+
+    const semantic = rendered.container.querySelector<HTMLElement>(
+      "h2[data-block-node='paragraph'][data-neutral-presentation='alternate']",
+    )!;
+    expect(semantic).not.toBeNull();
+    expect(semantic.querySelector("strong")?.textContent).toBe("Bold");
+    expect(semantic.querySelector("a")?.getAttribute("href")).toBe(
+      "https://example.test",
+    );
+    expect(semantic.querySelector("[data-editor-inline-atom='true']")).not.toBeNull();
+    expect(semantic.querySelector("br:not([data-editor-canonical-trailing-break])")).not.toBeNull();
+    expect(semantic.querySelector("br[data-editor-canonical-trailing-break]"))
+      .not.toBeNull();
+    expect(rendered.container.querySelector("p[data-block-node]")).toBeNull();
+    rendered.contentRuntime.destroy();
+  });
+
+  it("keeps the default renderer-owned presentation paragraph-shaped", () => {
+    const rendered = renderInactiveBlock("alternateTextBlock", "Default");
+    expect(
+      rendered.container.querySelector("p[data-block-node='paragraph']")
+        ?.textContent,
+    ).toBe("Default");
+    rendered.contentRuntime.destroy();
+  });
+
+  it("keeps placeholder attributes and the empty trailing break on the semantic element", () => {
+    const rendered = renderInactiveBlock("textBlock", "", {
+      placeholder: { text: "Semantic placeholder", visibility: "always" },
+      textDomPresentation: { element: "h3" },
+    });
+    const semantic = rendered.container.querySelector<HTMLElement>(
+      "h3[data-block-node='paragraph']",
+    )!;
+    expect(semantic.getAttribute("data-editor-placeholder")).toBe(
+      "Semantic placeholder",
+    );
+    expect(
+      semantic.querySelector(
+        ":scope > br[data-editor-canonical-trailing-break='true']",
+      ),
+    ).not.toBeNull();
+    expect(rendered.container.querySelector("p[data-block-node]")).toBeNull();
+    rendered.contentRuntime.destroy();
+  });
+
   it("projects every registered primitive inline mark without ProseMirror", () => {
-    const rendered = renderReadBlock("paragraph", "");
+    const rendered = renderInactiveBlock("textBlock", "");
 
     reconcileReadProjection(rendered, [
       { type: "text", text: "code", marks: [{ type: "code" }] },
@@ -325,60 +380,21 @@ describe("TextBlockPrimitive canonical projection", () => {
     rendered.contentRuntime.destroy();
   });
 
-  it("adds the trailing layout sentinel inside semantic heading output", () => {
-    const rendered = renderReadBlock("heading", "");
 
-    reconcileReadProjection(rendered, [
-      { type: "text", text: "Heading" },
-      { type: "hard_break" },
-    ]);
 
-    const heading = rendered.container.querySelector<HTMLElement>(
-      "h1[data-block-node='heading']",
-    )!;
-    expect(readRenderedText(heading)).toBe("Heading\n");
-    expect(
-      heading.querySelectorAll(
-        'br[data-editor-read-trailing-break="true"][aria-hidden="true"]',
-      ),
-    ).toHaveLength(1);
-    expect(
-      rendered.container.querySelector("p[data-block-node='paragraph']"),
-    ).toBeNull();
-    rendered.contentRuntime.destroy();
-  });
-
-  it("preserves an always placeholder in an empty read-only heading", () => {
-    const rendered = renderReadBlock("heading", "", {
-      placeholder: { text: "Heading", visibility: "always" },
-    });
-
-    const heading = rendered.container.querySelector<HTMLElement>(
-      "h1[data-block-node='heading']",
-    );
-    expect(heading).not.toBeNull();
-    expect(heading?.textContent).toBe("");
-    expect(heading?.className).toBe("");
-    expect(heading?.getAttribute("data-editor-placeholder")).toBe("Heading");
-    expect(
-      rendered.container.querySelector("p[data-block-node='paragraph']"),
-    ).toBeNull();
-    rendered.contentRuntime.destroy();
-  });
-
-  it("treats missing plain text snapshots as empty read text", () => {
-    const blockGraph = createBlockGraphFromTypes(["paragraph"]);
+  it("treats missing plain text snapshots as empty canonical text", () => {
+    const blockGraph = createBlockGraphFromTypes(["textBlock"]);
     const blockId = testBlockId(0);
     const contentRuntime = {
       subscribeBlockProjection: vi.fn(() => vi.fn()),
       readBlockProjection: vi.fn(() => undefined),
     } as unknown as EditorContentRuntime;
-    const editor = createReadRuntime();
+    const editor = createInactiveEditorDouble();
 
     const rendered = render(
       <TextBlockPrimitive
-        block={createReadBlock(blockGraph.blocks[blockId]!, blockId)}
-        editor={createReadRenderPort(
+        block={createInactiveBlock(blockGraph.blocks[blockId]!, blockId)}
+        editor={createInactiveRenderPort(
           editor,
           contentRuntime,
           testEditableEditorDefinition,
@@ -389,13 +405,13 @@ describe("TextBlockPrimitive canonical projection", () => {
     expect(rendered.container.textContent).toBe("");
     expect(
       rendered.container
-        .querySelector("[data-editor-read-row]")
+        .querySelector("[data-editor-inactive-text-root]")
         ?.getAttribute("data-empty"),
     ).toBe("true");
   });
 
-  it("keeps read projection text stable while selection paint is owned by the list layer", () => {
-    const rendered = renderReadBlock("paragraph", "abcdef");
+  it("keeps canonical projection text stable while selection paint is owned by the list layer", () => {
+    const rendered = renderInactiveBlock("textBlock", "abcdef");
 
     expect(
       rendered.container.querySelector("[data-editor-selection-paint]"),
@@ -404,8 +420,8 @@ describe("TextBlockPrimitive canonical projection", () => {
     rendered.contentRuntime.destroy();
   });
 
-  it("keeps inline marks visible when a formatted text block is rendered as a read projection", () => {
-    const rendered = renderReadBlock("paragraph", "bold text");
+  it("keeps inline marks visible when a formatted text block is rendered as a canonical projection", () => {
+    const rendered = renderInactiveBlock("textBlock", "bold text");
 
     reconcileReadProjection(rendered, [
       { type: "text", text: "bold", marks: [{ type: "strong" }] },
@@ -419,8 +435,8 @@ describe("TextBlockPrimitive canonical projection", () => {
     rendered.contentRuntime.destroy();
   });
 
-  it("renders rich inline mention atoms from read projections without hydrating Yjs", () => {
-    const rendered = renderReadBlock("paragraph", "", {
+  it("renders rich inline mention atoms from canonical projections without hydrating Yjs", () => {
+    const rendered = renderInactiveBlock("textBlock", "", {
       definition: testMentionDefinition,
     });
     const mention = mentionCases[0];
@@ -442,10 +458,51 @@ describe("TextBlockPrimitive canonical projection", () => {
     rendered.contentRuntime.destroy();
   });
 
+  it("parses marks and inline-atom metadata once per subscribed projection update", () => {
+    let metadataSchemaReads = 0;
+    let atomRenders = 0;
+    const metadata = {} as EditableEditorDefinition["inlineAtoms"][number]["metadata"];
+    Object.defineProperty(metadata, "id", {
+      enumerable: true,
+      get() {
+        metadataSchemaReads += 1;
+        return { type: "string", required: true } as const;
+      },
+    });
+    const definition: EditableEditorDefinition = {
+      ...testMentionDefinition,
+      inlineAtoms: [{
+        ...testMentionDefinition.inlineAtoms[0]!,
+        metadata,
+        render: (atomMetadata) => {
+          atomRenders += 1;
+          return testMentionDefinition.inlineAtoms[0]!.render(atomMetadata);
+        },
+      }],
+    };
+    const rendered = renderInactiveBlock("textBlock", "", { definition });
+    const inlineContent = [
+      { type: "text", text: "Marked ", marks: [{ type: "strong" }] },
+      mentionNode(mentionCases[0]),
+    ] as const satisfies readonly RichTextInlineNodeJson[];
+    metadataSchemaReads = 0;
+    atomRenders = 0;
+
+    reconcileReadProjection(rendered, inlineContent);
+
+    expect(atomRenders).toBe(2);
+    expect(metadataSchemaReads).toBe(3);
+    expect(rendered.container.querySelector("strong")?.textContent).toBe(
+      "Marked ",
+    );
+    expect(rendered.container.querySelector(".test-mention")).not.toBeNull();
+    rendered.contentRuntime.destroy();
+  });
+
   it.each(mentionCases)(
     "renders mention $id by resolving product display state in the definition renderer",
     (mention) => {
-      const rendered = renderReadBlock("paragraph", "", {
+      const rendered = renderInactiveBlock("textBlock", "", {
         definition: testMentionDefinition,
       });
 
@@ -463,8 +520,8 @@ describe("TextBlockPrimitive canonical projection", () => {
     },
   );
 
-  it("keeps mixed rich inline content ordered around read-mode mentions", () => {
-    const rendered = renderReadBlock("paragraph", "", {
+  it("keeps mixed rich inline content ordered around inactive mentions", () => {
+    const rendered = renderInactiveBlock("textBlock", "", {
       definition: testMentionDefinition,
     });
     const mention = mentionCases.find(
@@ -478,14 +535,14 @@ describe("TextBlockPrimitive canonical projection", () => {
       { type: "text", text: " tail" },
     ]);
 
-    const paragraph = rendered.container.querySelector(
+    const textBlock = rendered.container.querySelector(
       "[data-block-node='paragraph']",
     );
-    const strong = paragraph?.querySelector("strong");
+    const strong = textBlock?.querySelector("strong");
     const mentionElement =
-      paragraph?.querySelector<HTMLElement>(".test-mention");
-    const em = paragraph?.querySelector("em");
-    expect(paragraph?.textContent).toBe("Bold @Project Plan italic tail");
+      textBlock?.querySelector<HTMLElement>(".test-mention");
+    const em = textBlock?.querySelector("em");
+    expect(textBlock?.textContent).toBe("Bold @Project Plan italic tail");
     expect(strong?.textContent).toBe("Bold ");
     expect(mentionElement?.textContent).toBe("@Project Plan");
     expect(em?.textContent).toBe(" italic");
@@ -504,8 +561,8 @@ describe("TextBlockPrimitive canonical projection", () => {
     rendered.contentRuntime.destroy();
   });
 
-  it("keeps selected read-mode mention text as content while paint is owned by the list layer", () => {
-    const rendered = renderReadBlock("paragraph", "", {
+  it("keeps selected inactive mention text as content while paint is owned by the list layer", () => {
+    const rendered = renderInactiveBlock("textBlock", "", {
       definition: testMentionDefinition,
     });
 
@@ -524,7 +581,7 @@ describe("TextBlockPrimitive canonical projection", () => {
   });
 
   it("rejects an atom occurrence when the active definition omits its type", () => {
-    const rendered = renderReadBlock("paragraph", "");
+    const rendered = renderInactiveBlock("textBlock", "");
 
     expect(() =>
       reconcileReadProjection(rendered, [mentionNode(mentionCases[0])]),
@@ -532,31 +589,7 @@ describe("TextBlockPrimitive canonical projection", () => {
     rendered.contentRuntime.destroy();
   });
 
-  it("renders heading read projections with the same semantic text node shape as live ProseMirror blocks", () => {
-    const heading = renderReadBlock("heading", "Semantic heading");
-    expect(
-      heading.container.querySelector("h1[data-block-node='heading']")
-        ?.textContent,
-    ).toBe("Semantic heading");
-    expect(
-      heading.container.querySelector("p[data-block-node='paragraph']"),
-    ).toBeNull();
-    heading.contentRuntime.destroy();
-  });
 
-  it("renders current read projection shape without rich text validator work", () => {
-    const rendered = renderReadBlock("heading", "");
-
-    reconcileReadProjection(rendered, [
-      { type: "text", text: "Trusted heading" },
-    ]);
-
-    expect(
-      rendered.container.querySelector("h1[data-block-node='heading']")
-        ?.textContent,
-    ).toBe("Trusted heading");
-    rendered.contentRuntime.destroy();
-  });
 });
 
 const mentionCases = [
@@ -589,7 +622,7 @@ const mentionCases = [
 
 const testMentionDefinition: EditableEditorDefinition = {
   blocks: testEditableEditorDefinition.blocks,
-  defaultRoot: "paragraph",
+  defaultRoot: "textBlock",
   inlineMarks: testEditableEditorDefinition.inlineMarks,
   inlineAtoms: [
     {
@@ -624,7 +657,7 @@ function mentionNode(mention: MentionCase): RichTextInlineNodeJson {
 }
 
 function reconcileReadProjection(
-  rendered: ReturnType<typeof renderReadBlock>,
+  rendered: ReturnType<typeof renderInactiveBlock>,
   inlineContent: readonly RichTextInlineNodeJson[],
 ): void {
   act(() => {
@@ -648,7 +681,7 @@ function reconcileReadProjection(
   });
 }
 
-function renderReadBlock(
+function renderInactiveBlock(
   type: Block["type"],
   text: string,
   options: {
@@ -656,6 +689,7 @@ function renderReadBlock(
     placeholder?: TextPlaceholder;
     definition?: EditableEditorDefinition;
     editor?: EditorImplementation;
+    textDomPresentation?: TextDomPresentation;
   } = {},
 ) {
   const definition = options.definition ?? testEditableEditorDefinition;
@@ -687,20 +721,21 @@ function renderReadBlock(
     },
     loadedAt: Date.now(),
   });
-  const editor = options.editor ?? createReadRuntime(options.focusBlock);
-  const block = createReadBlock(blockGraph.blocks[blockId]!, blockId);
+  const editor = options.editor ?? createInactiveEditorDouble(options.focusBlock);
+  const block = createInactiveBlock(blockGraph.blocks[blockId]!, blockId);
   const readBlock = (
     <TextBlockPrimitive
       block={block}
-      editor={createReadRenderPort(editor, contentRuntime, definition)}
+      editor={createInactiveRenderPort(editor, contentRuntime, definition)}
       placeholder={options.placeholder}
+      textDomPresentation={options.textDomPresentation}
     />
   );
   const rendered = render(readBlock);
   return { ...rendered, blockId, contentRuntime, block };
 }
 
-function createReadRuntime(
+function createInactiveEditorDouble(
   focusBlock: ReturnType<typeof vi.fn> = vi.fn(),
 ): EditorImplementation {
   return {
@@ -708,7 +743,7 @@ function createReadRuntime(
   } as unknown as EditorImplementation;
 }
 
-function createReadBlock(
+function createInactiveBlock(
   block: VersionedBlock,
   id: VersionedBlock["id"],
 ): VersionedBlock {
@@ -723,33 +758,33 @@ function createReadBlock(
   };
 }
 
-function createReadRenderPort(
+function createInactiveRenderPort(
   editor: EditorImplementation,
   contentRuntime: EditorContentRuntime,
   definition: EditableEditorDefinition,
-): EditorRuntimePort {
+): EditableEditorRuntimePort {
   const compiledDefinition = compileCanonicalEditorDefinition(definition);
   const runtime = {
     ...editor,
-    editable: false,
+    editable: true,
     definition,
     compiledDefinition,
     contentRuntime,
   };
-  assertReadRenderPort(runtime);
+  assertInactiveRenderPort(runtime);
   registerEditorRuntimePort(runtime, runtime);
   return runtime;
 }
 
-function assertReadRenderPort(
+function assertInactiveRenderPort(
   value: object,
-): asserts value is EditorRuntimePort {
+): asserts value is EditableEditorRuntimePort {
   if (
     !("definition" in value) ||
     !("compiledDefinition" in value) ||
     !("contentRuntime" in value)
   ) {
-    throw new Error("read render-port fixture is incomplete");
+    throw new Error("inactive render-port fixture is incomplete");
   }
 }
 
@@ -759,7 +794,7 @@ function readRenderedText(root: Element): string {
     if (node.nodeType === Node.TEXT_NODE) {
       text += node.textContent ?? "";
     } else if (node instanceof HTMLBRElement) {
-      if (!node.hasAttribute("data-editor-read-trailing-break")) text += "\n";
+      if (!node.hasAttribute("data-editor-canonical-trailing-break")) text += "\n";
     } else if (node instanceof Element) {
       text += readRenderedText(node);
     }

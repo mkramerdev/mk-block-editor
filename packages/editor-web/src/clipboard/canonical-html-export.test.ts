@@ -5,55 +5,73 @@ import type { CanonicalBlockFragment } from "@repo/editor-core/editing";
 import type { BlockId } from "@repo/editor-core/kernel";
 import { serializeCanonicalFragmentHtml } from "./canonical-html-export.ts";
 
-describe("canonical semantic HTML export", () => {
-  it("preserves only handler-declared semantic data attributes", () => {
-    const listId = "html-list" as BlockId;
-    const textId = "html-text" as BlockId;
-    const definitions: Readonly<Record<string, BlockDefinition>> = {
-      paragraph: { kind: "text", type: "paragraph", rootLayout: "normal" },
-      semanticList: {
-        kind: "wrapper",
-        type: "semanticList",
-        rootLayout: "normal",
-        contentBoundary: false,
-        content: { required: ["paragraph"], additional: "paragraph" },
-      },
-    };
-    const fragment: CanonicalBlockFragment = {
-      blocks: [
-        { id: listId, type: "semanticList", parentId: null },
-        {
-          id: textId,
-          type: "paragraph",
-          parentId: listId,
-          content: createBlockRichTextContentFromPlainText("paragraph", "Task"),
-          plainText: "Task",
-        },
-      ],
-      rootBlockIds: [listId],
-      start: { kind: "block", blockId: listId },
-      end: { kind: "block", blockId: listId },
-    };
+const wrapperId = "html-wrapper" as BlockId;
+const textId = "html-text" as BlockId;
+const atomicId = "html-atomic" as BlockId;
+const definitions: Readonly<Record<string, BlockDefinition>> = {
+  textBlock: { kind: "text", type: "textBlock" },
+  wrapperBlock: { kind: "wrapper", type: "wrapperBlock", content: { required: [], additional: "block" } },
+  atomicBlock: { kind: "atomic", type: "atomicBlock" },
+};
 
-    expect(
-      serializeCanonicalFragmentHtml(fragment, {
-        blockDefinitions: definitions,
-        inlineMarks: [],
-        htmlExportHandlers: [
-          {
-            id: "semantic-list",
-            preserveDataAttributes: ["data-semantic-list"],
-            export(block, context) {
-              if (block.type !== "semanticList") return null;
-              const list = context.document.createElement("ul");
-              list.dataset.semanticList = "true";
-              list.dataset.editorBlockId = block.id;
-              list.append(context.exportChildren(block.id));
-              return list;
+function fragment(rootBlockIds: readonly BlockId[]): CanonicalBlockFragment {
+  const includeWrapper = rootBlockIds.includes(wrapperId);
+  const includeAtomic = rootBlockIds.includes(atomicId);
+  return {
+    blocks: [
+      ...(includeWrapper
+        ? [
+            { id: wrapperId, type: "wrapperBlock", parentId: null },
+            {
+              id: textId,
+              type: "textBlock",
+              parentId: wrapperId,
+              content: createBlockRichTextContentFromPlainText(
+                "textBlock",
+                "Neutral",
+              ),
+              plainText: "Neutral",
             },
-          },
-        ],
-      }),
-    ).toBe('<ul data-semantic-list="true"><p>Task</p></ul>');
+          ]
+        : []),
+      ...(includeAtomic
+        ? [{ id: atomicId, type: "atomicBlock", parentId: null }]
+        : []),
+    ],
+    rootBlockIds,
+    start: { kind: "block", blockId: rootBlockIds[0]! },
+    end: { kind: "block", blockId: rootBlockIds.at(-1)! },
+  };
+}
+
+describe("canonical neutral HTML export", () => {
+  it("uses handlers before fallback and preserves only their declared data", () => {
+    expect(serializeCanonicalFragmentHtml(fragment([wrapperId]), {
+      blockDefinitions: definitions,
+      inlineMarks: [],
+      htmlExportHandlers: [{
+        id: "custom-wrapper",
+        preserveDataAttributes: ["data-custom-wrapper"],
+        export(block, context) {
+          if (block.id !== wrapperId) return null;
+          const element = context.document.createElement("article");
+          element.dataset.customWrapper = "true";
+          element.dataset.editorInternal = "removed";
+          element.append(context.exportChildren(block.id));
+          return element;
+        },
+      }],
+    })).toBe('<article data-custom-wrapper="true"><p>Neutral</p></article>');
+  });
+
+  it("uses neutral text, wrapper recursion, and unsupported atomic fallbacks", () => {
+    expect(serializeCanonicalFragmentHtml(fragment([wrapperId, atomicId]), {
+      blockDefinitions: definitions,
+      inlineMarks: [],
+    })).toBe("<p>Neutral</p>");
+    expect(serializeCanonicalFragmentHtml(fragment([atomicId]), {
+      blockDefinitions: definitions,
+      inlineMarks: [],
+    })).toBe("");
   });
 });

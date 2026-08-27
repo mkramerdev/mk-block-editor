@@ -36,6 +36,7 @@ import type {
   EditorTransportContentUpdate,
   EditorTransportTransaction,
 } from "../transport/transport-types.ts";
+import { firstDraftTransactionProposalsEqual } from "../transport/transaction-proposal-identity.ts";
 import {
   firstDraftBlockModelDefinitions,
   firstDraftInlineAtomModels,
@@ -151,7 +152,10 @@ export async function acceptFirstDraftTransactionInPostgresTransaction(
       );
       if (
         !persistedTransaction ||
-        !sameTransactionProposal(persistedTransaction, options.transaction)
+        !firstDraftTransactionProposalsEqual(
+          persistedTransaction,
+          options.transaction,
+        )
       ) {
         await options.client.query("ROLLBACK");
         open = false;
@@ -461,34 +465,6 @@ async function applyContentChanges(input: {
     }
   }
   return Object.freeze(accepted);
-}
-
-function sameTransactionProposal(
-  accepted: EditorTransportTransaction,
-  proposed: EditorTransportTransaction,
-): boolean {
-  if (
-    accepted.transactionId !== proposed.transactionId ||
-    accepted.historyAction !== proposed.historyAction ||
-    !jsonValuesEqual(accepted.graph, proposed.graph) ||
-    !jsonValuesEqual(accepted.metadata, proposed.metadata) ||
-    accepted.content.length !== proposed.content.length
-  )
-    return false;
-  return accepted.content.every((entry, index) => {
-    const candidate = proposed.content[index];
-    return Boolean(
-      candidate &&
-      entry.blockId === candidate.blockId &&
-      entry.blockType === candidate.blockType &&
-      entry.update.kind === candidate.update.kind &&
-      entry.update.format === candidate.update.format &&
-      entry.update.version === candidate.update.version &&
-      Buffer.from(entry.update.payload.copy()).equals(
-        Buffer.from(candidate.update.payload.copy()),
-      ),
-    );
-  });
 }
 
 function assertValidFirstDraftDocument(

@@ -9,10 +9,8 @@ export type {
 } from "@repo/editor-core/content";
 export type { EditorWebContentRuntime } from "../runtime/content/content-runtime.ts";
 export type {
-  Editor,
   EditableEditor,
-  EditorReadRuntime,
-  ReadEditor,
+  EditorDocumentRuntime,
   EditorBlockMetadataUpdateOptions,
   EditorBlockDeletion,
   EditorBlockDeletionResult,
@@ -27,6 +25,7 @@ export type {
   EditorCanonicalSelectionEffect,
   EditorBlockContentChange,
   EditorDocumentProps,
+  EditorChildOrderProjection,
   EditorSelectionDragSnapshot,
   EditorSelectionDragCallback,
   EditorDocumentLayerRenderContext,
@@ -50,21 +49,22 @@ export type {
 export type {
   EditorDocumentGeometryReader,
   EditorDocumentRect,
+  EditorViewportRect,
 } from "../document/geometry/editor-document-geometry.ts";
 export { readEditorSelectionRangeBlockGeometry } from "../document/geometry/editor-selection-geometry.ts";
 export type { EditorSelectionDocumentGeometry } from "../document/geometry/editor-selection-geometry.ts";
 export type {
   EditorBlockCommandDefinition,
   EditorBlockCommandExecutionContext,
+  EditorStructuralTextBoundaryIntent,
+  EditorStructuralTextBoundaryRequest,
   EditorCommandDefinition,
   EditorCommandExecutionResult,
   EditorContentCodecs,
   EditorContentImportDefinition,
   EditorContentRuntimeDefinition,
-  EditorDefinition,
-  EditorSelectionFragmentDefinition,
   EditableEditorDefinition,
-  ReadEditorDefinition,
+  EditorSelectionFragmentDefinition,
   EditorBlockInternalSelectionSubsystemDefinition,
   EditorBlockInternalSelectionValidationInput,
   EditorBlockInternalSelectionValidationResult,

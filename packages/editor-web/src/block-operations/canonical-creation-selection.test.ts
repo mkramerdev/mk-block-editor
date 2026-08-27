@@ -6,32 +6,25 @@ import { wholeSelection } from "@repo/editor-core/selection";
 import { describe, expect, it } from "vitest";
 import { resolveCanonicalCreationSelection } from "./canonical-creation-selection.ts";
 
-const renderer = () => null;
 const definitions: Readonly<Record<string, BlockDefinition>> = {
-  paragraph: {
+  textBlock: {
     kind: "text",
-    type: "paragraph",
-    renderer,
-    rootLayout: "normal",
+    type: "textBlock",
   },
   nonContentText: {
     kind: "text",
     type: "nonContentText",
-    renderer,
-    rootLayout: "normal",
     selection: wholeSelection(),
   },
-  divider: {
+  atomicBlock: {
     kind: "atomic",
-    type: "divider",
-    renderer,
-    rootLayout: "normal",
+    type: "atomicBlock",
   },
 };
 
 describe("canonical creation selection resolution", () => {
   it("rejects an ID outside the fragment", () => {
-    const fragment = textFragment("paragraph", "abc");
+    const fragment = textFragment("textBlock", "abc");
     expect(
       resolveCanonicalCreationSelection(fragment, definitions, {
         selectionBlockId: asBlockId("outside"),
@@ -53,7 +46,7 @@ describe("canonical creation selection resolution", () => {
   });
 
   it("rejects invalid text offsets and offsets on atomic targets", () => {
-    const text = textFragment("paragraph", "abc");
+    const text = textFragment("textBlock", "abc");
     expect(
       resolveCanonicalCreationSelection(text, definitions, {
         selectionBlockId: text.rootBlockIds[0]!,
@@ -63,7 +56,7 @@ describe("canonical creation selection resolution", () => {
 
     const atomicId = asBlockId("atomic-target");
     const atomic = createCanonicalBlockFragment({
-      blocks: [{ id: atomicId, type: "divider", parentId: null }],
+      blocks: [{ id: atomicId, type: "atomicBlock", parentId: null }],
       rootBlockIds: [atomicId],
       start: { kind: "block", blockId: atomicId },
       end: { kind: "block", blockId: atomicId },
@@ -78,7 +71,7 @@ describe("canonical creation selection resolution", () => {
   });
 });
 
-function textFragment(type: "paragraph" | "nonContentText", text: string) {
+function textFragment(type: "textBlock" | "nonContentText", text: string) {
   const id = asBlockId(`${type}-target`);
   return createCanonicalBlockFragment({
     blocks: [

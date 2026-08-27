@@ -5,12 +5,23 @@ import {
   useCallback,
   useContext,
   useEffect,
-  useRef,
+  useState,
   useSyncExternalStore,
   type PointerEvent,
   type ReactNode,
 } from "react";
 import type { BlockId } from "@repo/editor-core/kernel";
+import {
+  FirstDraftBlockDragAndDropProvider,
+  useFirstDraftActiveDragGroup,
+  type FirstDraftBlockDragAndDropBridge,
+} from "../block-drag-and-drop/lifecycle-bridge.tsx";
+import type { FirstDraftTableDragStore } from "../table-drag-and-drop/index.ts";
+import {
+  createFirstDraftBlockActionMenuStore,
+  FirstDraftBlockActionMenuProvider,
+  type FirstDraftBlockActionMenuStore,
+} from "../block-action-menu/index.ts";
 import {
   createFirstDraftBlockHoverStore,
   type FirstDraftBlockHoverStore,
@@ -33,13 +44,21 @@ const disabledFirstDraftBlockHoverStore: FirstDraftBlockHoverStore =
 export function FirstDraftBlockHoverProvider({
   children,
   enabled = true,
+  blockDragAndDrop,
+  tableDragStore,
+  blockActionMenuStore,
 }: {
   readonly children: ReactNode;
   readonly enabled?: boolean;
+  readonly blockDragAndDrop?: FirstDraftBlockDragAndDropBridge;
+  readonly tableDragStore?: FirstDraftTableDragStore;
+  readonly blockActionMenuStore?: FirstDraftBlockActionMenuStore;
 }) {
-  const storeRef = useRef<FirstDraftBlockHoverStore | null>(null);
-  storeRef.current ??= createFirstDraftBlockHoverStore();
-  const ownedStore = storeRef.current;
+  const [ownedStore] = useState(createFirstDraftBlockHoverStore);
+  const [ownedBlockActionMenuStore] = useState(
+    createFirstDraftBlockActionMenuStore,
+  );
+  const actionMenuStore = blockActionMenuStore ?? ownedBlockActionMenuStore;
   const store = enabled ? ownedStore : disabledFirstDraftBlockHoverStore;
   const clear = useCallback(
     () => ownedStore.setHoveredBlockId(null),
@@ -64,7 +83,10 @@ export function FirstDraftBlockHoverProvider({
         return;
       }
       const blockId = shell.dataset.editorBlockId as BlockId | undefined;
-      ownedStore.setHoveredBlockId(blockId?.length ? blockId : null);
+      const delegatedOwner = resolveDomHoverDelegate(target, shell);
+      ownedStore.setHoveredBlockId(
+        delegatedOwner ?? (blockId?.length ? blockId : null),
+      );
     },
     [clear, enabled, ownedStore],
   );
@@ -82,15 +104,60 @@ export function FirstDraftBlockHoverProvider({
   }, [clear]);
 
   return (
-    <FirstDraftBlockHoverStoreContext.Provider value={store}>
-      <div
-        className="first-draft-block-hover-boundary"
-        onPointerMove={handlePointerMove}
-        onPointerLeave={handlePointerLeave}
+    <FirstDraftBlockActionMenuProvider store={actionMenuStore}>
+      <FirstDraftBlockDragAndDropProvider
+        bridge={blockDragAndDrop}
+        tableDragStore={tableDragStore}
       >
-        {children}
-      </div>
-    </FirstDraftBlockHoverStoreContext.Provider>
+        <FirstDraftBlockHoverStoreContext.Provider value={store}>
+          <FirstDraftBlockHoverBoundary
+            onPointerMove={handlePointerMove}
+            onPointerLeave={handlePointerLeave}
+          >
+            {children}
+          </FirstDraftBlockHoverBoundary>
+        </FirstDraftBlockHoverStoreContext.Provider>
+      </FirstDraftBlockDragAndDropProvider>
+    </FirstDraftBlockActionMenuProvider>
+  );
+}
+
+function resolveDomHoverDelegate(
+  target: Element,
+  targetShell: HTMLElement,
+): BlockId | null {
+  const boundary = target.closest<HTMLElement>(
+    "[data-first-draft-hover-primary-owner]",
+  );
+  if (!boundary) return null;
+  const primaryShell = [...boundary.children].find(
+    (child): child is HTMLElement =>
+      child instanceof HTMLElement && child.matches(FIRST_DRAFT_BLOCK_SHELL_SELECTOR),
+  );
+  if (primaryShell !== targetShell) return null;
+  const owner = boundary.dataset.firstDraftHoverPrimaryOwner;
+  return owner?.length ? (owner as BlockId) : null;
+}
+
+function FirstDraftBlockHoverBoundary({
+  children,
+  onPointerMove,
+  onPointerLeave,
+}: {
+  readonly children: ReactNode;
+  readonly onPointerMove: (event: PointerEvent<HTMLDivElement>) => void;
+  readonly onPointerLeave: () => void;
+}) {
+  const activeDragGroup = useFirstDraftActiveDragGroup();
+  return (
+    <div
+      className="first-draft-block-hover-boundary"
+      data-first-draft-active-drag-group={activeDragGroup ?? undefined}
+      onPointerMove={onPointerMove}
+      onPointerLeave={onPointerLeave}
+    >
+      {children}
+    </div>
   );
 }
 

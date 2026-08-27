@@ -8,16 +8,10 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import type { BlockRendererProps } from "../api/block-renderer.ts";
 import { EditorDocument } from "../runtime/document/editor-document-component.tsx";
-import {
-  initializeTestEditableEditor as initializeEditableEditor,
-  initializeTestReadEditor as initializeReadEditor,
-} from "./test-editor-initializers.ts";
+import { initializeTestEditableEditor as initializeEditableEditor } from "./test-editor-initializers.ts";
 import type { EditableEditorDefinition } from "../runtime/definition/contracts.ts";
 import { createTestEditorSnapshot } from "./editor-snapshot-fixtures.ts";
-import {
-  testEditableEditorDefinition,
-  testReadEditorDefinition,
-} from "./test-editor-definition.ts";
+import { testEditableEditorDefinition } from "./test-editor-definition.ts";
 
 const firstId = "phase-one-selection-first" as BlockId;
 const secondId = "phase-one-selection-second" as BlockId;
@@ -32,11 +26,11 @@ if (!registeredInternalSubsystem) {
 const internalSubsystem = registeredInternalSubsystem;
 
 describe("editor-owned standalone selection publication", () => {
-  it("makes a read-only block pointer-selectable and publishes exactly once", () => {
+  it("makes an atomic block pointer-selectable and publishes exactly once", () => {
     const onStandaloneSettlement = vi.fn();
-    const editor = initializeReadEditor({
-      definition: testReadEditorDefinition,
-      snapshot: createTestEditorSnapshot([{ id: firstId, type: "divider" }]),
+    const editor = initializeEditableEditor({
+      definition: testEditableEditorDefinition,
+      snapshot: createTestEditorSnapshot([{ id: firstId, type: "atomicBlock" }]),
     });
     editor.selectionController.subscribeStandaloneSettlements(
       onStandaloneSettlement,
@@ -66,8 +60,8 @@ describe("editor-owned standalone selection publication", () => {
     const editor = initializeEditableEditor({
       definition: testEditableEditorDefinition,
       snapshot: createTestEditorSnapshot([
-        { id: firstId, type: "divider" },
-        { id: secondId, type: "divider" },
+        { id: firstId, type: "atomicBlock" },
+        { id: secondId, type: "atomicBlock" },
       ]),
       onChange,
     });
@@ -100,8 +94,8 @@ describe("editor-owned standalone selection publication", () => {
     const editor = initializeEditableEditor({
       definition: testEditableEditorDefinition,
       snapshot: createTestEditorSnapshot([
-        { id: firstId, type: "divider" },
-        { id: secondId, type: "divider" },
+        { id: firstId, type: "atomicBlock" },
+        { id: secondId, type: "atomicBlock" },
       ]),
       onChange,
     });
@@ -134,7 +128,7 @@ describe("editor-owned standalone selection publication", () => {
     const editor = initializeEditableEditor({
       definition: testEditableEditorDefinition,
       snapshot: createTestEditorSnapshot([
-        { id: firstId, type: "paragraph", text: "abc" },
+        { id: firstId, type: "textBlock", text: "abc" },
       ]),
       onChange,
     });
@@ -189,7 +183,7 @@ describe("editor-owned standalone selection publication", () => {
     const onStandaloneSettlement = vi.fn();
     const editor = initializeEditableEditor({
       definition: internalSelectionDefinition,
-      snapshot: createTestEditorSnapshot([{ id: firstId, type: "divider" }]),
+      snapshot: createTestEditorSnapshot([{ id: firstId, type: "atomicBlock" }]),
       onChange,
     });
     editor.selectionController.subscribeStandaloneSettlements(
@@ -224,7 +218,7 @@ describe("editor-owned standalone selection publication", () => {
     const onStandaloneSettlement = vi.fn();
     const editor = initializeEditableEditor({
       definition: internalSelectionDefinition,
-      snapshot: createTestEditorSnapshot([{ id: firstId, type: "divider" }]),
+      snapshot: createTestEditorSnapshot([{ id: firstId, type: "atomicBlock" }]),
       onChange,
     });
     editor.selectionController.subscribeStandaloneSettlements(
@@ -259,7 +253,7 @@ describe("editor-owned standalone selection publication", () => {
     const onStandaloneSettlement = vi.fn();
     const editor = initializeEditableEditor({
       definition: internalSelectionDefinition,
-      snapshot: createTestEditorSnapshot([{ id: firstId, type: "divider" }]),
+      snapshot: createTestEditorSnapshot([{ id: firstId, type: "atomicBlock" }]),
       onChange,
     });
     editor.selectionController.subscribeStandaloneSettlements(
@@ -337,17 +331,15 @@ const internalSelectionDefinition: EditableEditorDefinition = {
   ...testEditableEditorDefinition,
   blocks: {
     ...testEditableEditorDefinition.blocks,
-    divider: {
-      ...testEditableEditorDefinition.blocks.divider!,
+    atomicBlock: {
+      ...testEditableEditorDefinition.blocks.atomicBlock!,
       renderer: InternalSelectionRenderer,
     },
   },
 };
 
 function settleBlockRange(
-  editor:
-    | ReturnType<typeof initializeEditableEditor>
-    | ReturnType<typeof initializeReadEditor>,
+  editor: ReturnType<typeof initializeEditableEditor>,
   anchorBlockId: BlockId,
   focusBlockId: BlockId,
   cause: "pointer" | "keyboard",

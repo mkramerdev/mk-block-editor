@@ -1,14 +1,18 @@
 "use client";
 
 import {
-  Children,
   useCallback,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   useSyncExternalStore,
   type CSSProperties,
+  type PointerEventHandler,
+  type ReactNode,
+  type RefObject,
 } from "react";
+import { Ellipsis } from "lucide-react";
 import { richTextDocumentContentSize } from "@repo/editor-core/content/rich-text";
 import type { BlockId } from "@repo/editor-core/kernel";
 import { EditableTextBlockPrimitive } from "@repo/editor-web/editable-block-renderer";
@@ -16,11 +20,21 @@ import {
   editorSelectionBoundsDataAttributes,
   readEditorBlockSelectionTarget,
   selectionPaintSegmentDataAttributes,
-  textOffsetFromPoint,
+  useEditorTextGestureBoundary,
+} from "@repo/editor-web/block-renderer";
+import type {
+  EditorTextGestureBoundary,
+  EditorTextGesturePointer,
+  EditorTransferredPointerGesture,
 } from "@repo/editor-web/block-renderer";
 import type { EditableEditor } from "@repo/editor-web/editor";
 import type { AdditionalSelectionRecord } from "@repo/editor-web/editor";
 import type { FirstDraftBlockRendererProps } from "../../first-draft-editor-contracts.ts";
+import {
+  isFirstDraftBlockDropAnchorEligible,
+  useFirstDraftBlockDropTargetRef,
+} from "../../block-drag-and-drop/index.ts";
+import { FIRST_DRAFT_TABLE_GRID_BOUNDS_TARGET } from "../../block-drag-and-drop/document-drag-visual-bounds.ts";
 import {
   FIRST_DRAFT_BLOCK_CONTROL_OFFSETS,
   FirstDraftBlockChrome,
@@ -32,28 +46,155 @@ import {
   encodeTableRange,
   rangeSelectionPaintSegments,
   readTableRangeSelection,
+  readTableRangeSelectionPayload,
   resolveTableRange,
+  selectionPaintSegmentsForIds,
   TABLE_INTERNAL_SELECTION_SUBSYSTEM_ID,
   tableInternalSelectionSubsystem,
+  createTableSelectionStore,
   TableSelectionProvider,
   useTableSelectionState,
   type RemoteTableSelectionSegment,
   type TableCellPoint,
   type TableRange,
+  type TableSelectionStore,
 } from "./selection.ts";
 import {
   resolveFirstDraftTableColumnIds,
-  TABLE_COLUMN_WIDTHS_FIELD,
+  resolveFirstDraftTablePresentationColumnWidths,
+  type FirstDraftTableColumnIdResolution,
 } from "./model.ts";
 import {
-  appendFirstDraftTableColumn,
-  appendFirstDraftTableRow,
+  insertFirstDraftTableColumn,
+  insertFirstDraftTableRow,
+  readFirstDraftTableMutationStructure,
+  resolveFirstDraftTableColumnTargetIndex,
   resizeFirstDraftTableColumn,
 } from "./mutations.ts";
+import {
+  createFirstDraftTableGeometryRegistry,
+  FirstDraftTableGeometryProvider,
+  useFirstDraftTableActionControlLayouts,
+  useFirstDraftTableGeometryElementRef,
+  useFirstDraftTableRowGeometryRef,
+  type TableActionControlLayout,
+} from "./action-control-geometry.tsx";
+import {
+  materializeFirstDraftTableActionRange,
+  resolveFirstDraftTableActionTarget,
+  tableRangeSelectionsEqual,
+} from "./action-target.ts";
+import {
+  useFirstDraftTableActionMenuSnapshot,
+  useFirstDraftTableActionMenuStore,
+  type FirstDraftTableActionTarget,
+} from "../../table-action-menu/index.ts";
+import type { TableRangeSelection } from "./selection.ts";
+import {
+  FirstDraftTableColumnCarrierLane,
+  captureFirstDraftTableColumnDragPreview,
+  captureFirstDraftTableRowDragPreview,
+  readFirstDraftTableDragStructure,
+  createFirstDraftTablePresentationStore,
+  FirstDraftTablePresentationProvider,
+  FirstDraftTableRowCarrierLane,
+  createFirstDraftTableColumnContainerId,
+  createFirstDraftTableColumnDragItems,
+  createFirstDraftTableRowContainerId,
+  useFirstDraftProjectedTableColumnItems,
+  useFirstDraftProjectedTableRowIds,
+  useFirstDraftTableDragSnapshot,
+  useFirstDraftTableDragStore,
+  useFirstDraftTablePresentation,
+  type FirstDraftTablePresentation,
+  type FirstDraftTablePresentationStore,
+  type TableColumnDragItem,
+} from "../../table-drag-and-drop/index.ts";
+import { TableGridPresentation } from "../presentations.tsx";
 
 type Props = FirstDraftBlockRendererProps;
 
+interface HoveredTablePoint {
+  readonly rowId: BlockId;
+  readonly rowIndex: number;
+  readonly columnId: string;
+  readonly columnIndex: number;
+}
+
+interface TableActionControlTarget {
+  readonly target: FirstDraftTableActionTarget;
+  readonly targetIndex: number;
+}
+
 const MIN_WIDTH = 176;
+
+interface TableRuntimeBindings {
+  objectRef(element: HTMLDivElement | null): void;
+  scrollRef(element: HTMLDivElement | null): void;
+  gridRef(element: HTMLDivElement | null): void;
+  keyDown(event: React.KeyboardEvent<HTMLDivElement>): void;
+  objectPointerMove(event: React.PointerEvent<HTMLDivElement>): void;
+  pointerDown(event: React.PointerEvent<HTMLDivElement>): void;
+  pointerMove(event: React.PointerEvent<HTMLDivElement>): void;
+  pointerUp(event: React.PointerEvent<HTMLDivElement>): void;
+  click(event: React.MouseEvent<HTMLDivElement>): void;
+  pointerCancel(event: React.PointerEvent<HTMLDivElement>): void;
+  paste(event: React.ClipboardEvent<HTMLDivElement>): void;
+  pointerOver(event: React.PointerEvent<HTMLDivElement>): void;
+  pointerOut(event: React.PointerEvent<HTMLDivElement>): void;
+}
+
+interface TableControlSnapshot {
+  readonly resizeControls: ReactNode;
+  readonly appendColumnControl: ReactNode;
+  readonly appendRowControl: ReactNode;
+  readonly actionControls: ReactNode;
+}
+
+interface TableControlStore {
+  readonly getSnapshot: () => TableControlSnapshot;
+  readonly subscribe: (listener: () => void) => () => void;
+  readonly publish: (snapshot: TableControlSnapshot) => void;
+}
+
+const emptyTableControlSnapshot: TableControlSnapshot = {
+  resizeControls: null,
+  appendColumnControl: null,
+  appendRowControl: null,
+  actionControls: null,
+};
+
+function createTableControlStore(): TableControlStore {
+  let snapshot = emptyTableControlSnapshot;
+  const listeners = new Set<() => void>();
+  return {
+    getSnapshot: () => snapshot,
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    publish(next) {
+      snapshot = next;
+      listeners.forEach((listener) => listener());
+    },
+  };
+}
+
+const emptyRuntimeBindings: TableRuntimeBindings = {
+  objectRef: () => undefined,
+  scrollRef: () => undefined,
+  gridRef: () => undefined,
+  keyDown: () => undefined,
+  objectPointerMove: () => undefined,
+  pointerDown: () => undefined,
+  pointerMove: () => undefined,
+  pointerUp: () => undefined,
+  click: () => undefined,
+  pointerCancel: () => undefined,
+  paste: () => undefined,
+  pointerOver: () => undefined,
+  pointerOut: () => undefined,
+};
 
 export function TableRenderer({
   block,
@@ -61,18 +202,367 @@ export function TableRenderer({
   children,
   selectionController,
 }: Props) {
-  const setHoveredBlockId = useSetHoveredFirstDraftBlockId();
+  const afterTargetRef = useTableAfterTargetRef(block.id);
+  const hasAfterTarget = isFirstDraftBlockDropAnchorEligible(editor, {
+    kind: "after-block",
+    blockId: block.id,
+  });
   const rows = editor.getChildBlockIds(block.id);
   const columnCount = rows[0] ? editor.getChildBlockIds(rows[0]).length : 0;
-  const columnIds = resolveFirstDraftTableColumnIds(
+  const initialColumnResolution = resolveFirstDraftTableColumnIds(
     block.metadata,
     columnCount,
-  ).ids;
-  const widths = readColumnWidths(block.metadata, columnIds);
+  );
+  const initialColumnItems = createFirstDraftTableColumnDragItems(
+    initialColumnResolution.kind,
+    initialColumnResolution.ids,
+  );
+  const initialWidths = readColumnWidths(block.metadata, initialColumnResolution);
+  const initialTracks = initialColumnResolution.ids
+    .map((columnId) => `${initialWidths[columnId] ?? MIN_WIDTH}px`)
+    .join(" ");
+  const initialStyle = {
+    "--first-draft-table-tracks": initialTracks,
+    "--first-draft-table-grid-content-width": `${initialColumnResolution.ids.reduce(
+      (total, columnId) => total + (initialWidths[columnId] ?? MIN_WIDTH),
+      0,
+    )}px`,
+  } as CSSProperties;
+  const geometryRegistry = useMemo(
+    () => createFirstDraftTableGeometryRegistry(),
+    [],
+  );
+  const objectGeometryRef = useFirstDraftTableGeometryElementRef(
+    geometryRegistry,
+    "object",
+  );
+  const scrollGeometryRef = useFirstDraftTableGeometryElementRef(
+    geometryRegistry,
+    "scroll",
+  );
+  const gridGeometryRef = useFirstDraftTableGeometryElementRef(
+    geometryRegistry,
+    "grid",
+  );
+  const [presentationStore] = useState(() =>
+    createFirstDraftTablePresentationStore({
+      tableId: block.id,
+      rows: rows.map((rowId) => ({
+        rowId,
+        cellIds: editor.getChildBlockIds(rowId),
+      })),
+      columns: initialColumnItems,
+      dragPlaceholder: null,
+    }),
+  );
+  const [selectionStore] = useState(createTableSelectionStore);
+  const [controlStore] = useState(createTableControlStore);
+  const bindingsRef = useRef<TableRuntimeBindings>(emptyRuntimeBindings);
+  const objectRef = useRef<HTMLDivElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  const setObjectRef = useCallback((element: HTMLDivElement | null) => {
+    objectRef.current = element;
+    objectGeometryRef(element);
+    bindingsRef.current.objectRef(element);
+  }, [objectGeometryRef]);
+  const setScrollRef = useCallback((element: HTMLDivElement | null) => {
+    scrollRef.current = element;
+    scrollGeometryRef(element);
+    bindingsRef.current.scrollRef(element);
+  }, [scrollGeometryRef]);
+  const setGridRef = useCallback((element: HTMLDivElement | null) => {
+    gridRef.current = element;
+    gridGeometryRef(element);
+    bindingsRef.current.gridRef(element);
+  }, [gridGeometryRef]);
+
+  return (
+    <>
+      <div
+        ref={setObjectRef}
+        className="table-block__object"
+        data-editor-object-root="true"
+        style={initialStyle}
+        onKeyDownCapture={(event) => bindingsRef.current.keyDown(event)}
+        onPointerMove={(event) => bindingsRef.current.objectPointerMove(event)}
+      >
+        <div ref={setScrollRef} className="table-block__scroll">
+          <div className="table-block__chrome-anchor">
+            <FirstDraftBlockChrome
+              blockId={block.id}
+              editor={editor}
+              blockStartOffset={FIRST_DRAFT_BLOCK_CONTROL_OFFSETS.table}
+            />
+          </div>
+          <div className="table-block__frame">
+            <div className="table-block__grid-stack">
+              <TableGridPresentation
+                rootRef={setGridRef}
+                rowCount={rows.length}
+                columnCount={columnCount}
+                rootAttributes={{
+                  tabIndex: -1,
+                  "data-table-grid": "",
+                  "data-editor-block-internal-selection-host": "true",
+                  ...editorSelectionBoundsDataAttributes(block.id, {
+                    target: FIRST_DRAFT_TABLE_GRID_BOUNDS_TARGET,
+                  }),
+                  onPointerDownCapture: (event) =>
+                    bindingsRef.current.pointerDown(event),
+                  onPointerMoveCapture: (event) =>
+                    bindingsRef.current.pointerMove(event),
+                  onPointerUpCapture: (event) =>
+                    bindingsRef.current.pointerUp(event),
+                  onClickCapture: (event) =>
+                    bindingsRef.current.click(event),
+                  onPointerCancelCapture: (event) =>
+                    bindingsRef.current.pointerCancel(event),
+                  onPasteCapture: (event) =>
+                    bindingsRef.current.paste(event),
+                  onPointerOver: (event) =>
+                    bindingsRef.current.pointerOver(event),
+                  onPointerOut: (event) =>
+                    bindingsRef.current.pointerOut(event),
+                }}
+              >
+                <FirstDraftTableGeometryProvider registry={geometryRegistry}>
+                  <FirstDraftTablePresentationProvider
+                    store={presentationStore}
+                  >
+                    <TableSelectionProvider store={selectionStore}>
+                      {children}
+                    </TableSelectionProvider>
+                  </FirstDraftTablePresentationProvider>
+                </FirstDraftTableGeometryProvider>
+              </TableGridPresentation>
+              <TableControlProjection
+                store={controlStore}
+                control="resizeControls"
+              />
+            </div>
+            <TableControlProjection
+              store={controlStore}
+              control="appendColumnControl"
+            />
+            <TableControlProjection
+              store={controlStore}
+              control="appendRowControl"
+            />
+            <div
+              className="table-block__append-corner"
+              aria-hidden="true"
+              data-editor-ui="true"
+              data-editor-object-ui="true"
+            />
+          </div>
+        </div>
+        <TableControlProjection
+          store={controlStore}
+          control="actionControls"
+        />
+        <TableRuntimeController
+          block={block}
+          editor={editor}
+          selectionController={selectionController}
+          geometryRegistry={geometryRegistry}
+          presentationStore={presentationStore}
+          selectionStore={selectionStore}
+          controlStore={controlStore}
+          bindingsRef={bindingsRef}
+          objectRef={objectRef}
+          gridRef={gridRef}
+        />
+      </div>
+      {hasAfterTarget ? (
+        <div
+          ref={afterTargetRef}
+          className="first-draft-block-drop-target"
+          data-first-draft-block-drop-target-active="false"
+          data-editor-ui="true"
+          aria-hidden="true"
+        />
+      ) : null}
+    </>
+  );
+}
+
+function TableRuntimeController({
+  block,
+  editor,
+  selectionController,
+  geometryRegistry,
+  presentationStore,
+  selectionStore,
+  controlStore,
+  bindingsRef,
+  objectRef,
+  gridRef,
+}: Omit<Props, "children"> & {
+  readonly geometryRegistry: ReturnType<
+    typeof createFirstDraftTableGeometryRegistry
+  >;
+  readonly presentationStore: FirstDraftTablePresentationStore;
+  readonly selectionStore: TableSelectionStore;
+  readonly controlStore: TableControlStore;
+  readonly bindingsRef: RefObject<TableRuntimeBindings>;
+  readonly objectRef: RefObject<HTMLDivElement | null>;
+  readonly gridRef: RefObject<HTMLDivElement | null>;
+}) {
+  const setHoveredBlockId = useSetHoveredFirstDraftBlockId();
+  const structureCache = useRef<{
+    readonly key: string;
+    readonly rows: readonly BlockId[];
+  }>({ key: "", rows: [] });
+  const structure = useSyncExternalStore(
+    useCallback(
+      (listener: () => void) => {
+        const currentRows = editor.getChildBlockIds(block.id);
+        const releases = [
+          editor.subscribeChildBlockIds(block.id, listener),
+          ...currentRows.map((rowId) =>
+            editor.subscribeChildBlockIds(rowId, listener),
+          ),
+        ];
+        return () => releases.forEach((release) => release());
+      },
+      [block.id, editor],
+    ),
+    useCallback(
+      () => {
+        const rows = editor.getChildBlockIds(block.id);
+        const key = JSON.stringify(
+          rows.map((rowId) => [rowId, ...editor.getChildBlockIds(rowId)]),
+        );
+        if (structureCache.current.key === key) return structureCache.current;
+        structureCache.current = { key, rows };
+        return structureCache.current;
+      },
+      [block.id, editor],
+    ),
+    useCallback(() => structureCache.current, []),
+  );
+  const rows = structure.rows;
+  const tableDragStore = useFirstDraftTableDragStore();
+  const tableDragSnapshot = useFirstDraftTableDragSnapshot();
+  const suppressedRowActionClicks = useRef(new Set<BlockId>());
+  useLayoutEffect(() => {
+    const session = tableDragSnapshot.session;
+    if (session?.axis === "row" && session.status === "dragging") {
+      suppressedRowActionClicks.current.add(session.sourceRowId);
+    }
+  }, [tableDragSnapshot]);
+  const projectedRows = useFirstDraftProjectedTableRowIds(block.id, rows);
+  const rowContainerId = createFirstDraftTableRowContainerId(block.id);
+  const columnContainerId = createFirstDraftTableColumnContainerId(block.id);
+  const columnCount = rows[0] ? editor.getChildBlockIds(rows[0]).length : 0;
+  const columnResolution = useMemo(
+    () => resolveFirstDraftTableColumnIds(block.metadata, columnCount),
+    [block.metadata, columnCount],
+  );
+  const canonicalColumnIds = columnResolution.ids;
+  const columnIdentityKey = JSON.stringify([
+    columnResolution.kind,
+    ...canonicalColumnIds,
+  ]);
+  const canonicalColumnItems = useMemo(
+    () =>
+      createFirstDraftTableColumnDragItems(
+        columnResolution.kind,
+        canonicalColumnIds,
+      ),
+    // The serialized identity key intentionally keeps opaque tokens stable
+    // across metadata-only table updates such as column resizing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [columnIdentityKey],
+  );
+  const projectedColumnItems = useFirstDraftProjectedTableColumnItems(
+    block.id,
+    canonicalColumnItems,
+  );
+  const columnIds = useMemo(
+    () => projectedColumnItems.map((item) => item.presentationId),
+    [projectedColumnItems],
+  );
+  const columnDragIds = useMemo(
+    () => projectedColumnItems.map((item) => item.dragId),
+    [projectedColumnItems],
+  );
+  useLayoutEffect(
+    () =>
+      tableDragStore.registerTable({
+        tableId: block.id,
+        rowContainerId,
+        columnContainerId,
+        columnItems: canonicalColumnItems,
+        getHorizontalScrollElement: () => geometryRegistry.getElements().scroll,
+        readCanonicalStructure: () =>
+          readFirstDraftTableDragStructure(editor, block.id),
+        captureRowDragPreview: (rowId, structure) =>
+          captureFirstDraftTableRowDragPreview(
+            editor,
+            block.id,
+            rowId,
+            structure,
+          ),
+        captureColumnDragPreview: (item, structure) => {
+          const elements = geometryRegistry.getElements();
+          const grid = elements.grid;
+          if (!grid?.isConnected) return null;
+          const rowHeights: number[] = [];
+          for (const rowId of structure.rowIds) {
+            const row = elements.rows.get(rowId);
+            if (
+              !row?.isConnected ||
+              row.ownerDocument !== grid.ownerDocument ||
+              row.dataset.tableRowId !== rowId ||
+              !grid.contains(row)
+            ) {
+              return null;
+            }
+            const height = row.getBoundingClientRect().height;
+            if (!Number.isFinite(height) || height <= 0) return null;
+            rowHeights.push(height);
+          }
+          return captureFirstDraftTableColumnDragPreview(
+            editor,
+            block.id,
+            item,
+            structure,
+            rowHeights,
+          );
+        },
+        subscribeCanonicalStructure(listener) {
+          const currentRows = editor.getChildBlockIds(block.id);
+          const releases = [
+            editor.subscribeBlock(block.id, listener),
+            editor.subscribeChildBlockIds(block.id, listener),
+            ...currentRows.map((rowId) =>
+              editor.subscribeChildBlockIds(rowId, listener),
+            ),
+          ];
+          return () => releases.forEach((release) => release());
+        },
+      }),
+    [
+      block.id,
+      canonicalColumnItems,
+      columnContainerId,
+      editor,
+      geometryRegistry,
+      rowContainerId,
+      tableDragStore,
+    ],
+  );
+  const widths = useMemo(
+    () => readColumnWidths(block.metadata, columnResolution),
+    [block, columnResolution],
+  );
   const [preview, setPreview] = useState<Record<string, number> | null>(null);
   const [drag, setDrag] = useState<{
     readonly pointerId: number;
     readonly id: string;
+    readonly target: TableColumnDragItem["target"];
     readonly startX: number;
     readonly startWidth: number;
   } | null>(null);
@@ -82,11 +572,54 @@ export function TableRenderer({
     selectionController.getCanonicalSnapshot,
     selectionController.getCanonicalSnapshot,
   );
+  const presentationRows = useMemo(() => {
+    // Column projection changes the store adapter result for every row.
+    void projectedColumnItems;
+    return projectedRows.map((rowId) => ({
+      rowId,
+      cellIds: tableDragStore.childOrderProjection.getProjectedChildIds(
+        rowId,
+        editor.getChildBlockIds(rowId),
+      ),
+    }));
+  }, [editor, projectedColumnItems, projectedRows, tableDragStore]);
+  const dragPlaceholder = useMemo(() => {
+    const session = tableDragSnapshot.session;
+    if (!session?.valid || session.tableId !== block.id) return null;
+    return session.axis === "row"
+      ? ({ axis: "row", rowId: session.sourceRowId } as const)
+      : ({ axis: "column", dragId: session.sourceDragId } as const);
+  }, [block.id, tableDragSnapshot.session]);
+  const presentation = useMemo<FirstDraftTablePresentation>(
+    () => ({
+      tableId: block.id,
+      rows: presentationRows,
+      columns: projectedColumnItems,
+      dragPlaceholder,
+    }),
+    [block.id, dragPlaceholder, presentationRows, projectedColumnItems],
+  );
+  const presentationGraph = useMemo(
+    () => ({
+      getParentId: (blockId: BlockId) => editor.getParentId(blockId),
+      getChildBlockIds: (parentId: BlockId) => {
+        if (parentId === block.id) {
+          return presentation.rows.map((row) => row.rowId);
+        }
+        return (
+          presentation.rows.find((row) => row.rowId === parentId)?.cellIds ??
+          editor.getChildBlockIds(parentId)
+        );
+      },
+    }),
+    [block.id, editor, presentation],
+  );
   const range = useMemo(
     () => readTableRangeSelection(canonical, block.id, editor),
     [block.id, canonical, editor],
   );
-  const gridRef = useRef<HTMLDivElement | null>(null);
+  const tableActionMenuStore = useFirstDraftTableActionMenuStore();
+  const tableActionMenu = useFirstDraftTableActionMenuSnapshot();
   const gesture = useRef<{
     readonly pointerId: number;
     readonly anchor: TableCellPoint;
@@ -96,13 +629,14 @@ export function TableRenderer({
     promoted: boolean;
   } | null>(null);
   const suppressClick = useRef(false);
-  const paintSegments = useMemo(
-    () => rangeSelectionPaintSegments(editor, block.id, range),
+  const selectedIds = useMemo(
+    () => new Set(rangeSelectionPaintSegments(editor, block.id, range).keys()),
     [block.id, editor, range],
   );
-  const selectedIds = useMemo(
-    () => new Set(paintSegments.keys()),
-    [paintSegments],
+  const paintSegments = useMemo(
+    () =>
+      selectionPaintSegmentsForIds(presentationGraph, block.id, selectedIds),
+    [block.id, presentationGraph, selectedIds],
   );
   const remoteRecords = useSyncExternalStore(
     useCallback(
@@ -117,22 +651,32 @@ export function TableRenderer({
     () => emptyAdditionalSelectionRecords,
   );
   const remoteSegments = useMemo(
-    () => remoteTableSelectionSegments(remoteRecords, editor, block.id),
-    [block.id, editor, remoteRecords],
+    () =>
+      remoteTableSelectionSegments(
+        remoteRecords,
+        editor,
+        presentationGraph,
+        block.id,
+      ),
+    [block.id, editor, presentationGraph, remoteRecords],
   );
   const renderedWidths = preview ?? widths;
-  const normalizedWidths = columnIds.map(
-    (id) => renderedWidths[id] ?? MIN_WIDTH,
+  const normalizedWidths = useMemo(
+    () => columnIds.map((id) => renderedWidths[id] ?? MIN_WIDTH),
+    [columnIds, renderedWidths],
+  );
+  const canonicalColumnWidths = useMemo(
+    () =>
+      canonicalColumnItems.map(
+        (item) => renderedWidths[item.presentationId] ?? MIN_WIDTH,
+      ),
+    [canonicalColumnItems, renderedWidths],
   );
   const tracks = normalizedWidths.map((width) => `${width}px`).join(" ");
   const gridContentWidth = `${normalizedWidths.reduce(
     (total, width) => total + width,
     0,
   )}px`;
-  const style = {
-    "--first-draft-table-tracks": tracks,
-    "--first-draft-table-grid-content-width": gridContentWidth,
-  } as CSSProperties;
   const pointFromTarget = useCallback(
     (target: EventTarget | null): TableCellPoint | null => {
       const cell =
@@ -145,6 +689,26 @@ export function TableRenderer({
       const cellId = cell.dataset.tableCellId as BlockId | undefined;
       return cellId && Number.isInteger(row) && Number.isInteger(column)
         ? { row, column, cellId }
+        : null;
+    },
+    [block.id],
+  );
+  const hoverPointFromTarget = useCallback(
+    (target: EventTarget | null): HoveredTablePoint | null => {
+      const cell =
+        target instanceof Element
+          ? target.closest<HTMLElement>("[data-table-cell-id]")
+          : null;
+      if (!cell || cell.dataset.tableId !== block.id) return null;
+      const rowIndex = Number(cell.dataset.tableRowIndex);
+      const columnIndex = Number(cell.dataset.tableColumnIndex);
+      const rowId = cell.dataset.tableRowId as BlockId | undefined;
+      const columnId = cell.dataset.tableColumnId;
+      return rowId &&
+        columnId &&
+        Number.isInteger(rowIndex) &&
+        Number.isInteger(columnIndex)
+        ? { rowId, rowIndex, columnId, columnIndex }
         : null;
     },
     [block.id],
@@ -189,18 +753,16 @@ export function TableRenderer({
     },
     [clearRange, editor, selectionController],
   );
-  const commitRange = useCallback(
-    (next: TableRange, cause: "pointer" | "keyboard") => {
+  const commitRangeSelection = useCallback(
+    (
+      selection: TableRangeSelection,
+      cause: "pointer" | "keyboard" | "canonical-rebase",
+    ) => {
       const target = readEditorBlockSelectionTarget(editor, block.id);
       if (!target) return false;
       const result = selectionController.commitBlockSelection(
         target,
-        createTableRangeCoverage(
-          block.id,
-          block.type,
-          encodeTableRange(next),
-          editor,
-        ),
+        createTableRangeCoverage(block.id, block.type, selection, editor),
         tableInternalSelectionSubsystem,
         standaloneSelectionContext(cause),
         editor.getSelectionGraphRevision(),
@@ -209,6 +771,217 @@ export function TableRenderer({
     },
     [block.id, block.type, editor, selectionController],
   );
+  const commitRange = useCallback(
+    (next: TableRange, cause: "pointer" | "keyboard") =>
+      commitRangeSelection(encodeTableRange(next), cause),
+    [commitRangeSelection],
+  );
+  const activateTableActionMenu = useCallback(
+    (
+      target: FirstDraftTableActionTarget,
+      triggerElement: HTMLButtonElement,
+      cause: "pointer" | "keyboard",
+    ) => {
+      if (!triggerElement.isConnected) return false;
+      let ownedTableRange: TableRangeSelection;
+      try {
+        ownedTableRange = materializeFirstDraftTableActionRange(
+          target,
+          resolveFirstDraftTableActionTarget(editor, block.id, target),
+        );
+      } catch {
+        return false;
+      }
+      if (!commitRangeSelection(ownedTableRange, cause)) return false;
+      return tableActionMenuStore.open({
+        kind: "open",
+        tableId: block.id,
+        target,
+        triggerElement,
+        ownedTableRange,
+      });
+    },
+    [block.id, commitRangeSelection, editor, tableActionMenuStore],
+  );
+
+  useLayoutEffect(() => {
+    const session =
+      tableActionMenu.kind === "open" && tableActionMenu.tableId === block.id
+        ? tableActionMenu
+        : null;
+    if (!session) return;
+    const current = readTableRangeSelectionPayload(canonical, block.id);
+    if (
+      !current ||
+      !tableRangeSelectionsEqual(current, session.ownedTableRange)
+    ) {
+      tableActionMenuStore.close();
+      return;
+    }
+    let desired: TableRangeSelection;
+    try {
+      desired = materializeFirstDraftTableActionRange(
+        session.target,
+        resolveFirstDraftTableActionTarget(
+          editor,
+          session.tableId,
+          session.target,
+        ),
+      );
+    } catch {
+      tableActionMenuStore.close();
+      return;
+    }
+    if (tableRangeSelectionsEqual(desired, session.ownedTableRange)) return;
+    if (!commitRangeSelection(desired, "canonical-rebase")) {
+      tableActionMenuStore.close();
+      return;
+    }
+    tableActionMenuStore.updateOwnedTableRange(session, desired);
+  });
+  const textGestureBoundary = useMemo<EditorTextGestureBoundary>(
+    () => ({
+      begin(start) {
+        const anchor = pointFromTarget(start.target);
+        const gestureGrid = gridRef.current;
+        if (!anchor || anchor.cellId !== start.blockId || !gestureGrid)
+          return null;
+        const pointFor = (pointer: EditorTextGesturePointer) =>
+          pointFromTarget(pointer.target);
+        let transferHead: TableCellPoint | null = null;
+        return {
+          shouldTransfer(pointer) {
+            const head = pointFor(pointer);
+            if (!head || head.cellId === anchor.cellId) return false;
+            transferHead = head;
+            return true;
+          },
+          transfer(pointer): EditorTransferredPointerGesture | null {
+            const grid = gestureGrid;
+            const head = transferHead ?? pointFor(pointer);
+            if (!head || head.cellId === anchor.cellId) return null;
+            try {
+              grid.setPointerCapture(pointer.pointerId);
+            } catch {
+              return null;
+            }
+            // Generic transient paint is already gone, while the text-pointer
+            // presentation claim still suppresses native paint. Remove its
+            // input projection and install the table range before that claim
+            // is released by the generic coordinator.
+            editor.blurEditor();
+            grid.ownerDocument.getSelection()?.removeAllRanges();
+            if (!commitRange({ anchor, head }, "pointer")) {
+              if (grid.hasPointerCapture(pointer.pointerId))
+                grid.releasePointerCapture(pointer.pointerId);
+              return null;
+            }
+            grid.focus({ preventScroll: true });
+            let active = true;
+            const release = () => {
+              if (!active) return;
+              active = false;
+              try {
+                if (grid.hasPointerCapture(pointer.pointerId))
+                  grid.releasePointerCapture(pointer.pointerId);
+              } catch {
+                // Capture may already be gone after browser cancellation.
+              }
+            };
+            const update = (next: EditorTextGesturePointer) => {
+              if (!active) return;
+              const nextHead = pointFor(next);
+              if (nextHead) commitRange({ anchor, head: nextHead }, "pointer");
+            };
+            return {
+              pointerId: pointer.pointerId,
+              move: update,
+              finish(next) {
+                update(next);
+                release();
+                grid.focus({ preventScroll: true });
+              },
+              cancel() {
+                release();
+                grid.focus({ preventScroll: true });
+              },
+            };
+          },
+          cancel() {
+            // The renderer holds no pointer resource until transfer succeeds.
+          },
+        };
+      },
+    }),
+    [commitRange, editor, gridRef, pointFromTarget],
+  );
+  const registerTextGestureBoundary =
+    useEditorTextGestureBoundary(textGestureBoundary);
+  const registerMenuGrid = useCallback(
+    (element: HTMLElement) =>
+      tableActionMenuStore.registerTableGrid(block.id, element),
+    [block.id, tableActionMenuStore],
+  );
+  const menuGridCleanup = useRef<(() => void) | null>(null);
+  const registerGridRef = useCallback(
+    (grid: HTMLDivElement | null) => {
+      menuGridCleanup.current?.();
+      menuGridCleanup.current = null;
+      registerTextGestureBoundary(grid);
+      if (grid) menuGridCleanup.current = registerMenuGrid(grid);
+    },
+    [registerMenuGrid, registerTextGestureBoundary],
+  );
+  const actionControlLayouts = useFirstDraftTableActionControlLayouts(
+    geometryRegistry,
+    editor.geometry,
+    columnDragIds,
+    normalizedWidths,
+  );
+  const actionControlLayoutKey = useMemo(
+    () =>
+      JSON.stringify({
+        rowLane: actionControlLayouts.rowLane,
+        columnLane: actionControlLayouts.columnLane,
+        rows: [...actionControlLayouts.rows].map(([id, layout]) => [
+          id,
+          layout.width,
+          layout.height,
+        ]),
+        columns: [...actionControlLayouts.columns].map(([id, layout]) => [
+          id,
+          layout.width,
+          layout.height,
+        ]),
+        rowTriggers: [...actionControlLayouts.rowTriggers].map(
+          ([id, layout]) => [
+            id,
+            layout.left,
+            layout.top,
+            layout.width,
+            layout.height,
+          ],
+        ),
+        columnTriggers: [...actionControlLayouts.columnTriggers].map(
+          ([id, layout]) => [
+            id,
+            layout.left,
+            layout.top,
+            layout.width,
+            layout.height,
+          ],
+        ),
+      }),
+    [actionControlLayouts],
+  );
+  useLayoutEffect(() => {
+    tableDragStore.notifyTableGeometryChanged(block.id, actionControlLayoutKey);
+  }, [actionControlLayoutKey, block.id, tableDragStore]);
+  const [hoveredPoint, setHoveredPoint] = useState<HoveredTablePoint | null>(
+    null,
+  );
+  const [hoveredControl, setHoveredControl] =
+    useState<TableActionControlTarget | null>(null);
   const tableValue = useMemo(
     () => ({
       selectedIds,
@@ -242,12 +1015,16 @@ export function TableRenderer({
       editor.setTransactionSelection({ kind: "preserve" });
     });
   };
-  const cells = rows.flatMap((rowId, row) =>
-    editor
-      .getChildBlockIds(rowId)
-      .map((cellId, column) => ({ row, column, cellId })),
+  const cells = presentation.rows.flatMap((currentRow, row) =>
+    currentRow.cellIds.map((cellId, column) => ({ row, column, cellId })),
   );
   const handleKey = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (
+      event.target instanceof Element &&
+      event.target.closest('[data-editor-ui="true"]')
+    ) {
+      return;
+    }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
       event.preventDefault();
       if (event.shiftKey) editor.redo();
@@ -275,7 +1052,7 @@ export function TableRenderer({
       if (next) {
         event.preventDefault();
         event.stopPropagation();
-        const cellId = editor.getChildBlockIds(rows[next.row]!)[next.column];
+        const cellId = presentation.rows[next.row]?.cellIds[next.column];
         if (cellId)
           commitRange(
             { anchor: range.anchor, head: { ...next, cellId } },
@@ -296,7 +1073,7 @@ export function TableRenderer({
           "keyboard",
         );
       } else if (!event.shiftKey) {
-        appendFirstDraftTableRow(editor, block.id, rows.length, columnCount);
+        insertFirstDraftTableRow(editor, block.id, rows.length);
       }
       return;
     }
@@ -304,7 +1081,7 @@ export function TableRenderer({
     const next = moveByArrow(point, event.key, rows.length, columnCount);
     if (!next) return;
     if (!shouldLeaveTextCell(event.target, event.key)) return;
-    const cellId = editor.getChildBlockIds(rows[next.row]!)[next.column];
+    const cellId = presentation.rows[next.row]?.cellIds[next.column];
     if (!cellId) return;
     event.preventDefault();
     event.stopPropagation();
@@ -323,7 +1100,7 @@ export function TableRenderer({
     );
   };
   const beginResize = (
-    id: string,
+    item: TableColumnDragItem,
     event: React.PointerEvent<HTMLDivElement>,
   ) => {
     if (event.button !== 0) return;
@@ -333,9 +1110,10 @@ export function TableRenderer({
     setPreview(widths);
     setDrag({
       pointerId: event.pointerId,
-      id,
+      id: item.presentationId,
+      target: item.target,
       startX: event.clientX,
-      startWidth: widths[id] ?? MIN_WIDTH,
+      startWidth: widths[item.presentationId] ?? MIN_WIDTH,
     });
   };
   const moveResize = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -350,10 +1128,17 @@ export function TableRenderer({
   };
   const finishResize = (commit: boolean) => {
     if (commit && preview && drag) {
-      const columnIndex = columnIds.indexOf(drag.id);
       const width = preview[drag.id];
-      if (columnIndex >= 0 && width !== undefined) {
-        resizeFirstDraftTableColumn(editor, block.id, columnIndex, width);
+      if (width !== undefined) {
+        try {
+          const columnIndex = resolveFirstDraftTableColumnTargetIndex(
+            readFirstDraftTableMutationStructure(editor, block.id),
+            drag.target,
+          );
+          resizeFirstDraftTableColumn(editor, block.id, columnIndex, width);
+        } catch {
+          // A stale resize identity fails closed without committing a width.
+        }
       }
     }
     setPreview(null);
@@ -364,14 +1149,8 @@ export function TableRenderer({
     suppressClick.current = false;
     const point = pointFromTarget(event.target);
     if (!point) return;
-    const cell =
-      event.target instanceof Element
-        ? event.target.closest<HTMLElement>("[data-table-cell-id]")
-        : null;
-    const textRoot = cell?.querySelector<HTMLElement>(
-      '[data-editor-text-root="true"]',
-    );
-    if (textRoot && !textRoot.isContentEditable) event.preventDefault();
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest('[data-editor-text-root="true"]')) return;
     gesture.current = {
       pointerId: event.pointerId,
       anchor: point,
@@ -480,162 +1259,470 @@ export function TableRenderer({
       return;
     }
     const point = pointFromTarget(event.target);
-    const cell =
-      event.target instanceof Element
-        ? event.target.closest<HTMLElement>("[data-table-cell-id]")
-        : null;
-    if (!point || !cell) return;
-    const native = cell.ownerDocument.getSelection();
-    const textRoot =
-      cell.querySelector<HTMLElement>('[data-editor-text-root="true"]') ?? cell;
+    if (!point) return;
     if (
-      native &&
-      !native.isCollapsed &&
-      native.anchorNode &&
-      native.focusNode &&
-      textRoot.contains(native.anchorNode) &&
-      textRoot.contains(native.focusNode)
+      event.target instanceof Element &&
+      event.target.closest('[data-editor-text-root="true"]')
     )
       return;
     if (event.shiftKey && range) {
       event.preventDefault();
       commitRange({ anchor: range.anchor, head: point }, "pointer");
+    }
+  };
+  const handleCellPointerOver = (event: React.PointerEvent<HTMLDivElement>) => {
+    const point = hoverPointFromTarget(event.target);
+    if (!point) return;
+    const previous = hoverPointFromTarget(event.relatedTarget);
+    if (
+      previous?.rowId === point.rowId &&
+      previous.columnId === point.columnId
+    ) {
       return;
     }
-    const length = cellLength(editor, point.cellId);
-    const offset =
-      textOffsetFromPoint(textRoot, event.clientX, event.clientY, length) ??
-      length;
-    event.preventDefault();
-    focusCell(point, offset, "pointer");
+    setHoveredPoint(point);
+  };
+  const handleCellPointerOut = (event: React.PointerEvent<HTMLDivElement>) => {
+    const point = hoverPointFromTarget(event.target);
+    if (!point) return;
+    const next = hoverPointFromTarget(event.relatedTarget);
+    if (next) {
+      setHoveredPoint(next);
+      return;
+    }
+    setHoveredPoint(null);
   };
 
-  return (
+  const openSession =
+    tableActionMenu.kind === "open" && tableActionMenu.tableId === block.id
+      ? tableActionMenu
+      : null;
+  const visibleRowControlTargets = new Map<BlockId, TableActionControlTarget>();
+  projectedRows.forEach((rowId, rowIndex) => {
+    if (!actionControlLayouts.rowTriggers.has(rowId)) return;
+    visibleRowControlTargets.set(rowId, {
+      target: { kind: "row", rowId },
+      targetIndex: rowIndex,
+    });
+  });
+  const visibleColumnControlTargets = new Map<
+    string,
+    TableActionControlTarget
+  >();
+  projectedColumnItems.forEach((item, columnIndex) => {
+    if (!actionControlLayouts.columnTriggers.has(item.dragId)) return;
+    visibleColumnControlTargets.set(item.dragId, {
+      target: {
+        kind: "column",
+        identity: item.target,
+      },
+      targetIndex: columnIndex,
+    });
+  });
+
+  const enterControl = (target: TableActionControlTarget) => {
+    setHoveredControl(target);
+    setHoveredPoint(null);
+  };
+  const leaveControl = (
+    target: TableActionControlTarget,
+    relatedTarget: EventTarget | null,
+  ) => {
+    const nextPoint = hoverPointFromTarget(relatedTarget);
+    if (nextPoint) setHoveredPoint(nextPoint);
+    setHoveredControl((current) =>
+      sameTableActionControlTarget(current, target) ? null : current,
+    );
+  };
+
+  const resizeControls = (
     <div
-      className="table-block__object"
-      data-editor-object-root="true"
-      style={style}
-      onKeyDownCapture={handleKey}
-      onPointerMove={(event) => {
-        setHoveredBlockId(block.id);
-        event.stopPropagation();
-      }}
+      className="table-block__resize-overlay"
+      style={{ gridTemplateColumns: tracks }}
+      data-editor-ui="true"
+      data-editor-object-ui="true"
     >
-      <div className="table-block__chrome-anchor">
-        <FirstDraftBlockChrome
-          blockId={block.id}
-          editor={editor}
-          blockStartOffset={FIRST_DRAFT_BLOCK_CONTROL_OFFSETS.table}
-        />
-      </div>
-      <div className="table-block__scroll">
-        <div className="table-block__frame">
-          <div className="table-block__grid-stack">
-            <div
-              ref={gridRef}
-              className="table-block__grid"
-              role="grid"
-              aria-label="Table"
-              aria-rowcount={rows.length}
-              aria-colcount={columnCount}
-              tabIndex={-1}
-              data-table-grid
-              data-table-selection-kind={range ? "local" : undefined}
-              data-table-selection-type={range ? "cell-range" : undefined}
-              data-table-selection-anchor-cell-id={range?.anchor.cellId}
-              data-table-selection-head-cell-id={range?.head.cellId}
-              data-editor-block-internal-selection-host="true"
-              {...editorSelectionBoundsDataAttributes(block.id, {
-                target: "table-grid",
-              })}
-              onPointerDownCapture={pointerDown}
-              onPointerMoveCapture={pointerMove}
-              onPointerUpCapture={finishPointer}
-              onClickCapture={completedClick}
-              onPointerCancelCapture={cancelPointer}
-              onPasteCapture={pasteRange}
-            >
-              <TableSelectionProvider value={tableValue}>
-                {children}
-              </TableSelectionProvider>
-            </div>
-            <div
-              className="table-block__resize-overlay"
-              style={{ gridTemplateColumns: tracks }}
-              data-editor-ui="true"
-              data-editor-object-ui="true"
-            >
-              {columnIds.map((id, index) => (
-                <div
-                  key={id}
-                  className="table-block__resize-handle"
-                  role="separator"
-                  aria-orientation="vertical"
-                  aria-label={`Resize column ${index + 1}`}
-                  aria-valuemin={MIN_WIDTH}
-                  aria-valuenow={renderedWidths[id] ?? MIN_WIDTH}
-                  tabIndex={0}
-                  data-table-resize-column={id}
-                  data-table-resize-active={drag?.id === id || undefined}
-                  onPointerDown={(event) => beginResize(id, event)}
-                  onPointerMove={moveResize}
-                  onPointerUp={(event) => {
-                    if (event.currentTarget.hasPointerCapture(event.pointerId))
-                      event.currentTarget.releasePointerCapture(
-                        event.pointerId,
-                      );
-                    finishResize(true);
-                  }}
-                  onPointerCancel={() => finishResize(false)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Escape") finishResize(false);
-                    if (
-                      event.key === "ArrowLeft" ||
-                      event.key === "ArrowRight"
-                    ) {
-                      event.preventDefault();
-                      const next = resizeColumn(
-                        widths,
-                        columnIds,
-                        id,
-                        (widths[id] ?? MIN_WIDTH) +
-                          (event.key === "ArrowLeft" ? -8 : 8),
-                      );
-                      if (next) {
-                        resizeFirstDraftTableColumn(
-                          editor,
-                          block.id,
-                          index,
-                          next[id]!,
-                        );
-                      }
-                    }
-                  }}
-                />
-              ))}
-            </div>
-          </div>
-          <TableAppendButton
-            axis="column"
-            label="Add table column"
-            onAppend={() => appendFirstDraftTableColumn(editor, block.id)}
-          />
-          <TableAppendButton
-            axis="row"
-            label="Add table row"
-            onAppend={() =>
-              appendFirstDraftTableRow(
+      {projectedColumnItems.map((item, index) => (
+        <div
+          key={item.dragId}
+          className="table-block__resize-handle"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label={`Resize column ${index + 1}`}
+          aria-valuemin={MIN_WIDTH}
+          aria-valuenow={renderedWidths[item.presentationId] ?? MIN_WIDTH}
+          tabIndex={0}
+          data-table-resize-column={item.presentationId}
+          data-table-resize-active={drag?.id === item.presentationId || undefined}
+          onPointerDown={(event) => beginResize(item, event)}
+          onPointerMove={moveResize}
+          onPointerUp={(event) => {
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+              event.currentTarget.releasePointerCapture(event.pointerId);
+            }
+            finishResize(true);
+          }}
+          onPointerCancel={() => finishResize(false)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") finishResize(false);
+            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+            event.preventDefault();
+            const next = resizeColumn(
+              widths,
+              columnIds,
+              item.presentationId,
+              (widths[item.presentationId] ?? MIN_WIDTH) +
+                (event.key === "ArrowLeft" ? -8 : 8),
+            );
+            if (!next) return;
+            try {
+              const canonicalIndex = resolveFirstDraftTableColumnTargetIndex(
+                readFirstDraftTableMutationStructure(editor, block.id),
+                item.target,
+              );
+              resizeFirstDraftTableColumn(
                 editor,
                 block.id,
-                rows.length,
-                columnCount,
-              )
+                canonicalIndex,
+                next[item.presentationId]!,
+              );
+            } catch {
+              // Keyboard resize rejects stale logical identities.
             }
-          />
-        </div>
-      </div>
+          }}
+        />
+      ))}
     </div>
   );
+  const appendColumnControl = (
+    <div
+      className="table-block__append-zone table-block__append-zone--column"
+      data-editor-ui="true"
+      data-editor-object-ui="true"
+    >
+      <TableAppendButton
+        axis="column"
+        label="Add table column"
+        onAppend={() =>
+          insertFirstDraftTableColumn(editor, block.id, columnCount)
+        }
+      />
+    </div>
+  );
+  const appendRowControl = (
+    <div
+      className="table-block__append-zone table-block__append-zone--row"
+      data-editor-ui="true"
+      data-editor-object-ui="true"
+    >
+      <TableAppendButton
+        axis="row"
+        label="Add table row"
+        onAppend={() => insertFirstDraftTableRow(editor, block.id, rows.length)}
+      />
+    </div>
+  );
+  const actionControls = (
+    <div
+      className="table-block__action-control-overlay"
+      data-editor-ui="true"
+      data-editor-object-ui="true"
+    >
+        {/* The package exclusively projects these canonical carrier nodes.
+            Visible table rows continue to follow the application projection. */}
+        <FirstDraftTableRowCarrierLane
+          tableId={block.id}
+          rowContainerId={rowContainerId}
+          rowIds={rows}
+          laneLayout={actionControlLayouts.rowLane}
+          rowLayouts={actionControlLayouts.rows}
+          store={tableDragStore}
+        />
+        {projectedRows.map((rowId) => {
+          const target = visibleRowControlTargets.get(rowId);
+          const triggerLayout = actionControlLayouts.rowTriggers.get(rowId);
+          return target && triggerLayout ? (
+            <TableActionTrigger
+              key={`row-trigger:${rowId}`}
+              target={target}
+              layout={triggerLayout}
+              menuId={tableActionMenuStore.menuId}
+              open={
+                openSession !== null &&
+                sameTableActionTarget(openSession.target, target.target)
+              }
+              cellHovered={hoveredPoint?.rowId === rowId}
+              controlHovered={sameTableActionControlTarget(
+                hoveredControl,
+                target,
+              )}
+              onSortablePointerDown={(event) => {
+                tableDragStore.activateRowCarrier(rowId, event);
+              }}
+              onOpen={(triggerElement, cause) =>
+                activateTableActionMenu(target.target, triggerElement, cause)
+              }
+              consumeSuppressedPointerClick={() =>
+                suppressedRowActionClicks.current.delete(rowId)
+              }
+              onPointerEnter={enterControl}
+              onPointerLeave={leaveControl}
+            />
+          ) : null;
+        })}
+        <FirstDraftTableColumnCarrierLane
+          tableId={block.id}
+          columnContainerId={columnContainerId}
+          items={canonicalColumnItems}
+          laneLayout={actionControlLayouts.columnLane}
+          columnLayouts={actionControlLayouts.columns}
+          columnWidths={canonicalColumnWidths}
+          store={tableDragStore}
+        />
+        {projectedColumnItems.map((item) => {
+          const target = visibleColumnControlTargets.get(item.dragId);
+          const triggerLayout = actionControlLayouts.columnTriggers.get(
+            item.dragId,
+          );
+          return target && triggerLayout ? (
+            <TableActionTrigger
+              key={`column-trigger:${item.dragId}`}
+              target={target}
+              layout={triggerLayout}
+              menuId={tableActionMenuStore.menuId}
+              open={
+                openSession !== null &&
+                sameTableActionTarget(openSession.target, target.target)
+              }
+              cellHovered={hoveredPoint?.columnId === item.presentationId}
+              controlHovered={sameTableActionControlTarget(
+                hoveredControl,
+                target,
+              )}
+              onSortablePointerDown={(event) => {
+                tableDragStore.activateColumnCarrier(item.dragId, event);
+              }}
+              onOpen={(triggerElement, cause) =>
+                activateTableActionMenu(target.target, triggerElement, cause)
+              }
+              consumeSuppressedPointerClick={() => false}
+              onPointerEnter={enterControl}
+              onPointerLeave={leaveControl}
+            />
+          ) : null;
+        })}
+    </div>
+  );
+
+  useLayoutEffect(() => {
+    registerGridRef(gridRef.current);
+    return () => registerGridRef(null);
+  }, [gridRef, registerGridRef]);
+
+  useLayoutEffect(() => {
+    bindingsRef.current = {
+      objectRef: () => undefined,
+      scrollRef: () => undefined,
+      gridRef: registerGridRef,
+      keyDown: handleKey,
+      objectPointerMove(event) {
+        setHoveredBlockId(block.id);
+        event.stopPropagation();
+      },
+      pointerDown,
+      pointerMove,
+      pointerUp: finishPointer,
+      click: completedClick,
+      pointerCancel: cancelPointer,
+      paste: pasteRange,
+      pointerOver: handleCellPointerOver,
+      pointerOut: handleCellPointerOut,
+    };
+    presentationStore.publish(presentation);
+    selectionStore.publish(tableValue);
+    controlStore.publish({
+      resizeControls,
+      appendColumnControl,
+      appendRowControl,
+      actionControls,
+    });
+    const object = objectRef.current;
+    if (object) {
+      object.style.setProperty("--first-draft-table-tracks", tracks);
+      object.style.setProperty(
+        "--first-draft-table-grid-content-width",
+        gridContentWidth,
+      );
+    }
+    const grid = gridRef.current;
+    if (!grid) return;
+    grid.setAttribute("aria-rowcount", String(rows.length));
+    grid.setAttribute("aria-colcount", String(columnCount));
+    setOptionalDataAttribute(grid, "tableSelectionKind", range ? "local" : null);
+    setOptionalDataAttribute(
+      grid,
+      "tableSelectionType",
+      range ? "cell-range" : null,
+    );
+    setOptionalDataAttribute(
+      grid,
+      "tableSelectionAnchorCellId",
+      range?.anchor.cellId ?? null,
+    );
+    setOptionalDataAttribute(
+      grid,
+      "tableSelectionHeadCellId",
+      range?.head.cellId ?? null,
+    );
+  });
+
+  return null;
+}
+
+function TableControlProjection({
+  store,
+  control,
+}: {
+  readonly store: TableControlStore;
+  readonly control: keyof TableControlSnapshot;
+}) {
+  const snapshot = useSyncExternalStore(
+    store.subscribe,
+    store.getSnapshot,
+    store.getSnapshot,
+  );
+  return snapshot[control];
+}
+
+function setOptionalDataAttribute(
+  element: HTMLElement,
+  key: keyof DOMStringMap,
+  value: string | null,
+): void {
+  if (value === null) delete element.dataset[key];
+  else element.dataset[key] = value;
+}
+
+function TableActionTrigger({
+  target,
+  layout,
+  menuId,
+  open,
+  cellHovered,
+  controlHovered,
+  onOpen,
+  onPointerEnter,
+  onPointerLeave,
+  onSortablePointerDown,
+  consumeSuppressedPointerClick,
+}: {
+  readonly target: TableActionControlTarget;
+  readonly layout: TableActionControlLayout;
+  readonly menuId: string;
+  readonly open: boolean;
+  readonly cellHovered: boolean;
+  readonly controlHovered: boolean;
+  readonly onOpen: (
+    triggerElement: HTMLButtonElement,
+    cause: "pointer" | "keyboard",
+  ) => void;
+  readonly onPointerEnter: (target: TableActionControlTarget) => void;
+  readonly onPointerLeave: (
+    target: TableActionControlTarget,
+    relatedTarget: EventTarget | null,
+  ) => void;
+  readonly onSortablePointerDown: PointerEventHandler<HTMLButtonElement>;
+  readonly consumeSuppressedPointerClick: () => boolean;
+}) {
+  const suppressKeyboardClick = useRef(false);
+  const axis = target.target.kind;
+  const label = `${axis === "row" ? "Row" : "Column"} ${target.targetIndex + 1} actions`;
+  return (
+    <div
+      className={`table-block__action-control-zone table-block__action-control-zone--${axis}`}
+      style={layout}
+      data-table-action-control-axis={axis}
+      data-cell-hovered={cellHovered || undefined}
+      data-control-hovered={controlHovered || undefined}
+      data-open={open || undefined}
+      onPointerEnter={() => onPointerEnter(target)}
+      onPointerLeave={(event) => onPointerLeave(target, event.relatedTarget)}
+    >
+      <span className="table-block__action-control-bridge" aria-hidden="true" />
+      <button
+        type="button"
+        className="table-block__action-trigger"
+        aria-label={label}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
+        data-editor-ui="true"
+        data-editor-object-ui="true"
+        data-editor-preserve-selection="true"
+        data-table-action-trigger-axis={axis}
+        data-open={open || undefined}
+        onPointerDown={(event) => {
+          onSortablePointerDown(event);
+          event.stopPropagation();
+        }}
+        onMouseDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.stopPropagation();
+          if (event.detail !== 0 && consumeSuppressedPointerClick()) return;
+          if (suppressKeyboardClick.current && event.detail === 0) {
+            suppressKeyboardClick.current = false;
+            return;
+          }
+          onOpen(event.currentTarget, "pointer");
+        }}
+        onKeyDown={(event) => {
+          if (
+            event.key !== "Enter" &&
+            event.key !== " " &&
+            event.key !== "ArrowDown"
+          ) {
+            return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          suppressKeyboardClick.current = true;
+          queueMicrotask(() => {
+            suppressKeyboardClick.current = false;
+          });
+          onOpen(event.currentTarget, "keyboard");
+        }}
+      >
+        <Ellipsis aria-hidden="true" />
+      </button>
+    </div>
+  );
+}
+
+function sameTableActionControlTarget(
+  left: TableActionControlTarget | null,
+  right: TableActionControlTarget,
+): boolean {
+  return left !== null && sameTableActionTarget(left.target, right.target);
+}
+
+function sameTableActionTarget(
+  left: FirstDraftTableActionTarget,
+  right: FirstDraftTableActionTarget,
+): boolean {
+  if (left.kind !== right.kind) return false;
+  if (left.kind === "row" && right.kind === "row") {
+    return left.rowId === right.rowId;
+  }
+  if (left.kind !== "column" || right.kind !== "column") return false;
+  if (left.identity.kind !== right.identity.kind) return false;
+  return left.identity.kind === "canonical" &&
+    right.identity.kind === "canonical"
+    ? left.identity.columnId === right.identity.columnId
+    : left.identity.kind === "synthetic-presentation" &&
+        right.identity.kind === "synthetic-presentation" &&
+        left.identity.presentationId === right.identity.presentationId &&
+        left.identity.indexAtOpen === right.identity.indexAtOpen &&
+        left.identity.columnCountAtOpen === right.identity.columnCountAtOpen;
 }
 
 function TableAppendButton({
@@ -671,6 +1758,46 @@ function TableAppendButton({
 }
 
 export function TableRowRenderer({ block, editor, children }: Props) {
+  const rowRef = useRef<HTMLDivElement | null>(null);
+  const rowGeometryRef = useFirstDraftTableRowGeometryRef(block.id);
+  const setRowRef = useCallback(
+    (element: HTMLDivElement | null) => {
+      rowRef.current = element;
+      rowGeometryRef(element);
+    },
+    [rowGeometryRef],
+  );
+  const table = block.parentId ? editor.getBlock(block.parentId) : null;
+  const count = editor.getChildBlockIds(block.id).length;
+  const resolution = resolveFirstDraftTableColumnIds(table?.metadata, count);
+  const widths = readColumnWidths(table?.metadata, resolution);
+  const initialTracks = resolution.ids
+    .map((columnId) => `${widths[columnId] ?? MIN_WIDTH}px`)
+    .join(" ");
+  return (
+    <div
+      ref={setRowRef}
+      className="table-block__row"
+      role="row"
+      data-table-row-id={block.id}
+      style={{
+        gridTemplateColumns: `var(--first-draft-table-tracks, ${initialTracks})`,
+      }}
+    >
+      {children}
+      <TableRowTrackController block={block} editor={editor} rowRef={rowRef} />
+    </div>
+  );
+}
+
+function TableRowTrackController({
+  block,
+  editor,
+  rowRef,
+}: Pick<Props, "block" | "editor"> & {
+  readonly rowRef: RefObject<HTMLDivElement | null>;
+}) {
+  const presentation = useFirstDraftTablePresentation();
   const tableId = block.parentId;
   const table = useSyncExternalStore(
     (listener) =>
@@ -679,30 +1806,36 @@ export function TableRowRenderer({ block, editor, children }: Props) {
     () => (tableId ? editor.getBlock(tableId) : null),
   );
   const count = editor.getChildBlockIds(block.id).length;
-  const ids = resolveFirstDraftTableColumnIds(table?.metadata, count).ids;
-  const widths = readColumnWidths(table?.metadata, ids);
-  const fallbackTracks = ids
-    .map((id) => `${widths[id] ?? MIN_WIDTH}px`)
+  const resolution = resolveFirstDraftTableColumnIds(table?.metadata, count);
+  const widths = readColumnWidths(table?.metadata, resolution);
+  const fallbackTracks = presentation.columns
+    .map((item) => `${widths[item.presentationId] ?? MIN_WIDTH}px`)
     .join(" ");
-  const elements = Children.toArray(children);
-  return (
-    <div
-      className="table-block__row"
-      role="row"
-      style={{
-        gridTemplateColumns: `var(--first-draft-table-tracks, ${fallbackTracks})`,
-      }}
-    >
-      {elements}
-    </div>
-  );
+  useLayoutEffect(() => {
+    rowRef.current?.style.setProperty(
+      "grid-template-columns",
+      `var(--first-draft-table-tracks, ${fallbackTracks})`,
+    );
+  }, [fallbackTracks, rowRef]);
+  return null;
 }
 
 export function TableCellRenderer({ block, editor }: Props) {
+  const presentation = useFirstDraftTablePresentation();
   const rowId = block.parentId!;
   const tableId = editor.getParentId(rowId)!;
-  const row = editor.getChildBlockIds(tableId).indexOf(rowId);
-  const column = editor.getChildBlockIds(rowId).indexOf(block.id);
+  const row = presentation.rows.findIndex(
+    (candidate) => candidate.rowId === rowId,
+  );
+  const presentedRow = presentation.rows[row];
+  const column = presentedRow?.cellIds.indexOf(block.id) ?? -1;
+  const columnItem = presentation.columns[column];
+  const columnId = columnItem?.presentationId;
+  const isDragPlaceholder =
+    presentation.dragPlaceholder?.axis === "row"
+      ? presentation.dragPlaceholder.rowId === rowId
+      : presentation.dragPlaceholder?.axis === "column" &&
+        columnItem?.dragId === presentation.dragPlaceholder.dragId;
   const selection = useTableSelectionState();
   const selected = selection.selectedIds.has(block.id);
   const paintSegment = selection.paintSegments.get(block.id);
@@ -715,8 +1848,13 @@ export function TableCellRenderer({ block, editor }: Props) {
       aria-selected={selected || undefined}
       data-table-id={tableId}
       data-table-cell-id={block.id}
+      data-table-row-id={rowId}
+      data-table-column-id={columnId}
       data-table-row-index={row}
       data-table-column-index={column}
+      data-table-drag-placeholder={
+        isDragPlaceholder ? presentation.dragPlaceholder?.axis : undefined
+      }
     >
       <EditableTextBlockPrimitive block={block} editor={editor} />
       {selected && paintSegment ? (
@@ -749,13 +1887,18 @@ export function TableCellRenderer({ block, editor }: Props) {
   );
 }
 
+function useTableAfterTargetRef(blockId: BlockId) {
+  return useFirstDraftBlockDropTargetRef({ kind: "after-block", blockId });
+}
+
 const emptyAdditionalSelectionRecords = Object.freeze(
   [],
 ) as readonly AdditionalSelectionRecord[];
 
 function remoteTableSelectionSegments(
   records: readonly AdditionalSelectionRecord[],
-  graph: EditableEditor,
+  canonicalGraph: Pick<EditableEditor, "getParentId" | "getChildBlockIds">,
+  presentationGraph: Pick<EditableEditor, "getParentId" | "getChildBlockIds">,
   tableId: BlockId,
 ): ReadonlyMap<BlockId, readonly RemoteTableSelectionSegment[]> {
   const result = new Map<BlockId, RemoteTableSelectionSegment[]>();
@@ -773,13 +1916,16 @@ function remoteTableSelectionSegments(
     }
     const selection = decodeTableRangeSelection(resolved.payload);
     const range = selection
-      ? resolveTableRange(graph, tableId, selection)
+      ? resolveTableRange(canonicalGraph, tableId, selection)
       : null;
     if (!range) continue;
-    for (const [cellId, edges] of rangeSelectionPaintSegments(
-      graph,
+    const selectedIds = new Set(
+      rangeSelectionPaintSegments(canonicalGraph, tableId, range).keys(),
+    );
+    for (const [cellId, edges] of selectionPaintSegmentsForIds(
+      presentationGraph,
       tableId,
-      range,
+      selectedIds,
     )) {
       const segments = result.get(cellId) ?? [];
       segments.push({ subject: record.subject, color: record.color, edges });
@@ -856,7 +2002,9 @@ function cellLength(
   return cell ? editor.readBlockPlainText(cellId, cell.type).length : 0;
 }
 
-function standaloneSelectionContext(cause: "pointer" | "keyboard") {
+function standaloneSelectionContext(
+  cause: "pointer" | "keyboard" | "canonical-rebase",
+) {
   return { publication: { kind: "standalone-local" as const }, cause };
 }
 
@@ -881,15 +2029,14 @@ function replaceCellText(
 
 function readColumnWidths(
   metadata: Readonly<Record<string, unknown>> | undefined,
-  ids: readonly string[],
+  resolution: FirstDraftTableColumnIdResolution,
 ): Record<string, number> {
-  const value = metadata?.[TABLE_COLUMN_WIDTHS_FIELD];
-  const record =
-    value && typeof value === "object" && !Array.isArray(value)
-      ? (value as Record<string, unknown>)
-      : {};
+  const record = resolveFirstDraftTablePresentationColumnWidths(
+    metadata,
+    resolution,
+  );
   return Object.fromEntries(
-    ids.map((id) => [
+    resolution.ids.map((id) => [
       id,
       typeof record[id] === "number"
         ? Math.max(MIN_WIDTH, record[id])

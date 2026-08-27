@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  blockDefinitionAcceptsParent,
   blockDefinitionAcceptsSequence,
   type BlockDefinition,
 } from "@repo/editor-core/definitions";
@@ -11,7 +12,6 @@ import type {
 } from "@repo/editor-core/document";
 import {
   duplicateCanonicalBlockSubtrees,
-  materializeCanonicalBlockCreation,
   type BlockPlacement,
 } from "@repo/editor-core/editing";
 import type { RichTextDocumentNodeJson } from "@repo/editor-core/content/rich-text";
@@ -22,6 +22,7 @@ import type {
 } from "../runtime/document/contracts.ts";
 import {
   commitCanonicalBlockCreation,
+  commitCanonicalBlockCreationAtPlacement,
   readDirectBlockIds,
   readPublicEditorGraph,
 } from "./canonical-block-insertion.ts";
@@ -59,6 +60,17 @@ export interface EditorBlockInsertion {
   readonly selection?: boolean | EditorTransactionSelectionEffect;
 }
 
+export interface EditorBlockExactInsertion {
+  readonly placement: BlockPlacement;
+  readonly blockType: BlockType;
+  readonly metadata?: JsonObject;
+  readonly defaultContentCount?: number;
+  readonly content?: RichTextDocumentNodeJson;
+  readonly plainText?: string;
+  readonly createBlockId?: () => BlockId;
+  readonly selection?: boolean | EditorTransactionSelectionEffect;
+}
+
 export type EditorBlockReplacement = EditorBlockInsertion;
 
 export interface EditorBlockDeletion {
@@ -77,21 +89,25 @@ export interface EditorBlockMove {
   readonly selection?: EditorTransactionSelectionEffect;
 }
 
-export interface EditorBlockIndentation {
+export interface EditorBlockPositionMove {
   readonly blockId: BlockId;
-  readonly offset: number;
+  /** A canonical boundary in the document before the block is removed. */
+  readonly position: BlockPlacement;
+  readonly selection?: EditorTransactionSelectionEffect;
 }
 
 export interface EditorBlockOperations {
   insertBlock(insertion: EditorBlockInsertion): EditorBlockOperationResult;
+  insertBlockAt(insertion: EditorBlockExactInsertion): EditorBlockOperationResult;
   replaceBlock(replacement: EditorBlockReplacement): EditorBlockOperationResult;
   deleteBlock(deletion: EditorBlockDeletion): EditorBlockOperationResult;
   duplicateBlock(
     duplication: EditorBlockDuplication,
   ): EditorBlockOperationResult;
   moveBlock(movement: EditorBlockMove): EditorBlockOperationResult;
-  indentBlock(indentation: EditorBlockIndentation): EditorBlockOperationResult;
-  outdentBlock(indentation: EditorBlockIndentation): EditorBlockOperationResult;
+  moveBlockToPosition(
+    movement: EditorBlockPositionMove,
+  ): EditorBlockOperationResult;
 }
 
 export type EditorWithBlockOperations = EditableEditor & EditorBlockOperations;
@@ -100,12 +116,12 @@ type BlockDefinitions = Readonly<Record<BlockType, BlockDefinition>>;
 
 const methodNames = [
   "insertBlock",
+  "insertBlockAt",
   "replaceBlock",
   "deleteBlock",
   "duplicateBlock",
   "moveBlock",
-  "indentBlock",
-  "outdentBlock",
+  "moveBlockToPosition",
 ] as const satisfies readonly (keyof EditorBlockOperations)[];
 
 const enrichedEditors = new WeakSet<EditableEditor>();
@@ -129,6 +145,8 @@ export function addEditorBlockOperations<TEditor extends EditableEditor>(
   const methods: EditorBlockOperations = {
     insertBlock: (insertion) =>
       executeCreation(editor, blockDefinitions, insertion, "after"),
+    insertBlockAt: (insertion) =>
+      executeExactCreation(editor, blockDefinitions, insertion),
     replaceBlock: (replacement) =>
       executeCreation(editor, blockDefinitions, replacement, "replace"),
     deleteBlock: (deletion) =>
@@ -137,14 +155,75 @@ export function addEditorBlockOperations<TEditor extends EditableEditor>(
       executeDuplication(editor, blockDefinitions, duplication),
     moveBlock: (movement) =>
       executeMovement(editor, blockDefinitions, movement),
-    indentBlock: (indentation) =>
-      executeIndentation(editor, blockDefinitions, indentation, "indent"),
-    outdentBlock: (indentation) =>
-      executeIndentation(editor, blockDefinitions, indentation, "outdent"),
+    moveBlockToPosition: (movement) =>
+      executePositionMovement(editor, blockDefinitions, movement),
   };
   defineBlockOperationMethods(editor, methods);
   enrichedEditors.add(editor);
   return editor;
+}
+
+function executeExactCreation(
+  editor: EditableEditor,
+  blockDefinitions: BlockDefinitions,
+  input: EditorBlockExactInsertion,
+): EditorBlockOperationResult {
+  if (
+    !input ||
+    typeof input.blockType !== "string" ||
+    !blockDefinitions[input.blockType]
+  ) {
+    return invalidInput("The requested block type is unavailable.");
+  }
+  const placement = input.placement;
+  if (
+    !placement ||
+    (placement.parentId !== null && typeof placement.parentId !== "string") ||
+    !Number.isInteger(placement.childIndex) ||
+    placement.childIndex < 0
+  ) {
+    return invalidInput("The insertion placement is invalid.");
+  }
+  if (placement.parentId !== null) {
+    const parent = editor.getBlock(placement.parentId);
+    if (!isLiveKnownBlock(blockDefinitions, parent)) {
+      return invalidInput("The insertion parent is unavailable.");
+    }
+    if (blockDefinitions[parent.type]?.kind !== "wrapper") {
+      return invalidInput("The insertion parent does not accept child blocks.");
+    }
+  }
+  const siblingCount = readDirectBlockIds(editor, placement.parentId).length;
+  if (placement.childIndex > siblingCount) {
+    return invalidInput("The insertion placement is invalid.");
+  }
+  const result = commitCanonicalBlockCreationAtPlacement({
+    editor,
+    graphRevision: editor.getDiagnostics().blockGraphVersion,
+    blockDefinitions,
+    placement,
+    blockType: input.blockType,
+    ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
+    ...(input.defaultContentCount === undefined
+      ? {}
+      : { defaultContentCount: input.defaultContentCount }),
+    ...(input.content === undefined ? {} : { content: input.content }),
+    ...(input.plainText === undefined ? {} : { plainText: input.plainText }),
+    ...(input.createBlockId === undefined
+      ? {}
+      : { createBlockId: input.createBlockId }),
+    selection:
+      input.selection === true
+        ? "created"
+        : input.selection === false || input.selection === undefined
+          ? { kind: "preserve" }
+          : input.selection,
+  });
+  return result.ok
+    ? accepted(result.transaction)
+    : result.transactionAttempted
+      ? rejectedTransaction(result.message)
+      : invalidInput(result.message);
 }
 
 function defineBlockOperationMethods<TEditor extends EditableEditor>(
@@ -179,42 +258,6 @@ function executeCreation(
     !blockDefinitions[input.blockType]
   ) {
     return invalidInput("The requested block type is unavailable.");
-  }
-  const source = editor.getBlock(input.blockId);
-  const sourceDefinition = source ? blockDefinitions[source.type] : undefined;
-  const targetDefinition = blockDefinitions[input.blockType];
-  if (source && sourceDefinition && targetDefinition) {
-    if (
-      sourceDefinition.list?.kind === "item" &&
-      targetDefinition.list?.kind === "item"
-    ) {
-      return convertCanonicalListType(
-        editor,
-        blockDefinitions,
-        source,
-        targetDefinition.list.containerType,
-        input.blockType,
-      );
-    }
-    if (
-      sourceDefinition.kind === "text" &&
-      targetDefinition.list?.kind === "item"
-    ) {
-      return wrapTextInCanonicalList(
-        editor,
-        blockDefinitions,
-        source,
-        targetDefinition.list.containerType,
-        input.blockType,
-      );
-    }
-    if (
-      sourceDefinition.list?.kind === "item" &&
-      targetDefinition.kind === "text" &&
-      input.blockType === sourceDefinition.list.primaryTextChildType
-    ) {
-      return liftPrimaryParagraphFromList(editor, blockDefinitions, source);
-    }
   }
   const result = commitCanonicalBlockCreation({
     editor,
@@ -253,18 +296,7 @@ function executeDeletion(
   if (!isLiveKnownBlock(blockDefinitions, block)) {
     return invalidInput(`Block ${input?.blockId ?? ""} is unavailable.`);
   }
-  const itemPolicy = blockDefinitions[block.type]?.list;
-  const parent = block.parentId ? editor.getBlock(block.parentId) : null;
-  const parentPolicy = parent ? blockDefinitions[parent.type]?.list : undefined;
-  const deletionRoot =
-    itemPolicy?.kind === "item" &&
-    parent &&
-    !parent.tombstone &&
-    parentPolicy?.kind === "container" &&
-    editor.getChildBlockIds(parent.id).length === 1
-      ? parent
-      : block;
-  const deletedIds = collectSubtreeIds(editor, deletionRoot.id);
+  const deletedIds = collectSubtreeIds(editor, block.id);
   const fallback = resolveDeleteFallbackSelection(
     editor,
     blockDefinitions,
@@ -272,10 +304,10 @@ function executeDeletion(
   );
   const result = editor.transaction(() => {
     editor.deleteBlocks({
-      blockIds: [deletionRoot.id],
+      blockIds: [block.id],
       includeDescendants: true,
       expectedParents: {
-        [deletionRoot.id]: deletionRoot.parentId,
+        [block.id]: block.parentId,
       },
     });
     editor.setTransactionSelection(
@@ -283,231 +315,6 @@ function executeDeletion(
         ? selectionForBlock(blockDefinitions, fallback, 0)
         : { kind: "clear" },
     );
-  });
-  return transactionResult(result);
-}
-
-function convertCanonicalListType(
-  editor: EditableEditor,
-  blockDefinitions: BlockDefinitions,
-  sourceItem: VersionedBlock,
-  targetContainerType: BlockType,
-  targetItemType: BlockType,
-): EditorBlockOperationResult {
-  if (sourceItem.parentId === null) return noChange();
-  const sourceList = editor.getBlock(sourceItem.parentId);
-  const sourcePolicy = sourceList
-    ? blockDefinitions[sourceList.type]?.list
-    : undefined;
-  const targetPolicy = blockDefinitions[targetContainerType]?.list;
-  if (
-    !sourceList ||
-    sourceList.tombstone ||
-    sourcePolicy?.kind !== "container" ||
-    targetPolicy?.kind !== "container" ||
-    targetPolicy.itemType !== targetItemType
-  ) {
-    return noChange();
-  }
-  const itemIds = editor.getChildBlockIds(sourceList.id);
-  if (
-    itemIds.some((itemId) => {
-      const item = editor.getBlock(itemId);
-      return !item || item.tombstone || item.type !== sourcePolicy.itemType;
-    })
-  ) {
-    return stalePlan("The canonical list item sequence is stale.");
-  }
-  const result = editor.transaction(() => {
-    editor.replaceBlockTypes([
-      { blockId: sourceList.id, blockType: targetContainerType },
-      ...itemIds.map((blockId) => ({
-        blockId,
-        blockType: targetItemType,
-        ...(blockDefinitions[targetItemType]?.conversion?.metadata ===
-        "target-defaults"
-          ? {
-              metadata:
-                blockDefinitions[targetItemType]?.defaultMetadata ?? null,
-            }
-          : {}),
-      })),
-    ]);
-    editor.setTransactionSelection({ kind: "preserve" });
-  });
-  return transactionResult(result);
-}
-
-function wrapTextInCanonicalList(
-  editor: EditableEditor,
-  blockDefinitions: BlockDefinitions,
-  paragraph: VersionedBlock,
-  containerType: BlockType,
-  itemType: BlockType,
-): EditorBlockOperationResult {
-  const siblings = readDirectBlockIds(editor, paragraph.parentId);
-  const paragraphIndex = siblings.indexOf(paragraph.id);
-  if (paragraphIndex < 0) return stalePlan("The paragraph boundary is stale.");
-  let creation: ReturnType<typeof materializeCanonicalBlockCreation>;
-  try {
-    creation = materializeCanonicalBlockCreation({
-      blockDefinitions,
-      type: containerType,
-      reservedBlockIds: new Set(collectCanonicalOrder(editor)),
-    });
-  } catch (error) {
-    return invalidInput(error instanceof Error ? error.message : String(error));
-  }
-  const item = creation.fragment.blocks.find(
-    (record) =>
-      record.parentId === creation.rootBlockId && record.type === itemType,
-  );
-  const placeholder = item
-    ? creation.fragment.blocks.find((record) => record.parentId === item.id)
-    : null;
-  if (!item || !placeholder)
-    return invalidInput(
-      "The canonical list minimum could not be materialized.",
-    );
-  const result = editor.transaction(() => {
-    editor.insertBlocks(
-      { parentId: paragraph.parentId, childIndex: paragraphIndex + 1 },
-      creation.fragment,
-    );
-    editor.moveBlocks({
-      blockIds: [paragraph.id],
-      destination: { parentId: item.id, childIndex: 1 },
-    });
-    editor.deleteBlocks({
-      blockIds: [placeholder.id],
-      includeDescendants: true,
-      expectedParents: { [placeholder.id]: item.id },
-    });
-    editor.setTransactionSelection({
-      kind: "text",
-      blockId: paragraph.id,
-      offset: 0,
-    });
-  });
-  return transactionResult(result);
-}
-
-function liftPrimaryParagraphFromList(
-  editor: EditableEditor,
-  blockDefinitions: BlockDefinitions,
-  sourceItem: VersionedBlock,
-): EditorBlockOperationResult {
-  if (sourceItem.parentId === null) return noChange();
-  const itemChildren = editor.getChildBlockIds(sourceItem.id);
-  if (itemChildren.length !== 1) return noChange();
-  const paragraph = editor.getBlock(itemChildren[0]!);
-  const itemPolicy = blockDefinitions[sourceItem.type]?.list;
-  const list = editor.getBlock(sourceItem.parentId);
-  const listPolicy = list ? blockDefinitions[list.type]?.list : undefined;
-  if (
-    !paragraph ||
-    paragraph.tombstone ||
-    itemPolicy?.kind !== "item" ||
-    paragraph.type !== itemPolicy.primaryTextChildType ||
-    !list ||
-    list.tombstone ||
-    listPolicy?.kind !== "container"
-  ) {
-    return stalePlan("The canonical list boundary is stale.");
-  }
-  const items = editor.getChildBlockIds(list.id);
-  const itemIndex = items.indexOf(sourceItem.id);
-  const listSiblings = readDirectBlockIds(editor, list.parentId);
-  const listIndex = listSiblings.indexOf(list.id);
-  if (itemIndex < 0 || listIndex < 0)
-    return stalePlan("The canonical list placement is stale.");
-
-  let temporaryParagraph: ReturnType<typeof materializeCanonicalBlockCreation>;
-  try {
-    temporaryParagraph = materializeCanonicalBlockCreation({
-      blockDefinitions,
-      type: paragraph.type,
-      reservedBlockIds: new Set(collectCanonicalOrder(editor)),
-    });
-  } catch (error) {
-    return invalidInput(error instanceof Error ? error.message : String(error));
-  }
-  const leading = items.slice(0, itemIndex);
-  const trailing = items.slice(itemIndex + 1);
-  let trailingList: ReturnType<
-    typeof materializeCanonicalBlockCreation
-  > | null = null;
-  let trailingPlaceholder: BlockId | null = null;
-  if (leading.length > 0 && trailing.length > 0) {
-    try {
-      trailingList = materializeCanonicalBlockCreation({
-        blockDefinitions,
-        type: list.type,
-        reservedBlockIds: new Set([
-          ...collectCanonicalOrder(editor),
-          ...temporaryParagraph.fragment.blocks.map((record) => record.id),
-        ]),
-      });
-    } catch (error) {
-      return invalidInput(
-        error instanceof Error ? error.message : String(error),
-      );
-    }
-    trailingPlaceholder =
-      trailingList.fragment.blocks.find(
-        (record) => record.parentId === trailingList!.rootBlockId,
-      )?.id ?? null;
-    if (!trailingPlaceholder)
-      return invalidInput("The trailing canonical list has no required item.");
-  }
-
-  const result = editor.transaction(() => {
-    if (trailingList && trailingPlaceholder) {
-      editor.insertBlocks(
-        { parentId: list.parentId, childIndex: listIndex + 1 },
-        trailingList.fragment,
-      );
-      editor.moveBlocks({
-        blockIds: trailing,
-        destination: { parentId: trailingList.rootBlockId, childIndex: 1 },
-      });
-      editor.deleteBlocks({
-        blockIds: [trailingPlaceholder],
-        includeDescendants: true,
-        expectedParents: {
-          [trailingPlaceholder]: trailingList.rootBlockId,
-        },
-      });
-    }
-    editor.insertBlocks(
-      { parentId: sourceItem.id, childIndex: 1 },
-      temporaryParagraph.fragment,
-    );
-    editor.moveBlocks({
-      blockIds: [paragraph.id],
-      destination: {
-        parentId: list.parentId,
-        childIndex: listIndex + (itemIndex === 0 ? 0 : 1),
-      },
-    });
-    if (items.length === 1) {
-      editor.deleteBlocks({
-        blockIds: [list.id],
-        includeDescendants: true,
-        expectedParents: { [list.id]: list.parentId },
-      });
-    } else {
-      editor.deleteBlocks({
-        blockIds: [sourceItem.id],
-        includeDescendants: true,
-        expectedParents: { [sourceItem.id]: list.id },
-      });
-    }
-    editor.setTransactionSelection({
-      kind: "text",
-      blockId: paragraph.id,
-      offset: 0,
-    });
   });
   return transactionResult(result);
 }
@@ -559,26 +366,11 @@ function executeMovement(
   if (!isLiveKnownBlock(blockDefinitions, source)) {
     return invalidInput(`Block ${input?.blockId ?? ""} is unavailable.`);
   }
-  const itemPolicy = blockDefinitions[source.type]?.list;
-  const sourceList = source.parentId ? editor.getBlock(source.parentId) : null;
-  const removeSourceList =
-    itemPolicy?.kind === "item" &&
-    sourceList &&
-    !sourceList.tombstone &&
-    input.destination.parentId !== sourceList.id &&
-    editor.getChildBlockIds(sourceList.id).length === 1;
   const result = editor.transaction(() => {
     editor.moveBlocks({
       blockIds: [source.id],
       destination: input.destination,
     });
-    if (removeSourceList) {
-      editor.deleteBlocks({
-        blockIds: [sourceList.id],
-        includeDescendants: true,
-        expectedParents: { [sourceList.id]: sourceList.parentId },
-      });
-    }
     editor.setTransactionSelection(
       input.selection ??
         selectionForExistingBlock(editor, blockDefinitions, source, 0),
@@ -587,306 +379,98 @@ function executeMovement(
   return transactionResult(result);
 }
 
-function executeIndentation(
+function executePositionMovement(
   editor: EditableEditor,
   blockDefinitions: BlockDefinitions,
-  input: EditorBlockIndentation,
-  direction: "indent" | "outdent",
+  input: EditorBlockPositionMove,
 ): EditorBlockOperationResult {
   const source = input?.blockId ? editor.getBlock(input.blockId) : null;
   if (!isLiveKnownBlock(blockDefinitions, source)) {
     return invalidInput(`Block ${input?.blockId ?? ""} is unavailable.`);
   }
+  const position = input.position;
+  if (
+    !position ||
+    !Number.isInteger(position.childIndex) ||
+    position.childIndex < 0
+  ) {
+    return invalidInput("The destination position is invalid.");
+  }
   const sourceSiblings = readDirectBlockIds(editor, source.parentId);
   const sourceIndex = sourceSiblings.indexOf(source.id);
   if (sourceIndex < 0) return stalePlan("The source boundary is stale.");
 
-  const sourceDefinition = blockDefinitions[source.type];
-  if (sourceDefinition?.list?.kind === "item") {
-    return executeListItemIndentation(
-      editor,
-      blockDefinitions,
-      source,
-      sourceSiblings,
-      sourceIndex,
-      input.offset,
-      direction,
-    );
-  }
-
-  let destinationParentId: BlockId | null;
   let destinationSiblings: readonly BlockId[];
-  let destinationIndex: number;
-  if (direction === "indent") {
-    const previousId = sourceSiblings[sourceIndex - 1];
-    const previous = previousId ? editor.getBlock(previousId) : null;
-    const previousDefinition = previous
-      ? blockDefinitions[previous.type]
-      : undefined;
-    if (
-      !previous ||
-      previous.tombstone ||
-      previousDefinition?.kind !== "wrapper" ||
-      previousDefinition.content?.additional === undefined
-    ) {
-      return noChange();
-    }
-    destinationParentId = previous.id;
-    destinationSiblings = editor.getChildBlockIds(previous.id);
-    destinationIndex = destinationSiblings.length;
+  if (position.parentId === null) {
+    destinationSiblings = editor.getRootBlockIds();
   } else {
-    if (source.parentId === null) return noChange();
-    const parent = editor.getBlock(source.parentId);
-    if (!parent || parent.tombstone || parent.parentId === source.id) {
-      return stalePlan("The parent boundary is stale.");
+    const destinationParent = editor.getBlock(position.parentId);
+    if (!isLiveKnownBlock(blockDefinitions, destinationParent)) {
+      return invalidInput("The destination parent is unavailable.");
     }
-    destinationParentId = parent.parentId;
-    destinationSiblings = readDirectBlockIds(editor, parent.parentId);
-    const parentIndex = destinationSiblings.indexOf(parent.id);
-    if (parentIndex < 0) return stalePlan("The parent boundary is stale.");
-    destinationIndex = parentIndex + 1;
+    if (isBlockOrDescendant(editor, position.parentId, source.id)) {
+      return invalidInput("A block cannot be moved into its own subtree.");
+    }
+    destinationSiblings = editor.getChildBlockIds(position.parentId);
+  }
+  if (position.childIndex > destinationSiblings.length) {
+    return invalidInput("The destination position is invalid.");
   }
 
+  const destinationIndex =
+    source.parentId === position.parentId && sourceIndex < position.childIndex
+      ? position.childIndex - 1
+      : position.childIndex;
+  if (
+    source.parentId === position.parentId &&
+    destinationIndex === sourceIndex
+  ) {
+    return noChange();
+  }
   if (
     !acceptsMove(
       editor,
       blockDefinitions,
       source,
       sourceSiblings,
-      destinationParentId,
+      position.parentId,
       destinationSiblings,
       destinationIndex,
     )
   ) {
-    return noChange();
+    return invalidInput("The destination parent does not accept this block.");
   }
-  const adjustedDestinationIndex =
-    source.parentId === destinationParentId && sourceIndex < destinationIndex
-      ? destinationIndex - 1
-      : destinationIndex;
+
   const result = editor.transaction(() => {
     editor.moveBlocks({
       blockIds: [source.id],
       destination: {
-        parentId: destinationParentId,
-        childIndex: adjustedDestinationIndex,
+        parentId: position.parentId,
+        childIndex: destinationIndex,
       },
     });
     editor.setTransactionSelection(
-      selectionForExistingBlock(editor, blockDefinitions, source, input.offset),
+      input.selection ??
+        selectionForExistingBlock(editor, blockDefinitions, source, 0),
     );
   });
   return transactionResult(result);
 }
 
-function executeListItemIndentation(
+function isBlockOrDescendant(
   editor: EditableEditor,
-  blockDefinitions: BlockDefinitions,
-  source: VersionedBlock,
-  sourceSiblings: readonly BlockId[],
-  sourceIndex: number,
-  offset: number,
-  direction: "indent" | "outdent",
-): EditorBlockOperationResult {
-  const itemPolicy = blockDefinitions[source.type]?.list;
-  if (itemPolicy?.kind !== "item" || source.parentId === null)
-    return noChange();
-  const sourceList = editor.getBlock(source.parentId);
-  const sourceListPolicy = sourceList
-    ? blockDefinitions[sourceList.type]?.list
-    : undefined;
-  if (
-    !sourceList ||
-    sourceList.tombstone ||
-    sourceListPolicy?.kind !== "container" ||
-    sourceListPolicy.itemType !== source.type
-  )
-    return stalePlan("The canonical list boundary is stale.");
-
-  if (direction === "indent") {
-    const previousId = sourceSiblings[sourceIndex - 1];
-    let previous = previousId ? editor.getBlock(previousId) : null;
-    if (!previous && sourceIndex === 0) {
-      const listSiblings = readDirectBlockIds(editor, sourceList.parentId);
-      const sourceListIndex = listSiblings.indexOf(sourceList.id);
-      const previousListId = listSiblings[sourceListIndex - 1];
-      const previousList = previousListId
-        ? editor.getBlock(previousListId)
-        : null;
-      const previousListPolicy = previousList
-        ? blockDefinitions[previousList.type]?.list
-        : undefined;
-      const ownerId =
-        previousList && previousListPolicy?.kind === "container"
-          ? editor.getChildBlockIds(previousList.id).at(-1)
-          : null;
-      previous = ownerId ? editor.getBlock(ownerId) : null;
-    }
-    const previousPolicy = previous
-      ? blockDefinitions[previous.type]?.list
-      : undefined;
-    if (!previous || previous.tombstone || previousPolicy?.kind !== "item")
-      return noChange();
-    const removeSourceList = sourceSiblings.length === 1;
-    const previousChildren = editor.getChildBlockIds(previous.id);
-    const compatibleNestedId = [...previousChildren]
-      .reverse()
-      .find((childId) => editor.getBlock(childId)?.type === sourceList.type);
-    if (compatibleNestedId) {
-      const nestedChildren = editor.getChildBlockIds(compatibleNestedId);
-      const result = editor.transaction(() => {
-        editor.moveBlocks({
-          blockIds: [source.id],
-          destination: {
-            parentId: compatibleNestedId,
-            childIndex: nestedChildren.length,
-          },
-        });
-        if (removeSourceList) {
-          editor.deleteBlocks({
-            blockIds: [sourceList.id],
-            includeDescendants: true,
-            expectedParents: { [sourceList.id]: sourceList.parentId },
-          });
-        }
-        editor.setTransactionSelection(
-          selectionForExistingBlock(editor, blockDefinitions, source, offset),
-        );
-      });
-      return transactionResult(result);
-    }
-
-    let creation: ReturnType<typeof materializeCanonicalBlockCreation>;
-    try {
-      creation = materializeCanonicalBlockCreation({
-        blockDefinitions,
-        type: sourceList.type,
-        reservedBlockIds: new Set(collectCanonicalOrder(editor)),
-      });
-    } catch (error) {
-      return invalidInput(
-        error instanceof Error ? error.message : String(error),
-      );
-    }
-    const nestedListId = creation.rootBlockId;
-    const placeholderItem = creation.fragment.blocks.find(
-      (record) =>
-        record.parentId === nestedListId && record.type === source.type,
-    );
-    if (!placeholderItem)
-      return invalidInput(
-        "The list definition did not create its required item.",
-      );
-    const result = editor.transaction(() => {
-      editor.insertBlocks(
-        { parentId: previous.id, childIndex: previousChildren.length },
-        creation.fragment,
-      );
-      editor.deleteBlocks({
-        blockIds: [placeholderItem.id],
-        includeDescendants: true,
-        expectedParents: { [placeholderItem.id]: nestedListId },
-      });
-      editor.moveBlocks({
-        blockIds: [source.id],
-        destination: { parentId: nestedListId, childIndex: 0 },
-      });
-      if (removeSourceList) {
-        editor.deleteBlocks({
-          blockIds: [sourceList.id],
-          includeDescendants: true,
-          expectedParents: { [sourceList.id]: sourceList.parentId },
-        });
-      }
-      editor.setTransactionSelection(
-        selectionForExistingBlock(editor, blockDefinitions, source, offset),
-      );
-    });
-    return transactionResult(result);
+  blockId: BlockId,
+  possibleAncestorId: BlockId,
+): boolean {
+  let currentId: BlockId | null = blockId;
+  const visited = new Set<BlockId>();
+  while (currentId !== null) {
+    if (currentId === possibleAncestorId) return true;
+    if (visited.has(currentId)) return true;
+    visited.add(currentId);
+    currentId = editor.getParentId(currentId);
   }
-
-  if (sourceList.parentId === null) return noChange();
-  const ownerItem = editor.getBlock(sourceList.parentId);
-  if (!ownerItem || ownerItem.tombstone || ownerItem.parentId === null)
-    return noChange();
-  const outerList = editor.getBlock(ownerItem.parentId);
-  const outerPolicy = outerList
-    ? blockDefinitions[outerList.type]?.list
-    : undefined;
-  if (!outerList || outerList.tombstone || outerPolicy?.kind !== "container")
-    return noChange();
-  const outerItems = editor.getChildBlockIds(outerList.id);
-  const ownerIndex = outerItems.indexOf(ownerItem.id);
-  if (ownerIndex < 0)
-    return stalePlan("The containing list boundary is stale.");
-  const removeNestedList = sourceSiblings.length === 1;
-  if (outerPolicy.itemType !== source.type) {
-    if (ownerIndex !== outerItems.length - 1) return noChange();
-    const outerSiblings = readDirectBlockIds(editor, outerList.parentId);
-    const outerIndex = outerSiblings.indexOf(outerList.id);
-    if (outerIndex < 0)
-      return stalePlan("The containing list placement is stale.");
-    let promotedList: ReturnType<typeof materializeCanonicalBlockCreation>;
-    try {
-      promotedList = materializeCanonicalBlockCreation({
-        blockDefinitions,
-        type: sourceList.type,
-        reservedBlockIds: new Set(collectCanonicalOrder(editor)),
-      });
-    } catch (error) {
-      return invalidInput(
-        error instanceof Error ? error.message : String(error),
-      );
-    }
-    const placeholder = promotedList.fragment.blocks.find(
-      (record) => record.parentId === promotedList.rootBlockId,
-    );
-    if (!placeholder)
-      return invalidInput("The promoted canonical list has no required item.");
-    const result = editor.transaction(() => {
-      editor.insertBlocks(
-        { parentId: outerList.parentId, childIndex: outerIndex + 1 },
-        promotedList.fragment,
-      );
-      editor.deleteBlocks({
-        blockIds: [placeholder.id],
-        includeDescendants: true,
-        expectedParents: { [placeholder.id]: promotedList.rootBlockId },
-      });
-      editor.moveBlocks({
-        blockIds: [source.id],
-        destination: { parentId: promotedList.rootBlockId, childIndex: 0 },
-      });
-      if (removeNestedList) {
-        editor.deleteBlocks({
-          blockIds: [sourceList.id],
-          includeDescendants: true,
-          expectedParents: { [sourceList.id]: ownerItem.id },
-        });
-      }
-      editor.setTransactionSelection(
-        selectionForExistingBlock(editor, blockDefinitions, source, offset),
-      );
-    });
-    return transactionResult(result);
-  }
-  const result = editor.transaction(() => {
-    editor.moveBlocks({
-      blockIds: [source.id],
-      destination: { parentId: outerList.id, childIndex: ownerIndex + 1 },
-    });
-    if (removeNestedList) {
-      editor.deleteBlocks({
-        blockIds: [sourceList.id],
-        includeDescendants: true,
-        expectedParents: { [sourceList.id]: ownerItem.id },
-      });
-    }
-    editor.setTransactionSelection(
-      selectionForExistingBlock(editor, blockDefinitions, source, offset),
-    );
-  });
-  return transactionResult(result);
+  return false;
 }
 
 function acceptsMove(
@@ -916,7 +500,9 @@ function acceptsMove(
       return false;
     }
   }
-  if (destinationParentId === null) return true;
+  if (destinationParentId === null) {
+    return blockDefinitionAcceptsParent(blockDefinitions[source.type]!, null);
+  }
   const parent = editor.getBlock(destinationParentId);
   const definition = parent ? blockDefinitions[parent.type] : undefined;
   if (!definition) return false;

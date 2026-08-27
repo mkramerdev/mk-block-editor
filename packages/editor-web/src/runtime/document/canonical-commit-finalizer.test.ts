@@ -15,7 +15,7 @@ describe("finalizeCanonicalEditorCommit", () => {
   it("reconciles first and publishes a minimal incremental content receipt", () => {
     const blockId = "finalizer-content" as BlockId;
     const snapshot = createTestEditorSnapshot([
-      { id: blockId, type: "paragraph", text: "a" },
+      { id: blockId, type: "textBlock", text: "a" },
     ]);
     const update = {
       kind: "operation" as const,
@@ -26,7 +26,7 @@ describe("finalizeCanonicalEditorCommit", () => {
     const operation = {
       kind: "insertInlineContent" as const,
       blockId,
-      blockType: "paragraph" as const,
+      blockType: "textBlock" as const,
       target: { kind: "text" as const },
       position: { blockId, offset: 1, contentVersion: null },
       content: [{ type: "text" as const, text: "@" }],
@@ -41,7 +41,7 @@ describe("finalizeCanonicalEditorCommit", () => {
       historyAction: "command",
       provenance: { kind: "typing", text: "@", inputType: "text" },
       blockId,
-      blockType: "paragraph",
+      blockType: "textBlock",
       operations: [operation],
       inverseOperations: [],
       yjsUpdate: update,

@@ -3,7 +3,7 @@
 import { createElement, useCallback, type ReactNode } from "react";
 import type { VersionedBlock } from "@repo/editor-core/document";
 import type { SelectionController } from "@repo/editor-react/selection";
-import type { AnyEditorRuntimePort } from "../../runtime/document/render-port.ts";
+import type { EditableEditorRuntimePort } from "../../runtime/document/render-port.ts";
 import { BlockRenderer } from "./block-renderer.tsx";
 import { BlockErrorBoundary } from "./block-error-boundary.tsx";
 import { editorSelectionBoundsDataAttributes } from "../selection/bounds/selection-bounds.ts";
@@ -11,7 +11,7 @@ import type { EditorBlockDomRegistryRegistrar } from "./block-dom-registry.ts";
 
 export interface BlockShellProps {
   block: VersionedBlock;
-  editor: AnyEditorRuntimePort;
+  editor: EditableEditorRuntimePort;
   selectionController: SelectionController;
   blockDomRegistrar: EditorBlockDomRegistryRegistrar;
   children?: ReactNode;
@@ -52,17 +52,15 @@ function BlockShellBase({
       role:
         shellElement === "div" && rootLayout !== null ? "listitem" : undefined,
     },
-    <>
-      <BlockErrorBoundary blockId={block.id}>
-        <BlockRenderer
-          block={block}
-          editor={editor}
-          selectionController={selectionController}
-        >
-          {children}
-        </BlockRenderer>
-      </BlockErrorBoundary>
-    </>,
+    <BlockErrorBoundary blockId={block.id}>
+      <BlockRenderer
+        block={block}
+        editor={editor}
+        selectionController={selectionController}
+      >
+        {children}
+      </BlockRenderer>
+    </BlockErrorBoundary>,
   );
 }
 

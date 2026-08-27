@@ -26,16 +26,14 @@ const blockDefinitions: Readonly<Record<BlockType, BlockDefinition>> = {
   ...testBlockDefinitions,
   emptyFlowShell: {
     kind: "wrapper" as const,
-    rootLayout: "normal" as const,
     type: "emptyFlowShell",
-    renderer: () => null,
     content: { required: [], additional: "block" as const },
     contentBoundary: false,
   },
 };
 const block = (
   blockId: BlockId,
-  type: BlockType = "paragraph",
+  type: BlockType = "textBlock",
   parentId: BlockId | null = null,
 ): VersionedBlock =>
   createVersionedBlockRecord({
@@ -118,9 +116,9 @@ describe("graph-native structural transactions", () => {
   });
 
   it("inserts at a requested child index", () => {
-    const parent = block(id(1), "callout");
-    const first = block(id(2), "paragraph", parent.id);
-    const second = block(id(3), "divider", parent.id);
+    const parent = block(id(1), "containerWrapper");
+    const first = block(id(2), "textBlock", parent.id);
+    const second = block(id(3), "atomicBlock", parent.id);
     const transaction = expectApplied(
       apply(graph([parent, first]), [
         insertBlocks({
@@ -184,7 +182,7 @@ describe("graph-native structural transactions", () => {
 
   it("reparents between two containers", () => {
     const left = block(id(1), "emptyFlowShell");
-    const child = block(id(2), "paragraph", left.id);
+    const child = block(id(2), "textBlock", left.id);
     const right = block(id(3), "emptyFlowShell");
     const transaction = expectApplied(
       apply(graph([left, child, right]), [
@@ -202,10 +200,10 @@ describe("graph-native structural transactions", () => {
 
   it("copies only the two parent sequences during reparenting", () => {
     const left = block(id(1), "emptyFlowShell");
-    const moving = block(id(2), "paragraph", left.id);
+    const moving = block(id(2), "textBlock", left.id);
     const right = block(id(3), "emptyFlowShell");
     const other = block(id(4), "emptyFlowShell");
-    const stable = block(id(5), "paragraph", other.id);
+    const stable = block(id(5), "textBlock", other.id);
     const before = graph([left, moving, right, other, stable]);
 
     const transaction = expectApplied(
@@ -234,7 +232,7 @@ describe("graph-native structural transactions", () => {
 
   it("reuses every nested sequence during a root reorder", () => {
     const first = block(id(1), "emptyFlowShell");
-    const child = block(id(2), "paragraph", first.id);
+    const child = block(id(2), "textBlock", first.id);
     const second = block(id(3), "emptyFlowShell");
     const before = graph([first, child, second]);
 
@@ -257,7 +255,7 @@ describe("graph-native structural transactions", () => {
 
   it("moves between root and nested containment in both directions", () => {
     const parent = block(id(1), "emptyFlowShell");
-    const nested = block(id(2), "paragraph", parent.id);
+    const nested = block(id(2), "textBlock", parent.id);
     const root = block(id(3));
     const nestedAtRoot = expectApplied(
       apply(graph([parent, nested, root]), [
@@ -283,8 +281,8 @@ describe("graph-native structural transactions", () => {
   });
 
   it("rejects a descendant destination that creates a cycle", () => {
-    const parent = block(id(1), "callout");
-    const child = block(id(2), "callout", parent.id);
+    const parent = block(id(1), "containerWrapper");
+    const child = block(id(2), "containerWrapper", parent.id);
     const result = apply(graph([parent, child]), [
       moveBlocks({
         blockIds: [parent.id],
@@ -299,8 +297,8 @@ describe("graph-native structural transactions", () => {
   });
 
   it("deletes an ordered subtree atomically", () => {
-    const parent = block(id(1), "callout");
-    const child = block(id(2), "paragraph", parent.id);
+    const parent = block(id(1), "containerWrapper");
+    const child = block(id(2), "textBlock", parent.id);
     const sibling = block(id(3));
     const transaction = expectApplied(
       apply(graph([parent, child, sibling]), [
@@ -317,9 +315,9 @@ describe("graph-native structural transactions", () => {
 
   it("restores a complete ordered subtree in one canonical reduction", () => {
     const sibling = block(id(1));
-    const parent = block(id(2), "callout");
-    const first = block(id(3), "paragraph", parent.id);
-    const second = block(id(4), "divider", parent.id);
+    const parent = block(id(2), "containerWrapper");
+    const first = block(id(3), "textBlock", parent.id);
+    const second = block(id(4), "atomicBlock", parent.id);
     const transaction = expectApplied(
       apply(graph([sibling]), [
         {
@@ -356,8 +354,8 @@ describe("graph-native structural transactions", () => {
 
   it("rejects an invalid restored subtree without publishing a partial graph", () => {
     const sibling = block(id(1));
-    const leaf = block(id(2), "paragraph");
-    const child = block(id(3), "paragraph", leaf.id);
+    const leaf = block(id(2), "textBlock");
+    const child = block(id(3), "textBlock", leaf.id);
     const before = graph([sibling]);
     const result = apply(before, [
       {
@@ -385,10 +383,10 @@ describe("graph-native structural transactions", () => {
   });
 
   it("replaces a live structural block record through the same reducer", () => {
-    const original = block(id(1), "paragraph");
+    const original = block(id(1), "textBlock");
     const replacement = {
       ...original,
-      type: "heading",
+      type: "alternateTextBlock",
       metadataVersion: "2",
     };
     const transaction = expectApplied(
@@ -403,7 +401,7 @@ describe("graph-native structural transactions", () => {
     expect(transaction.rootBlockIds).toEqual([original.id]);
     expect(transaction.blocks[original.id]).toMatchObject({
       id: original.id,
-      type: "heading",
+      type: "alternateTextBlock",
       parentId: null,
       metadataVersion: "2",
     });

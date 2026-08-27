@@ -118,6 +118,19 @@ describe("canonical Yjs relative text anchors", () => {
     context.destroy();
   });
 
+  it("keeps an operation insertion anchor with assoc -1 before causally later content", () => {
+    const context = seeded("abcd");
+    const codec = createYjsRelativeTextPointCodec(context);
+    const position = codec.encode({ blockId, offset: 2 }, { assoc: -1 });
+    if (!position.ok) throw new Error("anchor creation failed");
+    write(context, "abXcd");
+    expect(codec.decode(position.point)).toMatchObject({
+      ok: true,
+      point: { offset: 2, relative: { assoc: -1 } },
+    });
+    context.destroy();
+  });
+
   it("returns an explicit unresolved result when its text type is removed", () => {
     const context = seeded("abcd");
     const codec = createYjsRelativeTextPointCodec(context);

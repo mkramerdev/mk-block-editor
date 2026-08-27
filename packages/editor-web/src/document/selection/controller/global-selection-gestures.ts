@@ -26,17 +26,19 @@ import {
   type EditorSelection,
   type EditorSelectionRangeBlock,
   type SelectionController,
+  type TextPointerGesturePresentationClaim,
 } from "@repo/editor-react/selection";
 import type {
   EditorBlockContentLease,
   EditorContentRuntime,
 } from "@repo/editor-core/content";
-import type { AnyEditorRuntimePort } from "../../../runtime/document/render-port.ts";
+import type { EditableEditorRuntimePort } from "../../../runtime/document/render-port.ts";
 import type { EditorDocumentLayerKeyboardDispatcher } from "../../../runtime/document/document-layer-interactions.ts";
 import { createEditorDocumentInputRouting } from "../../../runtime/keybindings/document-input-routing.ts";
 import type { EditorBlockDomRegistryReader } from "../../blocks/block-dom-registry.ts";
 import { registerDocumentInteractionOwner } from "../../interaction/document-interaction-router.ts";
 import { routeEditorDocumentKeydown } from "../../interaction/document-layer-keydown-routing.ts";
+import type { ResolvedNativeFocusTarget } from "../../../runtime/document/native-focus-coordinator.ts";
 import { pointerEventPreservesEditorSelection } from "../../interaction/interactive-targets.ts";
 import {
   resolveEditorSelectionPointerHit,
@@ -61,7 +63,6 @@ import {
   markKeyboardSelectionActive,
   pointerEventTargetElement,
   releasePointer,
-  setTextSelectionDragActive,
   suppressNativeSelection,
 } from "./pointer-gesture.ts";
 import {
@@ -73,8 +74,19 @@ import type {
   EditorSelectionDragCallback,
   EditorSelectionDragSnapshot,
 } from "../../../runtime/document/contracts.ts";
+import {
+  claimEditorNativeSelectionOwnership,
+  registerEditorNativeSelectionOwnership,
+  revokeEditorNativeSelectionOwnership,
+} from "./native-selection-ownership.ts";
+import type {
+  EditorTextGestureArbitration,
+  EditorTextGestureBoundarySession,
+  EditorTextGesturePointer,
+  EditorTransferredPointerGesture,
+} from "./text-gesture-arbitration.tsx";
 
-const editorOwnerByBlockList = new WeakMap<HTMLElement, AnyEditorRuntimePort>();
+const editorOwnerByBlockList = new WeakMap<HTMLElement, EditableEditorRuntimePort>();
 const DRAG_THRESHOLD_PX = 4;
 
 interface BrowserPointerResource {
@@ -88,7 +100,9 @@ interface BrowserPointerResource {
   lastClientY: number;
   phase: "pending" | "dragging";
   restoreNativeSelection: (() => void) | null;
+  pointerPresentation: TextPointerGesturePresentationClaim | null;
   readonly settlementLeases: EditorBlockContentLease[];
+  boundarySession: EditorTextGestureBoundarySession | null;
 }
 
 interface PointerSelectionCandidate {
@@ -104,11 +118,12 @@ interface PointerSelectionCandidate {
 export interface UseGlobalSelectionGesturesOptions {
   readonly listElement: HTMLElement | null;
   readonly blockDom: EditorBlockDomRegistryReader;
-  readonly editor: AnyEditorRuntimePort;
+  readonly editor: EditableEditorRuntimePort;
   readonly contentRuntime: EditorContentRuntime;
   readonly selectionController: SelectionController;
   readonly captureStructuralSelection: CaptureStructuralSelection;
   readonly documentLayerKeyboard: EditorDocumentLayerKeyboardDispatcher;
+  readonly textGestureArbitration: EditorTextGestureArbitration;
   readonly onTransientPointerPaintChange: (
     paint: TransientPointerSelectionPaint | null,
   ) => void;
@@ -132,6 +147,7 @@ export function useGlobalSelectionGestures({
   selectionController,
   captureStructuralSelection,
   documentLayerKeyboard,
+  textGestureArbitration,
   onTransientPointerPaintChange,
   onSelectionDragStart,
   onSelectionDragUpdate,
@@ -142,15 +158,16 @@ export function useGlobalSelectionGestures({
     if (!listElement) return;
     const list = listElement;
     const doc = list.ownerDocument;
-    const documentInput = editor.editable
-      ? createEditorDocumentInputRouting(doc, {
-          definition: editor.definition,
-          store: editor.store,
-          editor,
-        })
-      : null;
+    const unregisterNativeSelectionOwnership =
+      registerEditorNativeSelectionOwnership(list);
+    const documentInput = createEditorDocumentInputRouting(doc, {
+      definition: editor.definition,
+      store: editor.store,
+      editor,
+    });
     editorOwnerByBlockList.set(list, editor);
     let pointer: BrowserPointerResource | null = null;
+    let transferredPointer: EditorTransferredPointerGesture | null = null;
     let suppressCompletedDragClick = false;
     let transientPaintRevision = 0;
     let lastSelectionDragSnapshot: EditorSelectionDragSnapshot | null = null;
@@ -217,7 +234,7 @@ export function useGlobalSelectionGestures({
     const requestSettledTextPresentation = (
       point: EditorLogicalSelectionPoint,
     ): boolean => {
-      if (!editor.editable || !pointUsesContentSelectionEndpoint(point)) {
+      if (!pointUsesContentSelectionEndpoint(point)) {
         return false;
       }
       const canonical = selectionController.getCanonicalSnapshot();
@@ -247,8 +264,8 @@ export function useGlobalSelectionGestures({
       if (hit) updatePointer(pointer, hit);
       else publishSelectionDrag(pointer);
     };
-    const finishPointer = () => {
-      if (!pointer) return;
+    const detachPointerResources = (): BrowserPointerResource | null => {
+      if (!pointer) return null;
       const current = pointer;
       const endedSelectionDrag = lastSelectionDragSnapshot;
       pointer = null;
@@ -258,11 +275,60 @@ export function useGlobalSelectionGestures({
       delete list.dataset.editorNativeCaretPointerPending;
       current.restoreNativeSelection?.();
       if (current.phase === "dragging") releasePointer(list, current.pointerId);
-      setTextSelectionDragActive(list, false);
       if (endedSelectionDrag) onSelectionDragEnd?.(endedSelectionDrag);
+      return current;
+    };
+    const finishPointer = (terminal: "settled" | "canceled") => {
+      const current = detachPointerResources();
+      if (!current) return;
+      if (terminal === "canceled") suppressCompletedDragClick = false;
+      current.boundarySession?.cancel();
+      // Presentation is the final pointer resource to be released. Settled
+      // range ownership or the retained caret therefore already determines
+      // the next authoritative mode when this synchronous release publishes.
+      current.pointerPresentation?.release();
+    };
+    const finishTransferredPointer = (cancel: boolean) => {
+      const current = transferredPointer;
+      transferredPointer = null;
+      if (cancel) current?.cancel();
+    };
+    const pointerInput = (
+      event: PointerEvent,
+      target: EventTarget | null,
+    ): EditorTextGesturePointer => ({
+      pointerId: event.pointerId,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      target,
+    });
+    const transferPointer = (
+      resource: BrowserPointerResource,
+      input: EditorTextGesturePointer,
+    ): boolean => {
+      const session = resource.boundarySession;
+      if (!session || !session.shouldTransfer(input)) return false;
+      resource.boundarySession = null;
+      const current = detachPointerResources();
+      if (!current) return false;
+      try {
+        const transferred = session.transfer(input);
+        if (!transferred) {
+          session.cancel();
+          return true;
+        }
+        transferredPointer = transferred;
+        return true;
+      } finally {
+        // Table transfer is synchronous: it first removes the native input
+        // projection and commits block-internal paint. Only then may text
+        // pointer presentation relinquish native suppression.
+        current.pointerPresentation?.release();
+      }
     };
     const clearSelectionForPointer = () => {
-      finishPointer();
+      revokeEditorNativeSelectionOwnership(list);
+      finishPointer("canceled");
       selectionController.resetKeyboardNavigation();
       clearKeyboardSelectionActive(list);
       list.dataset.editorCanonicalSelectionClearPending = "true";
@@ -271,7 +337,7 @@ export function useGlobalSelectionGestures({
           publication: { kind: "standalone-local" },
           cause: "pointer",
         });
-        if (editor.editable) editor.blurEditor();
+        editor.blurEditor();
         clearNativeSelection(doc);
       } finally {
         delete list.dataset.editorCanonicalSelectionClearPending;
@@ -279,18 +345,15 @@ export function useGlobalSelectionGestures({
     };
     const beginActiveDrag = (resource: BrowserPointerResource): boolean => {
       if (
-        !editor.editable ||
         editor.getSelectionGraphRevision() !== resource.graphRevision
       ) {
-        finishPointer();
+        finishPointer("canceled");
         return false;
       }
       selectionController.resetKeyboardNavigation();
       resource.restoreNativeSelection ??= suppressNativeSelection(list);
-      setTextSelectionDragActive(list, true);
       if (!capturePointer(list, resource.pointerId)) {
-        setTextSelectionDragActive(list, false);
-        finishPointer();
+        finishPointer("canceled");
         return false;
       }
       resource.phase = "dragging";
@@ -302,7 +365,8 @@ export function useGlobalSelectionGestures({
     };
     const pointerdown = (event: PointerEvent) => {
       suppressCompletedDragClick = false;
-      if (pointer) finishPointer();
+      if (pointer) finishPointer("canceled");
+      finishTransferredPointer(true);
       if (event.button !== 0) return;
       if (pointerEventPreservesEditorSelection(event)) return;
       const target = pointerEventTargetElement(event);
@@ -310,16 +374,8 @@ export function useGlobalSelectionGestures({
         clearSelectionForPointer();
         return;
       }
+      claimEditorNativeSelectionOwnership(list, "pointer");
       if (
-        pointerEventPathMatches(
-          event,
-          '[data-editor-block-internal-selection-host="true"]',
-        )
-      ) {
-        return;
-      }
-      if (
-        !editor.editable ||
         isPointerEventFromEditorInteractiveControl(event, list)
       ) {
         clearSelectionForPointer();
@@ -331,6 +387,27 @@ export function useGlobalSelectionGestures({
         return;
       }
       const graphRevision = editor.getSelectionGraphRevision();
+      const internalHost = pointerEventPathMatches(
+        event,
+        '[data-editor-block-internal-selection-host="true"]',
+      );
+      const startsInTextRoot = Boolean(
+        target.closest('[data-editor-text-root="true"]'),
+      );
+      const boundarySession =
+        internalHost && startsInTextRoot
+          ? textGestureArbitration.begin(event.target, {
+              pointerId: event.pointerId,
+              graphRevision,
+              blockId: hit.target.block.id,
+              textOffset: hit.textOffset,
+              affinity: hit.affinity,
+              clientX: event.clientX,
+              clientY: event.clientY,
+              target: event.target,
+            })
+          : null;
+      if (internalHost && !boundarySession) return;
       const candidate = pointerCandidateFromHit(
         hit,
         event.pointerId,
@@ -348,7 +425,11 @@ export function useGlobalSelectionGestures({
         lastClientY: event.clientY,
         phase: "pending",
         restoreNativeSelection: suppressNativeSelection(list),
+        pointerPresentation: blockUsesContentSelectionEndpoint(hit.target)
+          ? selectionController.claimTextPointerGesturePresentation()
+          : null,
         settlementLeases: [],
+        boundarySession,
       };
       list.dataset.editorNativeCaretPointerPending = "true";
       // Once the DOM gesture controller has accepted an ordinary text
@@ -357,7 +438,19 @@ export function useGlobalSelectionGestures({
       // hit testing carries soft-wrap affinity through settlement, and the
       // active input projection remains the collapsed canonical caret.
       event.preventDefault();
-      if (editor.editable && blockUsesContentSelectionEndpoint(hit.target)) {
+      if (boundarySession) {
+        const activation = editor.focusText(hit.target.block.id, {
+          offset: hit.textOffset,
+          affinity: hit.affinity,
+          preventScroll: true,
+        });
+        if (activation.status === "rejected") {
+          finishPointer("canceled");
+          event.stopPropagation();
+          return;
+        }
+      }
+      if (blockUsesContentSelectionEndpoint(hit.target)) {
         // ProseMirror's compatibility-mouse gesture must not independently
         // normalize the same DOM point to its default soft-wrap side.
         event.stopPropagation();
@@ -419,16 +512,30 @@ export function useGlobalSelectionGestures({
         lastClientY: detail.clientY,
         phase: "pending",
         restoreNativeSelection: suppressNativeSelection(list),
+        pointerPresentation: null,
         settlementLeases: [],
+        boundarySession: null,
       };
       if (!beginActiveDrag(pointer)) return;
       blurFocusedEditorElement(list);
       updatePointer(pointer, focusHit);
     };
     const pointermove = (event: PointerEvent) => {
+      if (
+        transferredPointer &&
+        transferredPointer.pointerId === event.pointerId
+      ) {
+        const target = doc.elementFromPoint?.(event.clientX, event.clientY);
+        transferredPointer.move(pointerInput(event, target));
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       if (!pointer || pointer.pointerId !== event.pointerId) return;
       pointer.lastClientX = event.clientX;
       pointer.lastClientY = event.clientY;
+      const pointedTarget =
+        doc.elementFromPoint?.(event.clientX, event.clientY) ?? event.target;
       if (pointer.phase === "pending") {
         const dx = event.clientX - pointer.startClientX;
         const dy = event.clientY - pointer.startClientY;
@@ -436,9 +543,14 @@ export function useGlobalSelectionGestures({
           event.preventDefault();
           return;
         }
-        const hit = resolveHit(event.target, event.clientX, event.clientY);
+        if (transferPointer(pointer, pointerInput(event, pointedTarget))) {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+        const hit = resolveHit(pointedTarget, event.clientX, event.clientY);
         if (!hit) {
-          finishPointer();
+          finishPointer("canceled");
           event.preventDefault();
           return;
         }
@@ -448,7 +560,12 @@ export function useGlobalSelectionGestures({
         }
         updatePointer(pointer, hit);
       } else {
-        const hit = resolveHit(event.target, event.clientX, event.clientY);
+        if (transferPointer(pointer, pointerInput(event, pointedTarget))) {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+        const hit = resolveHit(pointedTarget, event.clientX, event.clientY);
         if (!hit) {
           publishSelectionDrag(pointer);
           event.preventDefault();
@@ -483,19 +600,31 @@ export function useGlobalSelectionGestures({
       event.stopPropagation();
     };
     const pointerup = (event: PointerEvent) => {
+      if (
+        transferredPointer &&
+        transferredPointer.pointerId === event.pointerId
+      ) {
+        const current = transferredPointer;
+        transferredPointer = null;
+        const target = doc.elementFromPoint?.(event.clientX, event.clientY);
+        current.finish(pointerInput(event, target));
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       if (!pointer || pointer.pointerId !== event.pointerId) return;
       const current = pointer;
       current.lastClientX = event.clientX;
       current.lastClientY = event.clientY;
       if (editor.getSelectionGraphRevision() !== current.graphRevision) {
-        finishPointer();
+        finishPointer("canceled");
         event.preventDefault();
         event.stopPropagation();
         return;
       }
       const hit = resolveHit(event.target, event.clientX, event.clientY);
       if (!hit && current.phase === "pending") {
-        finishPointer();
+        finishPointer("canceled");
         event.preventDefault();
         event.stopPropagation();
         return;
@@ -532,7 +661,7 @@ export function useGlobalSelectionGestures({
             kind: "rejected" as const,
             retainedSelection: selectionController.getCanonicalSnapshot(),
           };
-      if (settlement.kind !== "rejected" && editor.editable) {
+      if (settlement.kind !== "rejected") {
         const committed = selectionController.getCommittedSnapshot();
         const inputPoint = committed?.focus.target ?? null;
         if (inputPoint && pointUsesContentSelectionEndpoint(inputPoint)) {
@@ -542,7 +671,7 @@ export function useGlobalSelectionGestures({
       event.preventDefault();
       event.stopPropagation();
       suppressCompletedDragClick = true;
-      finishPointer();
+      finishPointer("settled");
     };
     const click = (event: MouseEvent) => {
       if (!suppressCompletedDragClick) return;
@@ -551,10 +680,24 @@ export function useGlobalSelectionGestures({
       event.stopPropagation();
     };
     const pointercancel = (event: PointerEvent) => {
+      if (
+        transferredPointer &&
+        transferredPointer.pointerId === event.pointerId
+      ) {
+        finishTransferredPointer(true);
+        return;
+      }
       if (!pointer || pointer.pointerId !== event.pointerId) return;
-      finishPointer();
+      finishPointer("canceled");
     };
     const lostpointercapture = (event: PointerEvent) => {
+      if (
+        transferredPointer &&
+        transferredPointer.pointerId === event.pointerId
+      ) {
+        finishTransferredPointer(true);
+        return;
+      }
       if (
         event.target !== list ||
         event.currentTarget !== list ||
@@ -562,9 +705,12 @@ export function useGlobalSelectionGestures({
         pointer.pointerId !== event.pointerId
       )
         return;
-      finishPointer();
+      finishPointer("canceled");
     };
-    const documentLoss = () => finishPointer();
+    const documentLoss = () => {
+      finishPointer("canceled");
+      finishTransferredPointer(true);
+    };
     const visibilitychange = () => {
       if (doc.visibilityState === "hidden") documentLoss();
     };
@@ -581,15 +727,13 @@ export function useGlobalSelectionGestures({
       }
       clearSelectionForPointer();
     };
-    const keydown = (event: KeyboardEvent) => {
+    const keydown = (
+      event: KeyboardEvent,
+      nativeFocus: ResolvedNativeFocusTarget,
+    ) => {
       const eventTarget = event.target instanceof Element ? event.target : null;
-      if (
-        editor.editable &&
-        (!editor.ownsNativeFocusTarget(event.target) ||
-          !editor.ownsActiveElement(doc))
-      ) {
-        return;
-      }
+      if (!nativeFocus) return;
+      claimEditorNativeSelectionOwnership(list, "keyboard");
       if (
         eventTarget &&
         list.contains(eventTarget) &&
@@ -637,7 +781,7 @@ export function useGlobalSelectionGestures({
           return;
         }
         selectionController.resetKeyboardNavigation();
-        if (editor.editable && pointUsesContentSelectionEndpoint(range.focus)) {
+        if (pointUsesContentSelectionEndpoint(range.focus)) {
           requestSettledTextPresentation(range.focus);
         }
         releaseContentLeases(selectionLeases);
@@ -647,9 +791,15 @@ export function useGlobalSelectionGestures({
         return;
       }
       if (event.key === "Escape") {
+        if (transferredPointer) {
+          finishTransferredPointer(true);
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
         if (selectionController.getPresentationSnapshot().composition) return;
         if (pointer) {
-          finishPointer();
+          finishPointer("canceled");
           event.preventDefault();
           return;
         }
@@ -662,7 +812,6 @@ export function useGlobalSelectionGestures({
             cause: "keyboard",
           });
           if (
-            editor.editable &&
             anchor &&
             pointUsesContentSelectionEndpoint(anchor)
           ) {
@@ -685,7 +834,6 @@ export function useGlobalSelectionGestures({
         return;
       }
       if (
-        editor.editable &&
         event.key === "Enter" &&
         !event.shiftKey &&
         !event.altKey &&
@@ -702,25 +850,12 @@ export function useGlobalSelectionGestures({
           anchor.blockId === head.blockId &&
           anchor.textOffset !== head.textOffset
         ) {
-          const block = editor.getBlock(anchor.blockId);
-          if (!block) return;
-          const from = Math.min(anchor.textOffset, head.textOffset);
-          const to = Math.max(anchor.textOffset, head.textOffset);
-          const handled = editor.executeCoreBlockKeyBehavior({
-            blockId: block.id,
-            blockType: block.type,
-            key: "enter",
-            cursorOffset: from,
-            selectionRange: { from, to },
-          });
-          if (!handled) return;
           event.preventDefault();
           event.stopPropagation();
           return;
         }
       }
       if (
-        editor.editable &&
         (event.key === "Backspace" || event.key === "Delete") &&
         committedSelectionIsNoncollapsed(
           selectionController.getCommittedSnapshot(),
@@ -743,13 +878,27 @@ export function useGlobalSelectionGestures({
         }
         event.preventDefault();
         event.stopPropagation();
-        const result = editor.executeStructuralRangeDeletion(capture.range, {
-          intent: "delete",
-          provenance: null,
-          selectionPresentation: "native-final-selection",
-          resolveVisibleChildBlockIds:
-            editor.definition.selectionFragment?.resolveVisibleChildBlockIds,
-        });
+        const productPlan =
+          editor.definition.selectionFragment?.planStructuralRangeDeletion?.({
+            intent: "delete",
+            range: capture.range,
+            graph: editor,
+            readBlockContent: (blockId, blockType) =>
+              contentRuntime.readBlockProjection(blockId, blockType),
+          }) ?? null;
+        const result = productPlan
+          ? editor.executeStructuralTransaction(productPlan, {
+              provenance: null,
+              selectionPresentation: "native-before-removal",
+            })
+          : editor.executeStructuralRangeDeletion(capture.range, {
+              intent: "delete",
+              provenance: null,
+              selectionPresentation: "native-final-selection",
+              resolveVisibleChildBlockIds:
+                editor.definition.selectionFragment
+                  ?.resolveVisibleChildBlockIds,
+            });
         if (!result.ok) return;
         return;
       }
@@ -761,6 +910,37 @@ export function useGlobalSelectionGestures({
       )
         return;
       const extendsSelection = event.shiftKey;
+      const focusedCaret = !extendsSelection
+        ? resolveFocusedKeyboardCaret(list, editor)
+        : null;
+      const focusedBlock = focusedCaret
+        ? editor.getBlock(focusedCaret.blockId)
+        : null;
+      const focusedContent = focusedBlock
+        ? contentRuntime.readBlockProjection(focusedBlock.id, focusedBlock.type)
+        : null;
+      if (
+        focusedCaret &&
+        eventTarget?.closest(
+          '[data-editor-text-root="true"][contenteditable="true"]',
+        ) &&
+        !committedSelectionIsNoncollapsed(
+          selectionController.getCommittedSnapshot(),
+        ) &&
+        ((event.key === "ArrowLeft" && focusedCaret.textOffset > 0) ||
+          (event.key === "ArrowRight" &&
+            focusedContent !== null &&
+            focusedCaret.textOffset <
+              richTextDocumentContentSize(focusedContent)) ||
+          ((event.key === "Home" || event.key === "End") &&
+            !event.ctrlKey &&
+            !event.metaKey))
+      ) {
+        // A collapsed caret in the active text projection remains a native
+        // editing concern. ProseMirror performs the movement and the collapsed
+        // selection mirror is synchronized afterward.
+        return;
+      }
       const start = resolveKeyboardSelectionStart(
         list,
         editor,
@@ -898,7 +1078,6 @@ export function useGlobalSelectionGestures({
         return;
       }
       if (
-        editor.editable &&
         extendsSelection &&
         start.anchor.blockId === move.point.blockId &&
         pointUsesContentSelectionEndpoint(start.anchor) &&
@@ -911,7 +1090,6 @@ export function useGlobalSelectionGestures({
         );
       }
       if (
-        editor.editable &&
         pointUsesContentSelectionEndpoint(move.point) &&
         (!extendsSelection || move.point.blockId !== start.focus.blockId)
       ) {
@@ -943,7 +1121,7 @@ export function useGlobalSelectionGestures({
         });
       }
       const canonical = selectionController.getCanonicalSnapshot();
-      if (canonical.kind !== "document" || !editor.editable) return;
+      if (canonical.kind !== "document") return;
       const anchor = canonical.snapshot.documentSelection.anchor;
       const focus = canonical.snapshot.documentSelection.focus;
       if (!focus || !pointUsesContentSelectionEndpoint(focus)) return;
@@ -971,17 +1149,32 @@ export function useGlobalSelectionGestures({
     );
     const unregisterInteractionOwner = registerDocumentInteractionOwner(doc, {
       list,
+      revokeNativeSelectionOwnership: () =>
+        revokeEditorNativeSelectionOwnership(list),
       releaseInteraction: releaseInteractionOwner,
       pointerdown: interactionOwnerPointerdown,
       pointermove,
       pointerup,
       pointercancel,
-      beforeinput: (event) => documentInput?.beforeinput(event),
+      beforeinput: (event) => {
+        claimEditorNativeSelectionOwnership(list, "input");
+        if (
+          event.inputType !== "historyUndo" &&
+          event.inputType !== "historyRedo"
+        ) {
+          return;
+        }
+        documentInput?.beforeinput(
+          event,
+          editor.resolveNativeFocusTarget(event.target),
+        );
+      },
       keydown: (event) =>
         routeEditorDocumentKeydown(
           event,
           documentLayerKeyboard,
           documentInput,
+          (target) => editor.resolveNativeFocusTarget(target),
           keydown,
         ),
       keyup,
@@ -992,7 +1185,8 @@ export function useGlobalSelectionGestures({
     doc.defaultView?.addEventListener("pagehide", documentLoss);
     doc.addEventListener("visibilitychange", visibilitychange);
     return () => {
-      finishPointer();
+      finishPointer("canceled");
+      finishTransferredPointer(true);
       suppressCompletedDragClick = false;
       selectionController.resetKeyboardNavigation();
       clearKeyboardSelectionActive(list);
@@ -1005,6 +1199,7 @@ export function useGlobalSelectionGestures({
         extendBlockInternalSelection,
       );
       unregisterInteractionOwner();
+      unregisterNativeSelectionOwnership();
       list.removeEventListener("lostpointercapture", lostpointercapture, true);
       doc.defaultView?.removeEventListener("blur", documentLoss);
       doc.defaultView?.removeEventListener("pagehide", documentLoss);
@@ -1018,7 +1213,6 @@ export function useGlobalSelectionGestures({
     contentRuntime,
     documentLayerKeyboard,
     editor,
-    editor.editable,
     listElement,
     onTransientPointerPaintChange,
     onSelectionDragEnd,
@@ -1026,6 +1220,7 @@ export function useGlobalSelectionGestures({
     onSelectionDragUpdate,
     selectionController,
     shouldPublishSelectionDrag,
+    textGestureArbitration,
   ]);
 }
 
@@ -1048,7 +1243,7 @@ function pointerEventPathMatches(event: Event, selector: string): boolean {
 
 function materializeSelectionDragSnapshot(
   resource: BrowserPointerResource,
-  editor: AnyEditorRuntimePort,
+  editor: EditableEditorRuntimePort,
   contentRuntime: EditorContentRuntime,
 ): EditorSelectionDragSnapshot | null {
   const points = materializePointerSettlement(resource, editor, contentRuntime);
@@ -1102,7 +1297,7 @@ function committedSelectionIsNoncollapsed(
 
 function resolveKeyboardSelectionStart(
   list: HTMLElement,
-  editor: AnyEditorRuntimePort,
+  editor: EditableEditorRuntimePort,
   controller: SelectionController,
 ): {
   readonly anchor: EditorLogicalSelectionPoint;
@@ -1141,9 +1336,8 @@ function resolveKeyboardSelectionStart(
 
 function resolveFocusedKeyboardCaret(
   list: HTMLElement,
-  editor: AnyEditorRuntimePort,
+  editor: EditableEditorRuntimePort,
 ): EditorLogicalSelectionPoint | null {
-  if (!editor.editable) return null;
   const canonical = editor.selectionController.getCanonicalSnapshot();
   if (canonical.kind !== "document") return null;
   const selection = canonical.snapshot.documentSelection;
@@ -1177,7 +1371,7 @@ function sameLogicalSelectionPoint(
 
 function createKeyboardSelectionPoint(
   list: HTMLElement,
-  editor: AnyEditorRuntimePort,
+  editor: EditableEditorRuntimePort,
   contentRuntime: EditorContentRuntime,
   target: EditorBlockSelectionTarget,
   textOffset: number,
@@ -1235,7 +1429,7 @@ function normalizeMountedTextAffinity(
 
 function resolveCanonicalSelectAllRange(
   list: HTMLElement,
-  editor: AnyEditorRuntimePort,
+  editor: EditableEditorRuntimePort,
   contentRuntime: EditorContentRuntime,
   leases: EditorBlockContentLease[],
 ): {
@@ -1306,7 +1500,7 @@ function pointerCandidateWithPhase(
 function deriveTransientPointerPaintPrimitives(
   anchor: PointerSelectionCandidate,
   focus: PointerSelectionCandidate,
-  editor: AnyEditorRuntimePort,
+  editor: EditableEditorRuntimePort,
 ): readonly DocumentSelectionPaintPrimitive[] | null {
   const graphRevision = editor.getSelectionGraphRevision();
   if (
@@ -1381,7 +1575,7 @@ function deriveTransientPointerPaintPrimitives(
 }
 
 interface TransientPointerCoverageContext {
-  readonly editor: AnyEditorRuntimePort;
+  readonly editor: EditableEditorRuntimePort;
   readonly selectedBlockIds: ReadonlySet<BlockId>;
   readonly normalizedStart: PointerSelectionCandidate;
   readonly normalizedEnd: PointerSelectionCandidate;
@@ -1512,7 +1706,7 @@ function pointerCandidateFromHit(
 
 function materializePointerSettlement(
   resource: BrowserPointerResource,
-  editor: AnyEditorRuntimePort,
+  editor: EditableEditorRuntimePort,
   contentRuntime: EditorContentRuntime,
 ): {
   readonly direction: "forward" | "backward";
@@ -1563,7 +1757,7 @@ function materializePointerSettlement(
 
 function materializePointerCandidate(
   candidate: PointerSelectionCandidate,
-  editor: AnyEditorRuntimePort,
+  editor: EditableEditorRuntimePort,
   contentRuntime: EditorContentRuntime,
   leases: EditorBlockContentLease[],
 ): EditorLogicalSelectionPoint | null {
@@ -1673,7 +1867,7 @@ function rangeCollapsePoint(
     readonly focus: EditorLogicalSelectionPoint;
   },
   key: EditorKeyboardSelectionKey,
-  graph: AnyEditorRuntimePort,
+  graph: EditableEditorRuntimePort,
 ): EditorLogicalSelectionPoint {
   const towardStart =
     key === "ArrowLeft" || key === "ArrowUp" || key === "Home";

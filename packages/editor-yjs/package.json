@@ -5,17 +5,21 @@
   "type": "module",
   "description": "Runtime-neutral Yjs document layer for editor block-content Y.Doc contexts, updates, metadata, origins, and observability. No DOM dependency.",
   "main": "./dist/api/index.js",
-  "types": "./src/api/index.ts",
+  "types": "./dist/api/index.d.ts",
   "exports": {
     ".": {
-      "types": "./src/api/index.ts",
+      "types": "./dist/api/index.d.ts",
       "import": "./dist/api/index.js"
     },
     "./checkpoint-format": {
-      "types": "./src/block-content/checkpoint-format.ts",
+      "types": "./dist/block-content/checkpoint-format.d.ts",
       "import": "./dist/block-content/checkpoint-format.js"
     }
   },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "pnpm run clean && tsc -p tsconfig.build.json",
     "dev:compiler": "tsc -p tsconfig.build.json --watch",

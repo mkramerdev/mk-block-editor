@@ -31,9 +31,9 @@ import { initializeTestEditableEditor as initializeEditableEditor } from "../tes
 import { createFirstDraftViewStateStore } from "../blocks/view-state.tsx";
 import { createFirstDraftEditorDefinition } from "../first-draft-definition.tsx";
 import { createFirstDraftSnapshot } from "../first-draft-fixture.ts";
-import { firstDraftBootstrapSnapshot } from "../read-model/bootstrap.ts";
+import { firstDraftBootstrapSnapshot } from "../bootstrap/bootstrap.ts";
 import type { EditorTransportTransaction } from "../transport/transport-types.ts";
-import { handleTransaction } from "../transport/handle-transaction.ts";
+import { createFirstDraftOutboundPublisher } from "../transport/outbound-publisher.ts";
 import {
   decodeFirstDraftMessage,
   encodeFirstDraftMessage,
@@ -41,7 +41,10 @@ import {
 import { createFirstDraftPostgresPersistence } from "./postgres-persistence.ts";
 import { recreateFirstDraftPostgresDatabase } from "./postgres-reset.ts";
 import { assertFirstDraftPostgresSchema } from "./postgres-schema.ts";
-import { seedFirstDraftPostgresDocument } from "./postgres-seed.ts";
+import {
+  restoreFirstDraftPostgresDocument,
+  seedFirstDraftPostgresDocument,
+} from "./postgres-seed.ts";
 
 const configuredPostgresUrl = Reflect.get(
   process.env,
@@ -137,6 +140,82 @@ describe.skipIf(postgresUrl === null)(
       expect(JSON.parse(block.rows[0]?.metadata_json as string)).toEqual({
         owner: "Ada",
       });
+    });
+
+    it("resumes exactly after an SSR revision and atomically restores only the demo document", async () => {
+      await seedFirstDraftPostgresDocument({
+        client: pool,
+        documentId: documentA,
+        snapshot: createFirstDraftSnapshot(),
+      });
+      await seedFirstDraftPostgresDocument({
+        client: pool,
+        documentId: documentB,
+        snapshot: createFirstDraftSnapshot(),
+      });
+      const first = metadataTransaction(
+        "40000000-0000-4000-8000-000000000071",
+        blockA,
+        { phase: "one" },
+      );
+      const second = metadataTransaction(
+        "40000000-0000-4000-8000-000000000072",
+        blockA,
+        { phase: "two" },
+      );
+      expect(await accept(persistence, documentA, first)).toMatchObject({
+        ok: true,
+        accepted: { baseRevision: 0, revision: 1 },
+      });
+      expect(await accept(persistence, documentA, second)).toMatchObject({
+        ok: true,
+        accepted: { baseRevision: 1, revision: 2 },
+      });
+
+      const replay = await persistence.loadAcceptedTransactions(documentA, 0);
+      expect(replay).toMatchObject({
+        ok: true,
+        requestedRevision: 0,
+        currentRevision: 2,
+        transactions: [
+          { transactionId: first.transactionId, baseRevision: 0, revision: 1 },
+          { transactionId: second.transactionId, baseRevision: 1, revision: 2 },
+        ],
+      });
+      await expect(
+        persistence.loadAcceptedTransactions(documentA, 2),
+      ).resolves.toMatchObject({
+        ok: true,
+        requestedRevision: 2,
+        currentRevision: 2,
+        transactions: [],
+      });
+      await expect(
+        persistence.loadAcceptedTransactions(documentA, 3),
+      ).resolves.toMatchObject({
+        ok: false,
+        reason: "revision-unavailable",
+        resynchronizationReason: "revision-ahead",
+      });
+
+      await restoreFirstDraftPostgresDocument({
+        client: pool,
+        documentId: documentA,
+        snapshot: createFirstDraftSnapshot(),
+      });
+      await expect(persistence.loadBootstrap(documentA)).resolves.toMatchObject({
+        ok: true,
+        bootstrap: { revision: 0 },
+      });
+      await expect(persistence.loadBootstrap(documentB)).resolves.toMatchObject({
+        ok: true,
+        bootstrap: { revision: 0 },
+      });
+      const transactions = await pool.query(
+        "SELECT revision FROM public.editor_transactions WHERE document_id = $1",
+        [documentA],
+      );
+      expect(transactions.rows).toEqual([]);
     });
 
     it("returns missing without writing", async () => {
@@ -628,6 +707,25 @@ describe.skipIf(postgresUrl === null)(
         ok: true,
         status: "existing",
       });
+      const staleProjectionRetry: EditorTransportTransaction = {
+        ...transaction,
+        content: transaction.content.map((entry) => ({
+          ...entry,
+          readProjection: initial,
+        })),
+      };
+      const staleRetry = await accept(
+        persistence,
+        documentA,
+        staleProjectionRetry,
+      );
+      expect(staleRetry).toMatchObject({
+        ok: true,
+        status: "existing",
+        transaction: {
+          content: [{ readProjection: next }],
+        },
+      });
       const duplicateState = await pool.query(
         `SELECT revision, content_checkpoint_base64
          FROM public.editor_documents d
@@ -639,6 +737,83 @@ describe.skipIf(postgresUrl === null)(
         revision: 1,
         content_checkpoint_base64: checkpointBeforeDuplicate,
       });
+
+      const conflictingProposals: EditorTransportTransaction[] = [
+        { ...transaction, historyAction: "undo" },
+        {
+          ...transaction,
+          metadata: {
+            kind: "updateBlockMetadata",
+            updates: [{ blockId: blockA, values: { conflict: true } }],
+          },
+        },
+        {
+          ...transaction,
+          graph: {
+            changes: [
+              {
+                kind: "move",
+                blockId: blockA,
+                placement: {
+                  parentId: null,
+                  previousSiblingId: null,
+                  nextSiblingId: blockB,
+                },
+              },
+            ],
+          },
+        },
+        {
+          ...transaction,
+          content: transaction.content.map((entry) => ({
+            ...entry,
+            blockId: blockB,
+          })),
+        },
+        {
+          ...transaction,
+          content: transaction.content.map((entry) => ({
+            ...entry,
+            blockType: "heading" as const,
+          })),
+        },
+        {
+          ...transaction,
+          content: transaction.content.map((entry) => ({
+            ...entry,
+            update: {
+              ...entry.update,
+              format: "conflicting-format" as typeof entry.update.format,
+            },
+          })),
+        },
+        {
+          ...transaction,
+          content: transaction.content.map((entry) => ({
+            ...entry,
+            update: {
+              ...entry.update,
+              version: 999 as typeof entry.update.version,
+            },
+          })),
+        },
+        {
+          ...transaction,
+          content: transaction.content.map((entry) => ({
+            ...entry,
+            update: {
+              ...entry.update,
+              payload: EditorImmutableBinary.copyOf(yjs.initialState),
+            },
+          })),
+        },
+      ];
+      for (const conflict of conflictingProposals) {
+        expect(await accept(persistence, documentA, conflict)).toMatchObject({
+          ok: false,
+          reason: "integrity",
+        });
+      }
 
       const invalidBytes: EditorTransportTransaction = {
         ...transaction,
@@ -679,7 +854,7 @@ describe.skipIf(postgresUrl === null)(
         ([, content]) =>
           content !== undefined &&
           extractPlainTextFromRichTextDocument(content) ===
-            "Northstar Editor: private beta brief",
+            "Welcome to my Block Editor ✨",
       );
       if (!headingEntry) throw new Error("Seeded heading is unavailable");
       const headingBlockId = asBlockId(headingEntry[0]);
@@ -688,15 +863,23 @@ describe.skipIf(postgresUrl === null)(
         "40000000-0000-4000-8000-000000000060",
         "40000000-0000-4000-8000-000000000061",
       ];
+      const publisher = createFirstDraftOutboundPublisher();
+      publisher.attachGeneration({
+        generationId: "postgres-generation",
+        socket: {
+          readyState: 1,
+          send: (frame) => frames.push(frame.slice(0)),
+        },
+        createTransactionId: () => "40000000-0000-4000-8000-000000000069",
+        publishSelection: vi.fn(),
+      });
+      publisher.generationCaughtUp();
       const editor = initializeEditableEditor({
         definition: createFirstDraftEditorDefinition(
           createFirstDraftViewStateStore(),
         ),
         snapshot: seededSnapshot,
-        onChange: handleTransaction({
-          readyState: 1,
-          send: (frame) => frames.push(frame.slice(0)),
-        }),
+        onChange: (change) => publisher.submitFinalized(change),
         createTransactionId: () =>
           transactionIds.shift() ?? "unexpected-transaction",
       });
@@ -710,22 +893,33 @@ describe.skipIf(postgresUrl === null)(
           text: "PASTED",
         }),
       ).toBe(true);
-      editor.dispose();
-      await vi.waitFor(() => expect(frames).toHaveLength(2));
-      expect(frames).toHaveLength(2);
+      publisher.flush("manual");
+      await vi.waitFor(() => expect(frames).toHaveLength(1));
       const transactionA = proposedTransaction(frames[0]!);
-      const transactionB = proposedTransaction(frames[1]!);
-
       const resultA = await accept(persistence, documentA, transactionA);
-      const resultB = await accept(persistence, documentA, transactionB);
       expect(resultA).toMatchObject({
         ok: true,
         accepted: { baseRevision: 0, revision: 1 },
       });
+      if (!resultA.ok) throw new Error(resultA.message);
+      publisher.acceptLocal(
+        { type: "editor-transaction-accepted", ...resultA.accepted },
+        0,
+      );
+      await vi.waitFor(() => expect(frames).toHaveLength(2));
+      const transactionB = proposedTransaction(frames[1]!);
+      const resultB = await accept(persistence, documentA, transactionB);
       expect(resultB).toMatchObject({
         ok: true,
         accepted: { baseRevision: 1, revision: 2 },
       });
+      if (!resultB.ok) throw new Error(resultB.message);
+      publisher.acceptLocal(
+        { type: "editor-transaction-accepted", ...resultB.accepted },
+        1,
+      );
+      editor.dispose();
+      publisher.dispose();
 
       const [document, transactions, stored] = await Promise.all([
         pool.query(
@@ -762,7 +956,7 @@ describe.skipIf(postgresUrl === null)(
         extractPlainTextFromRichTextDocument(
           JSON.parse(stored.rows[0]?.read_projection_json as string),
         ),
-      ).toBe("TPASTEDNorthstar Editor: private beta brief");
+      ).toBe("TPASTEDWelcome to my Block Editor ✨");
       expect(
         extractPlainTextFromRichTextDocument(
           requireRichTextDocument(
@@ -775,7 +969,7 @@ describe.skipIf(postgresUrl === null)(
             ),
           ),
         ),
-      ).toBe("TPASTEDNorthstar Editor: private beta brief");
+      ).toBe("TPASTEDWelcome to my Block Editor ✨");
 
       const reloaded = await persistence.loadBootstrap(documentA);
       if (!reloaded.ok) throw new Error(reloaded.message);
@@ -785,7 +979,117 @@ describe.skipIf(postgresUrl === null)(
         extractPlainTextFromRichTextDocument(
           reloadedSnapshot.content[headingBlockId]!,
         ),
-      ).toBe("TPASTEDNorthstar Editor: private beta brief");
+      ).toBe("TPASTEDWelcome to my Block Editor ✨");
+    });
+
+    it("persists a publisher-produced net-zero aggregate as one revision and reloads identical canonical state", async () => {
+      await seedFirstDraftPostgresDocument({
+        client: pool,
+        documentId: documentA,
+        snapshot: createFirstDraftSnapshot(),
+      });
+      const seeded = await persistence.loadBootstrap(documentA);
+      if (!seeded.ok) throw new Error(seeded.message);
+      const seededSnapshot = firstDraftBootstrapSnapshot(seeded.bootstrap);
+      const headingEntry = Object.entries(seededSnapshot.content).find(
+        ([, content]) =>
+          content !== undefined &&
+          extractPlainTextFromRichTextDocument(content).startsWith("Welcome"),
+      );
+      if (!headingEntry) throw new Error("Seeded heading is unavailable");
+      const headingBlockId = asBlockId(headingEntry[0]);
+      const originalProjection = headingEntry[1]!;
+      const frames: ArrayBuffer[] = [];
+      const publisher = createFirstDraftOutboundPublisher();
+      publisher.attachGeneration({
+        generationId: "net-zero-generation",
+        socket: {
+          readyState: 1,
+          send: (frame) => frames.push(frame.slice(0)),
+        },
+        createTransactionId: () =>
+          "40000000-0000-4000-8000-000000000079",
+        publishSelection: vi.fn(),
+      });
+      publisher.generationCaughtUp();
+      const sourceIds = [
+        "40000000-0000-4000-8000-000000000077",
+        "40000000-0000-4000-8000-000000000078",
+      ];
+      const editor = initializeEditableEditor({
+        definition: createFirstDraftEditorDefinition(
+          createFirstDraftViewStateStore(),
+        ),
+        snapshot: seededSnapshot,
+        onChange: (change) => publisher.submitFinalized(change),
+        createTransactionId: () => sourceIds.shift() ?? "unexpected-source",
+      });
+      expect(
+        editor.insertText({ blockId: headingBlockId, offset: 0, text: "N" }),
+      ).toBe(true);
+      expect(
+        editor.deleteText({
+          blockId: headingBlockId,
+          range: { from: 0, to: 1 },
+        }),
+      ).toBe(true);
+      publisher.flush("manual");
+      expect(frames).toHaveLength(1);
+      const aggregate = proposedTransaction(frames[0]!);
+      expect(aggregate.transactionId).toBe(
+        "40000000-0000-4000-8000-000000000079",
+      );
+      expect(aggregate.content[0]?.readProjection).toEqual(originalProjection);
+      expect(await accept(persistence, documentA, aggregate)).toMatchObject({
+        ok: true,
+        accepted: { baseRevision: 0, revision: 1 },
+      });
+
+      const [transactions, stored, reloaded] = await Promise.all([
+        pool.query(
+          `SELECT transaction_id, revision
+           FROM public.editor_transactions WHERE document_id = $1`,
+          [documentA],
+        ),
+        pool.query(
+          `SELECT read_projection_json, content_checkpoint_base64
+           FROM public.editor_blocks
+           WHERE document_id = $1 AND block_id = $2`,
+          [documentA, headingBlockId],
+        ),
+        persistence.loadBootstrap(documentA),
+      ]);
+      expect(transactions.rows).toEqual([
+        {
+          transaction_id: "40000000-0000-4000-8000-000000000079",
+          revision: 1,
+        },
+      ]);
+      const storedProjection = JSON.parse(
+        stored.rows[0]?.read_projection_json as string,
+      );
+      expect(storedProjection).toEqual(
+        readYjsProjection(
+          headingBlockId,
+          Buffer.from(
+            stored.rows[0]?.content_checkpoint_base64 as string,
+            "base64",
+          ),
+        ),
+      );
+      expect(storedProjection).toEqual(originalProjection);
+      if (!reloaded.ok) throw new Error(reloaded.message);
+      const reloadedSnapshot = firstDraftBootstrapSnapshot(reloaded.bootstrap);
+      expect(reloaded.bootstrap.revision).toBe(1);
+      expect(reloadedSnapshot.rootBlockIds).toEqual(
+        seededSnapshot.rootBlockIds,
+      );
+      expect(reloadedSnapshot.blocks).toEqual(seededSnapshot.blocks);
+      expect(reloadedSnapshot.content[headingBlockId]).toEqual(
+        originalProjection,
+      );
+      publisher.dispose();
+      editor.dispose();
     });
 
     it.each(["A-then-B", "B-then-A"] as const)(
@@ -803,7 +1107,7 @@ describe.skipIf(postgresUrl === null)(
           ([, content]) =>
             content !== undefined &&
             extractPlainTextFromRichTextDocument(content) ===
-              "Northstar Editor: private beta brief",
+              "Welcome to my Block Editor ✨",
         );
         if (!headingEntry) throw new Error("Seeded heading is unavailable");
         const headingBlockId = asBlockId(headingEntry[0]);
@@ -828,15 +1132,34 @@ describe.skipIf(postgresUrl === null)(
             },
           } satisfies typeof base;
         };
+        const publisherA = createFirstDraftOutboundPublisher();
+        publisherA.attachGeneration({
+          generationId: "postgres-generation-a",
+          socket: {
+            readyState: 1,
+            send: (frame) => framesA.push(frame.slice(0)),
+          },
+          createTransactionId: () => "40000000-0000-4000-8000-000000000064",
+          publishSelection: vi.fn(),
+        });
+        publisherA.generationCaughtUp();
+        const publisherB = createFirstDraftOutboundPublisher();
+        publisherB.attachGeneration({
+          generationId: "postgres-generation-b",
+          socket: {
+            readyState: 1,
+            send: (frame) => framesB.push(frame.slice(0)),
+          },
+          createTransactionId: () => "40000000-0000-4000-8000-000000000065",
+          publishSelection: vi.fn(),
+        });
+        publisherB.generationCaughtUp();
         const editorA = initializeEditableEditor({
           definition: definition((runtime) => {
             runtimeA = runtime;
           }),
           snapshot: seededSnapshot,
-          onChange: handleTransaction({
-            readyState: 1,
-            send: (frame) => framesA.push(frame.slice(0)),
-          }),
+          onChange: (change) => publisherA.submitFinalized(change),
           createTransactionId: () => "40000000-0000-4000-8000-000000000062",
         });
         const editorB = initializeEditableEditor({
@@ -844,10 +1167,7 @@ describe.skipIf(postgresUrl === null)(
             runtimeB = runtime;
           }),
           snapshot: seededSnapshot,
-          onChange: handleTransaction({
-            readyState: 1,
-            send: (frame) => framesB.push(frame.slice(0)),
-          }),
+          onChange: (change) => publisherB.submitFinalized(change),
           createTransactionId: () => "40000000-0000-4000-8000-000000000063",
         });
         const editingLeaseA = requireContentRuntime(
@@ -862,6 +1182,8 @@ describe.skipIf(postgresUrl === null)(
         expect(
           editorB.insertText({ blockId: headingBlockId, offset: 0, text: "B" }),
         ).toBe(true);
+        publisherA.flush("manual");
+        publisherB.flush("manual");
         expect(framesA).toHaveLength(1);
         expect(framesB).toHaveLength(1);
         const transactionA = proposedTransaction(framesA[0]!);
@@ -888,6 +1210,8 @@ describe.skipIf(postgresUrl === null)(
         expect(framesB).toHaveLength(1);
         editingLeaseA.release();
         editingLeaseB.release();
+        publisherA.dispose();
+        publisherB.dispose();
         editorA.dispose();
         editorB.dispose();
 

@@ -2,18 +2,17 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import { compileCanonicalEditorDefinition } from "../runtime/definition/compiled-editor-definition.ts";
 import type {
   EditorCommandDefinition,
-  EditorDefinition,
-  EditorTypingTriggerDefinition,
   EditableEditorDefinition,
+  EditorTypingTriggerDefinition,
 } from "../runtime/definition/contracts.ts";
 import { compileRegisteredEditorCommands } from "../runtime/definition/commands.ts";
 import { compileEditorKeybindings } from "../runtime/keybindings/compiled-keybindings.ts";
 import { normalizeEditorKeyChord } from "../runtime/keybindings/chord.ts";
 import { testEditableEditorDefinition } from "./test-editor-definition.ts";
 
-describe("EditorDefinition direct composition", () => {
+describe("EditableEditorDefinition direct composition", () => {
   it("has no capabilities field", () => {
-    expectTypeOf<EditorDefinition>().not.toHaveProperty("capabilities");
+    expectTypeOf<EditableEditorDefinition>().not.toHaveProperty("capabilities");
   });
 
   it("rejects old definitions containing capabilities", () => {
@@ -27,18 +26,18 @@ describe("EditorDefinition direct composition", () => {
   });
 
   it("rejects a missing block renderer during definition validation", () => {
-    const paragraph = testEditableEditorDefinition.blocks.paragraph!;
-    const { renderer, ...withoutRenderer } = paragraph;
+    const textBlock = testEditableEditorDefinition.blocks.textBlock!;
+    const { renderer, ...withoutRenderer } = textBlock;
     expect(renderer).toBeTypeOf("function");
     expect(() =>
       compileCanonicalEditorDefinition({
         ...testEditableEditorDefinition,
         blocks: {
           // @ts-expect-error A missing renderer is deliberately invalid definition input.
-          paragraph: withoutRenderer,
+          textBlock: withoutRenderer,
         },
       }),
-    ).toThrow(/Block definition paragraph must provide a renderer/u);
+    ).toThrow(/Block definition textBlock must provide a renderer/u);
   });
 
   it("rejects a non-function block renderer during definition validation", () => {
@@ -46,14 +45,14 @@ describe("EditorDefinition direct composition", () => {
       compileCanonicalEditorDefinition({
         ...testEditableEditorDefinition,
         blocks: {
-          paragraph: {
-            ...testEditableEditorDefinition.blocks.paragraph!,
+          textBlock: {
+            ...testEditableEditorDefinition.blocks.textBlock!,
             // @ts-expect-error A non-function renderer is deliberately invalid definition input.
-            renderer: "paragraph",
+            renderer: "textBlock",
           },
         },
       }),
-    ).toThrow(/Block definition paragraph renderer must be a function/u);
+    ).toThrow(/Block definition textBlock renderer must be a function/u);
   });
 
   it("compiles editable commands separately and rejects duplicate ids", () => {

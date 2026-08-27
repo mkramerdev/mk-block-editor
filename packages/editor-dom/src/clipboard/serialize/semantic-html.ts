@@ -3,7 +3,6 @@ import type {
   CanonicalBlockRecord,
 } from "@repo/editor-core/editing";
 import type { BlockId } from "@repo/editor-core/kernel";
-import { normalizeHeadingLevel } from "@repo/editor-core/document";
 import type {
   EditorHtmlCodecOptions,
   EditorHtmlExportContext,
@@ -39,15 +38,6 @@ export function serializeCanonicalFragmentHtml(
     const template = doc.createElement("template");
     template.innerHTML = html;
     sanitizeSemanticDom(template.content);
-    if (block.type === "heading") {
-      const level = readHeadingLevel(block);
-      const first = template.content.firstElementChild;
-      if (first) {
-        const heading = doc.createElement(`h${level}`);
-        heading.append(...Array.from(first.childNodes));
-        first.replaceWith(heading);
-      }
-    }
     return template.content;
   };
 
@@ -76,21 +66,7 @@ export function serializeCanonicalFragmentHtml(
     const definition = options.blockDefinitions[block.type];
     if (!definition) return null;
     if (definition.kind === "text") return exportTextBlock(block);
-    if (definition.kind === "atomic") {
-      return block.type === "divider" ? doc.createElement("hr") : null;
-    }
-    if (block.type === "quote") {
-      const quote = doc.createElement("blockquote");
-      quote.append(exportChildren(block.id));
-      return quote;
-    }
-    if (block.type === "code") {
-      const pre = doc.createElement("pre");
-      const code = doc.createElement("code");
-      code.textContent = readableDescendantText(block.id, children).join("\n");
-      pre.append(code);
-      return pre;
-    }
+    if (definition.kind === "atomic") return null;
     return exportChildren(block.id);
   };
 
@@ -122,20 +98,4 @@ export function serializeCanonicalFragmentHtml(
     return first ? first.innerHTML : container.innerHTML;
   }
   return container.innerHTML;
-}
-
-function readHeadingLevel(block: CanonicalBlockRecord): number {
-  return normalizeHeadingLevel(block.metadata?.["level"]);
-}
-
-function readableDescendantText(
-  blockId: BlockId,
-  children: ReadonlyMap<BlockId, readonly CanonicalBlockRecord[]>,
-): string[] {
-  const result: string[] = [];
-  for (const child of children.get(blockId) ?? []) {
-    if (child.plainText !== undefined) result.push(child.plainText);
-    result.push(...readableDescendantText(child.id, children));
-  }
-  return result;
 }

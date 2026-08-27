@@ -13,6 +13,7 @@ export {
   FIRST_DRAFT_PROTOCOL_VERSION,
   isValidFirstDraftDocumentId,
   MAX_FIRST_DRAFT_FRAME_BYTES,
+  MAX_FIRST_DRAFT_CLIENT_FRAME_BYTES,
   type ConnectFirstDraftSessionMessage,
   type DecodeFirstDraftMessageResult,
   type EditorTransactionAcceptedMessage,
@@ -23,6 +24,8 @@ export {
   type FirstDraftAcceptedTransactionReplayMessage,
   type FirstDraftDocumentCaughtUpMessage,
   type FirstDraftDocumentLoadedMessage,
+  type FirstDraftDocumentResynchronizedMessage,
+  type FirstDraftDocumentResynchronizationReason,
   type FirstDraftDocumentUnsubscribedMessage,
   type FirstDraftMessage,
   type FirstDraftParticipantMetadata,
@@ -40,6 +43,7 @@ export {
   type SubscribeFirstDraftDocumentMessage,
   type UnsubscribeFirstDraftDocumentMessage,
 } from "./message-protocol.ts";
+export { firstDraftTransactionProposalsEqual } from "./transaction-proposal-identity.ts";
 export { convertEditorTransactionToTransport } from "./editor-transaction-to-transport.ts";
 export type {
   EditorTransportBlockGraphChange,
@@ -48,16 +52,19 @@ export type {
   EditorTransportTransaction,
 } from "./transport-types.ts";
 export {
-  handleTransaction,
-  type EditorTransactionWebSocket,
-} from "./handle-transaction.ts";
+  createFirstDraftOutboundPublisher,
+  type FirstDraftOutboundFlushReason,
+  type FirstDraftOutboundGeneration,
+  type FirstDraftOutboundPublisher,
+  type FirstDraftOutboundPublisherOptions,
+  type FirstDraftOutboundPublisherSnapshot,
+  type FirstDraftOutboundRecordSnapshot,
+  type FirstDraftOutboundSocket,
+  type FirstDraftRemoteRefreshEditor,
+  type FirstDraftReplayClassification,
+} from "./outbound-publisher.ts";
 export {
   attachFirstDraftRemoteTransactions,
   type FirstDraftRemoteTransactionClientOptions,
   type FirstDraftRemoteTransactionEditor,
-  type FirstDraftRemoteTransactionSocket,
 } from "./remote-transaction-client.ts";
-export {
-  createFirstDraftFinalizedCommitObserver,
-  type FirstDraftFinalizedCommitObserver,
-} from "./finalized-commit-observer.ts";

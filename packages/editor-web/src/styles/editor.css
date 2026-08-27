@@ -18,10 +18,6 @@
   isolation: isolate;
 }
 
-.editor-web-block-list[data-editor-text-selection-drag-active="true"] {
-  cursor: text;
-}
-
 .editor-web-text {
   position: relative;
   /* Layer 2 is editor foreground: glyphs, the native caret, and the active
@@ -91,9 +87,6 @@
 .editor-web-text > h1,
 .editor-web-text > h2,
 .editor-web-text > h3,
-.editor-web-text > h4,
-.editor-web-text > h5,
-.editor-web-text > h6,
 .editor-web-text > blockquote,
 .editor-web-text > pre {
   font: inherit;
@@ -158,20 +151,14 @@
   caret-color: transparent;
 }
 
-/* Ordinary canonical ranges remain the real ProseMirror input selection while
- * generic selection paint owns their visible highlight. Keep the browser
- * range transparent so it cannot become a second painter. Explicit internal
- * hosts use their own ownership marker and composition uses a different mode. */
+/* Editor-owned transient and settled ranges may retain a native text-input
+ * projection while generic paint owns their visible highlight. Presentation
+ * ownership, not an ancestor host, controls suppression; composition keeps its
+ * explicit native presentation. */
 .editor-web-block-list[data-editor-native-selection-paint-mode="hidden-for-global-selection"]
-  [data-editor-text-root="true"]:not(
-    [data-editor-block-internal-selection-host="true"],
-    [data-editor-block-internal-selection-host="true"] *
-  )::selection,
+  [data-editor-text-root="true"]::selection,
 .editor-web-block-list[data-editor-native-selection-paint-mode="hidden-for-global-selection"]
-  [data-editor-text-root="true"]:not(
-    [data-editor-block-internal-selection-host="true"],
-    [data-editor-block-internal-selection-host="true"] *
-  )
+  [data-editor-text-root="true"]
   *::selection {
   color: inherit;
   background: transparent;
@@ -227,15 +214,9 @@
 
 @media (forced-colors: active) {
   .editor-web-block-list[data-editor-native-selection-paint-mode="hidden-for-global-selection"]
-    [data-editor-text-root="true"]:not(
-      [data-editor-block-internal-selection-host="true"],
-      [data-editor-block-internal-selection-host="true"] *
-    )::selection,
+    [data-editor-text-root="true"]::selection,
   .editor-web-block-list[data-editor-native-selection-paint-mode="hidden-for-global-selection"]
-    [data-editor-text-root="true"]:not(
-      [data-editor-block-internal-selection-host="true"],
-      [data-editor-block-internal-selection-host="true"] *
-    )
+    [data-editor-text-root="true"]
     *::selection {
     color: inherit;
     background: transparent;

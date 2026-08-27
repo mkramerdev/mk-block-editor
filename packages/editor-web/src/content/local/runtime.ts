@@ -11,10 +11,14 @@ import {
   type RichTextDocumentNodeJson,
 } from "@repo/editor-core/content/rich-text";
 import {
+  operationAnchorRequirement,
   prepareLogicalContentOperations,
   ownPublishedLogicalContentOperations,
   validateContentCommitInput,
   type PreparedLogicalContentOperations,
+  type PreparedLogicalContentTransition,
+  type EditorContentOperationReplayStep,
+  type EditorOperationAnchor,
 } from "@repo/editor-core/operations";
 import {
   isRichTextDocument,
@@ -60,6 +64,7 @@ interface ValidatedBlockState {
   readonly after: EditorRawBlockContent;
   readonly contentOperations: readonly EditorLogicalContentOperation[];
   readonly inverseContentOperations: readonly EditorLogicalContentOperation[];
+  readonly transitions: readonly PreparedLogicalContentTransition[];
   readonly operationUpdate: EditorContentOperationUpdate;
   readonly introduced: boolean;
   readonly restoresAnchorLineage: boolean;
@@ -174,6 +179,7 @@ function createLocalBlockContentStoreRuntime(
     Set<(commit?: AppliedContentCommit) => void>
   >();
   const commitListeners = new Set<(commit: AppliedContentCommit) => void>();
+  const anchorInvalidationListeners = new Set<() => void>();
   const validatedStates = new WeakMap<ValidatedContentCommit, ValidatedState>();
   const appliedStates = new WeakMap<AppliedContentCommit, AppliedState>();
 
@@ -252,6 +258,7 @@ function createLocalBlockContentStoreRuntime(
       assertValidBlockGraphVersion(data.blockGraphVersion);
       const liveBlockIds = new Set(data.blockIds);
       const notifications = new Set<BlockId>();
+      let invalidatedAnchors = false;
       for (const blockId of [...blockTypeById.keys()]) {
         if (liveBlockIds.has(blockId)) continue;
         blockTypeById.delete(blockId);
@@ -261,6 +268,7 @@ function createLocalBlockContentStoreRuntime(
         anchorRevisionById.delete(blockId);
         anchorStepsById.delete(blockId);
         anchorTombstoneById.delete(blockId);
+        invalidatedAnchors = true;
         notifications.add(blockId);
       }
       for (const blockId of data.blockIds) {
@@ -281,6 +289,7 @@ function createLocalBlockContentStoreRuntime(
           anchorRevisionById.delete(blockId);
           anchorStepsById.delete(blockId);
           anchorTombstoneById.delete(blockId);
+          invalidatedAnchors = true;
           continue;
         }
         if (!checkpoint || projection === undefined) {
@@ -301,6 +310,7 @@ function createLocalBlockContentStoreRuntime(
           anchorRevisionById.set(blockId, 0);
           anchorStepsById.delete(blockId);
           anchorTombstoneById.delete(blockId);
+          invalidatedAnchors = true;
         } else if (
           previousType !== blockType ||
           !rawContentEqual(previous, next)
@@ -320,6 +330,7 @@ function createLocalBlockContentStoreRuntime(
       for (const blockId of [...notifications].sort(compareBlockIds)) {
         notifyBlockContent(blockId);
       }
+      if (invalidatedAnchors) notifyAnchorInvalidation();
     },
     applyExternalContentUpdate(input) {
       requireLiveRuntime();
@@ -341,10 +352,37 @@ function createLocalBlockContentStoreRuntime(
         input.blockId,
         (contentRevisionById.get(input.blockId) ?? 0) + 1,
       );
-      anchorEpochById.set(input.blockId, nextAnchorEpoch++);
-      anchorRevisionById.set(input.blockId, 0);
-      anchorStepsById.delete(input.blockId);
-      anchorTombstoneById.delete(input.blockId);
+      let preservedLineage = false;
+      if (
+        input.update.format === LOCAL_CONTENT_FORMAT &&
+        input.update.version === LOCAL_CONTENT_FORMAT_VERSION
+      ) {
+        try {
+          const operations = decodeLocalContentOperationUpdate(input.update);
+          const prepared = prepareLogicalContentOperations({
+            blockType: input.blockType,
+            content: previous,
+            operations,
+            options: {
+              blockDefinitions: requireBlockDefinitions(blockDefinitions),
+              inlineMarks,
+              validatedCanonicalBase: true,
+              normalization: { inlineMarks, inlineAtoms },
+            },
+          });
+          if (prepared.ok && rawContentEqual(prepared.content, next)) {
+            appendLocalAnchorLineage(input.blockId, prepared.operations);
+            preservedLineage = true;
+          }
+        } catch {
+          // An authoritative projection without a valid canonical lineage
+          // invalidates operation anchors below.
+        }
+      }
+      if (!preservedLineage) {
+        invalidateLocalAnchorLineage(input.blockId);
+        notifyAnchorInvalidation();
+      }
       notifyBlockContent(input.blockId);
     },
     readContentBaseToken(blockId, blockType, requestedGraphRevision) {
@@ -524,6 +562,7 @@ function createLocalBlockContentStoreRuntime(
           after,
           contentOperations: Object.freeze(contentOperations),
           inverseContentOperations: Object.freeze(inverseContentOperations),
+          transitions: Object.freeze(preparedOperations?.transitions ?? []),
           operationUpdate: encodeLocalOperationUpdate(contentOperations),
           introduced,
           restoresAnchorLineage: Boolean(
@@ -672,7 +711,7 @@ function createLocalBlockContentStoreRuntime(
       }
       return runtime.readBlockProjection(blockId, blockType);
     },
-    commitContent(validated) {
+    commitContent(validated, replayCapture) {
       requireLiveRuntime();
       const state = validatedStates.get(validated);
       if (!state || state.status !== "validated") {
@@ -717,6 +756,9 @@ function createLocalBlockContentStoreRuntime(
         }
       }
       const blocks: AppliedContentBlock[] = [];
+      const inverseStepsByBlock: EditorContentOperationReplayStep[][] = [];
+      const removedInverseStepsByBlock: EditorContentOperationReplayStep[][] =
+        [];
       for (const block of state.blocks) {
         const committedRevision = block.baseToken.contentRevision + 1;
         if (block.introduced) {
@@ -733,21 +775,37 @@ function createLocalBlockContentStoreRuntime(
             anchorEpochById.set(block.blockId, nextAnchorEpoch++);
             anchorRevisionById.set(block.blockId, 0);
           }
-          const anchorRevision = anchorRevisionById.get(block.blockId) ?? 0;
-          const steps =
-            anchorStepsById.get(block.blockId) ??
-            new Map<number, readonly EditorLogicalContentOperation[]>();
-          steps.set(
-            anchorRevision,
-            Object.freeze([...block.contentOperations]),
-          );
-          anchorStepsById.set(block.blockId, steps);
-          anchorRevisionById.set(block.blockId, anchorRevision + 1);
         }
         if (!anchorEpochById.has(block.blockId)) {
           anchorEpochById.set(block.blockId, nextAnchorEpoch++);
           anchorRevisionById.set(block.blockId, 0);
         }
+        let anchorRevision = anchorRevisionById.get(block.blockId) ?? 0;
+        const lineageSteps =
+          anchorStepsById.get(block.blockId) ??
+          new Map<number, readonly EditorLogicalContentOperation[]>();
+        const capturedInverseSteps: EditorContentOperationReplayStep[] = [];
+        for (const transition of block.transitions) {
+          if (!block.restoresAnchorLineage) {
+            lineageSteps.set(
+              anchorRevision,
+              Object.freeze([transition.operation]),
+            );
+            anchorRevision += 1;
+          }
+          if (replayCapture === "inverse") {
+            capturedInverseSteps.unshift(
+              createLocalReplayStep(
+                transition.inverseOperation,
+                anchorEpochById.get(block.blockId)!,
+                anchorRevision,
+              ),
+            );
+          }
+        }
+        anchorStepsById.set(block.blockId, lineageSteps);
+        anchorRevisionById.set(block.blockId, anchorRevision);
+        inverseStepsByBlock.push(capturedInverseSteps);
         blockTypeById.set(block.blockId, block.blockType);
         contentById.set(block.blockId, block.after);
         contentRevisionById.set(block.blockId, committedRevision);
@@ -768,6 +826,23 @@ function createLocalBlockContentStoreRuntime(
       }
       for (const block of state.removedBlocks) {
         pendingRemovalBlockIds.add(block.blockId);
+        if (replayCapture === "inverse") {
+          const epoch = anchorEpochById.get(block.blockId);
+          if (epoch === undefined) {
+            throw new Error(
+              `Removed block ${block.blockId} lost anchor lineage`,
+            );
+          }
+          removedInverseStepsByBlock.push(
+            block.inverseContentOperations.map((operation) =>
+              createLocalReplayStep(
+                operation,
+                epoch,
+                anchorRevisionById.get(block.blockId) ?? 0,
+              ),
+            ),
+          );
+        }
       }
       state.status = "applied";
       const applied = Object.freeze({
@@ -779,9 +854,19 @@ function createLocalBlockContentStoreRuntime(
           ...state.removedBlocks.map((block) => block.blockId),
         ]),
         blocks: Object.freeze(blocks),
+        replayCapture:
+          replayCapture === "inverse"
+            ? Object.freeze({
+                kind: "inverse" as const,
+                steps: Object.freeze([
+                  ...inverseStepsByBlock.reverse().flat(),
+                  ...removedInverseStepsByBlock.reverse().flat(),
+                ]),
+              })
+            : Object.freeze({ kind: "none" as const }),
         ...(state.origin === undefined ? {} : { origin: state.origin }),
         id: nextAppliedId++,
-      });
+      }) as AppliedContentCommit;
       appliedStates.set(applied, { status: "applied", validated: state });
       return applied;
     },
@@ -866,6 +951,33 @@ function createLocalBlockContentStoreRuntime(
         };
       }
     },
+    createOperationAnchorInContext(lease, input) {
+      try {
+        requireOwnedLease(lease);
+        requireCurrentBlock(lease.blockId, lease.blockType);
+        const offset = normalizeAnchorOffset(input.textOffset);
+        if (
+          offset > richTextDocumentContentSize(contentById.get(lease.blockId)!)
+        ) {
+          return { ok: false, reason: "invalid" };
+        }
+        return {
+          ok: true,
+          anchor: createLocalOperationAnchor(
+            anchorEpochById.get(lease.blockId)!,
+            anchorRevisionById.get(lease.blockId) ?? 0,
+            offset,
+            input.association,
+          ),
+        };
+      } catch (error) {
+        return {
+          ok: false,
+          reason: "missing-text",
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
     tryCreateTextAnchorInLiveContext(input) {
       try {
         requireCurrentBlock(input.blockId, input.blockType);
@@ -941,6 +1053,15 @@ function createLocalBlockContentStoreRuntime(
         };
       }
     },
+    resolveOperationAnchorInContext(lease, anchor) {
+      return runtime.resolveTextAnchorInContext(lease, {
+        codec: anchor.codec,
+        payload: anchor.payload as unknown as {
+          encoded: string;
+          assoc?: -1 | 0 | 1;
+        },
+      });
+    },
     tryResolveTextAnchorInLiveContext(input) {
       try {
         requireCurrentBlock(input.blockId, input.blockType);
@@ -997,11 +1118,17 @@ function createLocalBlockContentStoreRuntime(
       commitListeners.add(listener);
       return () => commitListeners.delete(listener);
     },
+    subscribeOperationAnchorInvalidation(listener) {
+      requireLiveRuntime();
+      anchorInvalidationListeners.add(listener);
+      return () => anchorInvalidationListeners.delete(listener);
+    },
     destroy() {
       if (destroyed) return;
       destroyed = true;
       blockListeners.clear();
       commitListeners.clear();
+      anchorInvalidationListeners.clear();
       contentById.clear();
       blockTypeById.clear();
       contentRevisionById.clear();
@@ -1102,6 +1229,35 @@ function createLocalBlockContentStoreRuntime(
     for (const listener of [...listeners]) {
       notifyProjectionSubscriber(() => listener(commit));
     }
+  }
+
+  function notifyAnchorInvalidation(): void {
+    for (const listener of [...anchorInvalidationListeners]) {
+      notifyProjectionSubscriber(listener);
+    }
+  }
+
+  function appendLocalAnchorLineage(
+    blockId: BlockId,
+    operations: readonly EditorLogicalContentOperation[],
+  ): void {
+    let revision = anchorRevisionById.get(blockId) ?? 0;
+    const steps =
+      anchorStepsById.get(blockId) ??
+      new Map<number, readonly EditorLogicalContentOperation[]>();
+    for (const operation of operations) {
+      steps.set(revision, Object.freeze([operation]));
+      revision += 1;
+    }
+    anchorStepsById.set(blockId, steps);
+    anchorRevisionById.set(blockId, revision);
+  }
+
+  function invalidateLocalAnchorLineage(blockId: BlockId): void {
+    anchorEpochById.set(blockId, nextAnchorEpoch++);
+    anchorRevisionById.set(blockId, 0);
+    anchorStepsById.delete(blockId);
+    anchorTombstoneById.delete(blockId);
   }
 
   return runtime;
@@ -1298,6 +1454,84 @@ function affinityToAssoc(affinity: "forward" | "backward" | null): -1 | 0 | 1 {
   if (affinity === "backward") return -1;
   if (affinity === "forward") return 1;
   return 0;
+}
+
+function createLocalOperationAnchor(
+  epoch: number,
+  revision: number,
+  offset: number,
+  association: -1 | 1,
+): EditorOperationAnchor {
+  const value: LocalOperationTextAnchor = {
+    kind: "local-operation-anchor",
+    version: 1,
+    epoch,
+    revision,
+    offset,
+    assoc: association,
+  };
+  return Object.freeze({
+    codec: LOCAL_OPERATION_TEXT_ANCHOR_CODEC,
+    payload: Object.freeze({
+      encoded: encodeLocalTextAnchor(value),
+      assoc: association,
+    }),
+    association,
+  });
+}
+
+function createLocalReplayStep(
+  operation: EditorLogicalContentOperation,
+  epoch: number,
+  revision: number,
+): EditorContentOperationReplayStep {
+  const requirement = operationAnchorRequirement(operation);
+  if (requirement.kind === "position") {
+    if (operation.kind !== "insertInlineContent") {
+      throw new Error(
+        "Position replay requirements require insertion operations",
+      );
+    }
+    return Object.freeze({
+      kind: "content",
+      blockId: operation.blockId,
+      blockType: operation.blockType,
+      operation,
+      anchors: Object.freeze({
+        kind: "position",
+        position: createLocalOperationAnchor(
+          epoch,
+          revision,
+          requirement.offset,
+          requirement.association,
+        ),
+      }),
+    });
+  }
+  if (operation.kind === "insertInlineContent") {
+    throw new Error("Range replay requirements cannot target insertions");
+  }
+  return Object.freeze({
+    kind: "content",
+    blockId: operation.blockId,
+    blockType: operation.blockType,
+    operation,
+    anchors: Object.freeze({
+      kind: "range",
+      start: createLocalOperationAnchor(
+        epoch,
+        revision,
+        requirement.startOffset,
+        requirement.startAssociation,
+      ),
+      end: createLocalOperationAnchor(
+        epoch,
+        revision,
+        requirement.endOffset,
+        requirement.endAssociation,
+      ),
+    }),
+  });
 }
 
 function normalizeAnchorOffset(value: number): number {

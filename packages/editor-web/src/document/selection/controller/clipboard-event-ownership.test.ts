@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { CommittedSelectionSnapshot } from "@repo/editor-react/selection";
+import type { BlockId } from "@repo/editor-core/kernel";
 import {
   claimEditorClipboardEvent,
   resolveEditorClipboardEventOwnership,
@@ -11,6 +12,9 @@ describe("editor clipboard event ownership", () => {
     const target = document.createElement("div");
     list.append(target);
     const selection = {} as CommittedSelectionSnapshot;
+    const resolveNativeFocusTarget = vi.fn((candidate: EventTarget | null) =>
+      candidate === target ? resolved(target) : null,
+    );
 
     expect(
       resolveEditorClipboardEventOwnership({
@@ -19,10 +23,10 @@ describe("editor clipboard event ownership", () => {
         list,
         committedSelection: selection,
         isCommittedSelectionCurrent: (candidate) => candidate === selection,
-        ownsNativeTarget: (candidate) => candidate === target,
-        ownsActiveElement: () => false,
+        resolveNativeFocusTarget,
       }),
     ).toEqual({ kind: "selection", selection });
+    expect(resolveNativeFocusTarget).toHaveBeenCalledOnce();
   });
 
   it("routes structural editor gestures from the owning block list", () => {
@@ -30,6 +34,7 @@ describe("editor clipboard event ownership", () => {
     const structuralHandle = document.createElement("div");
     list.append(structuralHandle);
     const selection = {} as CommittedSelectionSnapshot;
+    const resolveNativeFocusTarget = vi.fn(() => null);
 
     expect(
       resolveEditorClipboardEventOwnership({
@@ -38,10 +43,10 @@ describe("editor clipboard event ownership", () => {
         list,
         committedSelection: selection,
         isCommittedSelectionCurrent: (candidate) => candidate === selection,
-        ownsNativeTarget: () => false,
-        ownsActiveElement: () => false,
+        resolveNativeFocusTarget,
       }),
     ).toEqual({ kind: "selection", selection });
+    expect(resolveNativeFocusTarget).toHaveBeenCalledOnce();
   });
 
   it("allows only the first editor to claim one event", () => {
@@ -66,8 +71,7 @@ describe("editor clipboard event ownership", () => {
           list,
           committedSelection: selection,
           isCommittedSelectionCurrent: () => true,
-          ownsNativeTarget: () => false,
-          ownsActiveElement: () => false,
+          resolveNativeFocusTarget: () => null,
         }),
       ).toEqual({ kind: "none" });
     },
@@ -89,8 +93,7 @@ describe("editor clipboard event ownership", () => {
           list,
           committedSelection: selection,
           isCommittedSelectionCurrent: () => true,
-          ownsNativeTarget: () => false,
-          ownsActiveElement: () => false,
+          resolveNativeFocusTarget: () => null,
         }),
       ).toEqual({ kind: "none" });
     }
@@ -112,8 +115,8 @@ describe("editor clipboard event ownership", () => {
         list,
         committedSelection: selection,
         isCommittedSelectionCurrent: () => true,
-        ownsNativeTarget: (candidate) => candidate === target,
-        ownsActiveElement: () => false,
+        resolveNativeFocusTarget: (candidate) =>
+          candidate === target ? resolved(target) : null,
       }),
     ).toEqual({ kind: "selection", selection });
   });
@@ -126,4 +129,12 @@ function eventFromPath(target: EventTarget, ...path: EventTarget[]): Event {
     composedPath: { value: () => [target, ...path] },
   });
   return event;
+}
+
+function resolved(target: HTMLElement) {
+  return {
+    kind: "text" as const,
+    blockId: "clipboard-text" as BlockId,
+    registeredTarget: target,
+  };
 }

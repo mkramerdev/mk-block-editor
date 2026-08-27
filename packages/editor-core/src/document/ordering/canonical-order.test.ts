@@ -17,7 +17,7 @@ const id = (suffix: number): BlockId =>
 function block(blockId: BlockId, parentId: BlockId | null = null): Block {
   return {
     id: blockId,
-    type: "paragraph",
+    type: "textBlock",
     parentId,
     tombstone: null,
   };

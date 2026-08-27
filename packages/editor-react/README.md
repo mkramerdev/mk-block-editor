@@ -82,15 +82,17 @@ contain overlays, block drag, gesture, target, placement, or preview state.
 Future block drag-and-drop interaction state belongs to the product UI; only
 the accepted semantic structural mutation crosses into the editor API.
 
-History is directly owned mandatory core state. Local edit producers submit
-immutable forward/inverse operation data after successful preparation. The
-coordinator completes pre-command replay anchors against the pre-command graph
-and content before destructive content application, completes post-command
-anchors against the prepared result, then commits canonical state and records
-one complete entry. Yjs association remains part of those prepared replay
-anchors. `editor.undo()` and `editor.redo()` replay through that same executor,
-while reactive availability is derived directly from the private cursor. See
-[../../HISTORY_ARCHITECTURE.md](../../HISTORY_ARCHITECTURE.md).
+History is directly owned mandatory core state. Selections and operations use
+separate semantic anchor contracts. An applied entry owns only its next undo
+replay plan; an undone entry owns only its next redo plan. Each plan is valid
+for one transition. Undo and redo resolve the current opaque operation anchors,
+apply ordinary canonical operations, then replace the entry with a freshly
+anchored opposite plan captured from the actual applied inverse. Ordered steps
+may depend on output introduced by an earlier content or graph step, without a
+saved absolute-offset fallback. Multi-block anchors are resolved in
+deterministic first-use order with one batched history lease per affected
+existing block, and history owns only frozen serialized data--never a runtime,
+lease, YDoc, Yjs type, or callback.
 
 The selection controller is the only semantic local-selection authority and
 the only owner of selection revision. Final settlement returns `changed`,
@@ -112,7 +114,6 @@ Run these after API or domain changes:
 pnpm --filter @repo/editor-react check-types
 pnpm --filter @repo/editor-react test
 pnpm --filter @repo/editor-web check-types
-pnpm --filter @repo/editor-first-draft check-types
 ```
 
 ## Dependencies

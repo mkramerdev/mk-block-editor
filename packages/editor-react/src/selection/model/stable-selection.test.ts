@@ -81,11 +81,11 @@ describe("editorStableSelectionsEqual", () => {
   });
 
   it("uses JSON semantics for nested block-internal payload objects", () => {
-    const left = blockInternalSelection(blockA, "table", {
+    const left = blockInternalSelection(blockA, "gridWrapper", {
       outer: { first: 1, second: { value: true, label: "cell" } },
       rows: [1, 2],
     });
-    const reordered = blockInternalSelection(blockA, "table", {
+    const reordered = blockInternalSelection(blockA, "gridWrapper", {
       rows: [1, 2],
       outer: { second: { label: "cell", value: true }, first: 1 },
     });
@@ -93,7 +93,7 @@ describe("editorStableSelectionsEqual", () => {
     expect(
       editorStableSelectionsEqual(
         left,
-        blockInternalSelection(blockA, "table", {
+        blockInternalSelection(blockA, "gridWrapper", {
           outer: { first: 1, second: { value: true, label: "cell" } },
           rows: [2, 1],
         }),
@@ -102,11 +102,11 @@ describe("editorStableSelectionsEqual", () => {
   });
 
   it("compares block-internal ownership and payload values", () => {
-    const base = blockInternalSelection(blockA, "table", { value: 1 });
+    const base = blockInternalSelection(blockA, "gridWrapper", { value: 1 });
     expect(
       editorStableSelectionsEqual(
         base,
-        blockInternalSelection(blockB, "table", { value: 1 }),
+        blockInternalSelection(blockB, "gridWrapper", { value: 1 }),
       ),
     ).toBe(false);
     expect(
@@ -118,7 +118,7 @@ describe("editorStableSelectionsEqual", () => {
     expect(
       editorStableSelectionsEqual(
         base,
-        blockInternalSelection(blockA, "table", { value: 2 }),
+        blockInternalSelection(blockA, "gridWrapper", { value: 2 }),
       ),
     ).toBe(false);
   });

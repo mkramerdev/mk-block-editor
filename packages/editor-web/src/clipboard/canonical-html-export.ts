@@ -6,10 +6,7 @@ import {
   isRichTextDocument,
   type RichTextInlineNodeJson,
 } from "@repo/editor-core/content/rich-text";
-import {
-  normalizeHeadingLevel,
-  type BlockType,
-} from "@repo/editor-core/document";
+import type { BlockType } from "@repo/editor-core/document";
 import type { BlockDefinition } from "@repo/editor-core/definitions";
 import type {
   CanonicalBlockFragment,
@@ -26,21 +23,38 @@ import {
   serializeInlineAtomSemanticHtmlEnvelope,
   type InlineMetadataFieldDefinition,
 } from "@repo/editor-core/content/inline-atoms";
+import {
+  readValidatedClipboardFragment,
+  validateClipboardFragment,
+  type ValidatedClipboardFragment,
+} from "./validated-fragment.ts";
+
+type CanonicalHtmlExportOptions = {
+  readonly blockDefinitions: Readonly<Record<BlockType, BlockDefinition>>;
+  readonly inlineMarks: readonly InlineMarkDefinition[];
+  readonly inlineAtoms?: readonly {
+    readonly type: string;
+    readonly metadata: Readonly<Record<string, InlineMetadataFieldDefinition>>;
+  }[];
+  readonly htmlExportHandlers?: readonly EditorHtmlExportHandler[];
+};
 
 export function serializeCanonicalFragmentHtml(
   fragment: CanonicalBlockFragment,
-  options: {
-    readonly blockDefinitions: Readonly<Record<BlockType, BlockDefinition>>;
-    readonly inlineMarks: readonly InlineMarkDefinition[];
-    readonly inlineAtoms?: readonly {
-      readonly type: string;
-      readonly metadata: Readonly<
-        Record<string, InlineMetadataFieldDefinition>
-      >;
-    }[];
-    readonly htmlExportHandlers?: readonly EditorHtmlExportHandler[];
-  },
+  options: CanonicalHtmlExportOptions,
 ): string | null {
+  return serializeValidatedCanonicalFragmentHtml(
+    validateClipboardFragment(fragment, options.blockDefinitions),
+    options,
+  );
+}
+
+/** Package-internal exporter for a fragment validated in this operation. */
+export function serializeValidatedCanonicalFragmentHtml(
+  validated: ValidatedClipboardFragment,
+  options: CanonicalHtmlExportOptions,
+): string | null {
+  const fragment = readValidatedClipboardFragment(validated);
   const doc = globalThis.document;
   if (!doc) return null;
   const blocks = new Map(fragment.blocks.map((block) => [block.id, block]));
@@ -62,9 +76,7 @@ export function serializeCanonicalFragmentHtml(
     const result = doc.createDocumentFragment();
     const content = block.content.content[0]?.content ?? [];
     for (const inline of content) result.append(exportInline(inline));
-    const wrapper = doc.createElement(
-      block.type === "heading" ? `h${readHeadingLevel(block)}` : "p",
-    );
+    const wrapper = doc.createElement("p");
     wrapper.append(result);
     const fragmentResult = doc.createDocumentFragment();
     fragmentResult.append(wrapper);
@@ -93,21 +105,7 @@ export function serializeCanonicalFragmentHtml(
     const definition = options.blockDefinitions[block.type];
     if (!definition) return null;
     if (definition.kind === "text") return exportTextContent(block);
-    if (definition.kind === "atomic") {
-      return block.type === "divider" ? doc.createElement("hr") : null;
-    }
-    if (block.type === "quote") {
-      const quote = doc.createElement("blockquote");
-      quote.append(exportChildren(block.id));
-      return quote;
-    }
-    if (block.type === "code") {
-      const pre = doc.createElement("pre");
-      const code = doc.createElement("code");
-      code.textContent = readableDescendantText(block.id).join("\n");
-      pre.append(code);
-      return pre;
-    }
+    if (definition.kind === "atomic") return null;
     return exportChildren(block.id);
   };
   const exportInline = (inline: RichTextInlineNodeJson): Node => {
@@ -142,14 +140,6 @@ export function serializeCanonicalFragmentHtml(
       node = wrapper;
     }
     return node;
-  };
-  const readableDescendantText = (blockId: BlockId): string[] => {
-    const result: string[] = [];
-    for (const child of children.get(blockId) ?? []) {
-      if (child.plainText !== undefined) result.push(child.plainText);
-      result.push(...readableDescendantText(child.id));
-    }
-    return result;
   };
 
   const container = doc.createElement("div");
@@ -194,10 +184,6 @@ function createMarkElement(
   if (typeof sanitized?.title === "string") link.title = sanitized.title;
   link.rel = "noopener noreferrer";
   return link;
-}
-
-function readHeadingLevel(block: CanonicalBlockRecord): number {
-  return normalizeHeadingLevel(block.metadata?.["level"]);
 }
 
 function sanitizeSemanticDom(

@@ -66,6 +66,7 @@ export interface SelectionController {
   subscribeStandaloneSettlements(
     listener: (selection: EditorStableSelection) => void,
   ): () => void;
+  claimTextPointerGesturePresentation(): TextPointerGesturePresentationClaim;
   isCommittedSnapshotCurrent(snapshot: CommittedSelectionSnapshot): boolean;
   getLastTransitionFailure(): string | null;
   reconcileCommittedGraphChange(
@@ -147,6 +148,10 @@ export interface SelectionController {
   dispose(): void;
 }
 
+export interface TextPointerGesturePresentationClaim {
+  release(): void;
+}
+
 type CanonicalSelectionInput =
   | { readonly kind: "none" }
   | { readonly kind: "document"; readonly snapshot: EditorSelectionSnapshot }
@@ -188,6 +193,7 @@ class SelectionControllerImplementation implements SelectionController {
     (selection: EditorStableSelection) => void
   >();
   private lastPublishedStandaloneSettlementSequence = 0;
+  private textPointerGesturePresentationOwner: symbol | null = null;
   private keyboardNavigation: {
     readonly preferredX: number | null;
   } | null = null;
@@ -237,6 +243,29 @@ class SelectionControllerImplementation implements SelectionController {
     this.standaloneSettlementListeners.add(listener);
     return () => this.standaloneSettlementListeners.delete(listener);
   };
+
+  readonly claimTextPointerGesturePresentation =
+    (): TextPointerGesturePresentationClaim => {
+      if (this.disposed) {
+        throw new Error("Cannot claim presentation on a disposed controller");
+      }
+      if (this.textPointerGesturePresentationOwner) {
+        throw new Error("Text pointer presentation already has an owner");
+      }
+      const owner = Symbol("text-pointer-gesture-presentation");
+      this.textPointerGesturePresentationOwner = owner;
+      this.publishPresentation(this.presentationSnapshot.settlement);
+      let released = false;
+      return {
+        release: () => {
+          if (released) return;
+          released = true;
+          if (this.textPointerGesturePresentationOwner !== owner) return;
+          this.textPointerGesturePresentationOwner = null;
+          this.publishPresentation(this.presentationSnapshot.settlement);
+        },
+      };
+    };
 
   getCommittedSnapshot(): CommittedSelectionSnapshot | null {
     const canonical = this.canonicalSnapshot;
@@ -795,6 +824,7 @@ class SelectionControllerImplementation implements SelectionController {
     this.disposed = true;
     this.keyboardNavigation = null;
     this.compositionSession = null;
+    this.textPointerGesturePresentationOwner = null;
     this.lastTransitionFailure = null;
     this.endpointSnapshot = createIdleSelectionSnapshot(
       this.endpointSnapshot.selectionRevision + 1,
@@ -1124,11 +1154,13 @@ class SelectionControllerImplementation implements SelectionController {
     const nativeSelectionPaintMode =
       this.compositionSession !== null
         ? "composition-owned"
-        : this.canonicalSnapshot.kind === "none" ||
-            (this.canonicalSnapshot.kind === "document" &&
-              isCollapsedTextSelection(this.canonicalSnapshot.snapshot))
-          ? "visible"
-          : "hidden-for-global-selection";
+        : this.textPointerGesturePresentationOwner !== null
+          ? "hidden-for-global-selection"
+          : this.canonicalSnapshot.kind === "none" ||
+              (this.canonicalSnapshot.kind === "document" &&
+                isCollapsedTextSelection(this.canonicalSnapshot.snapshot))
+            ? "visible"
+            : "hidden-for-global-selection";
     if (
       this.presentationSnapshot.canonical === this.canonicalSnapshot &&
       this.presentationSnapshot.settlement === settlement &&

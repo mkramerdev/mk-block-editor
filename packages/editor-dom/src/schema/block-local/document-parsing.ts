@@ -7,11 +7,6 @@ import {
 } from "@repo/editor-core/content/rich-text";
 import { canonicalRichTextToProseMirrorJson } from "../inline/atom-json.ts";
 import type { PMNode, Schema } from "../../prosemirror/index.ts";
-import type { BlockLocalDocumentMappingOptions } from "./document-mapping.ts";
-import {
-  getBlockLocalTextNodeAttrs,
-  getBlockLocalTextNodeName,
-} from "./document-mapping.ts";
 import {
   createEmptyBlockLocalProseMirrorDocument,
   createTextBlockLocalProseMirrorDocument,
@@ -22,11 +17,10 @@ export function parseBlockLocalProseMirrorDocument(
   input: unknown,
   blockType: BlockType,
   schema: Schema = blockLocalProseMirrorSchema,
-  options: BlockLocalDocumentMappingOptions = {},
 ): PMNode {
   return (
-    tryParseBlockLocalProseMirrorDocument(input, blockType, schema, options) ??
-    createEmptyBlockLocalProseMirrorDocument(blockType, schema, options)
+    tryParseBlockLocalProseMirrorDocument(input, blockType, schema) ??
+    createEmptyBlockLocalProseMirrorDocument(blockType, schema)
   );
 }
 
@@ -37,20 +31,16 @@ export function parseBlockLocalProseMirrorDocument(
  */
 export function materializeCanonicalBlockLocalProseMirrorDocument(
   input: RichTextDocumentNodeJson,
-  blockType: BlockType,
+  _blockType: BlockType,
   schema: Schema = blockLocalProseMirrorSchema,
-  options: BlockLocalDocumentMappingOptions = {},
 ): PMNode {
-  const nodeName = getBlockLocalTextNodeName(blockType, options);
-  const attrs = getBlockLocalTextNodeAttrs(blockType, options);
   const blockLocal = {
     ...input,
     content: input.content.map((child, index) =>
       index === 0
         ? {
             ...child,
-            type: nodeName,
-            ...(attrs === undefined ? {} : { attrs }),
+            type: "paragraph",
           }
         : child,
     ),
@@ -62,16 +52,14 @@ export function tryParseBlockLocalProseMirrorDocument(
   input: unknown,
   blockType: BlockType,
   schema: Schema = blockLocalProseMirrorSchema,
-  options: BlockLocalDocumentMappingOptions = {},
 ): PMNode | null {
   if (!input)
-    return createEmptyBlockLocalProseMirrorDocument(blockType, schema, options);
+    return createEmptyBlockLocalProseMirrorDocument(blockType, schema);
   if (typeof input === "string")
     return createTextBlockLocalProseMirrorDocument(
       blockType,
       input,
       schema,
-      options,
     );
   if (isRichTextDocument(input)) {
     try {
@@ -80,7 +68,6 @@ export function tryParseBlockLocalProseMirrorDocument(
           normalizeBlockLocalRichTextDocument(
             input,
             blockType,
-            options,
           ) as JsonObject,
         ),
       );
@@ -94,19 +81,15 @@ export function tryParseBlockLocalProseMirrorDocument(
 function normalizeBlockLocalRichTextDocument(
   input: RichTextDocumentNodeJson,
   blockType: BlockType,
-  options: BlockLocalDocumentMappingOptions,
 ): Record<string, unknown> {
   const normalized = normalizeRichTextDocument(blockType, input);
-  const nodeName = getBlockLocalTextNodeName(blockType, options);
-  const attrs = getBlockLocalTextNodeAttrs(blockType, options);
   return {
     ...normalized,
     content: normalized.content.map((child, index) =>
       index === 0
         ? {
             ...child,
-            type: nodeName,
-            ...(attrs === undefined ? {} : { attrs }),
+            type: "paragraph",
           }
         : child,
     ),

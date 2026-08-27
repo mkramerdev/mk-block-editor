@@ -35,7 +35,7 @@ describe("browser clipboard event coordination", () => {
   it("copies read-only and claims the event only after writing succeeds", () => {
     const fixture = coordinator();
     const event = clipboardEvent("copy");
-    fixture.handlers.copy(event);
+    dispatchClipboardEvent(event, fixture.handlers.copy);
 
     expect(fixture.options.boundary.writeSelection).toHaveBeenCalledOnce();
     expect(fixture.options.executeCut).not.toHaveBeenCalled();
@@ -93,7 +93,7 @@ describe("browser clipboard event coordination", () => {
       order.push("claim");
       preventDefault();
     });
-    fixture.handlers.cut(event);
+    dispatchClipboardEvent(event, fixture.handlers.cut);
 
     expect(order).toEqual(["write", "claim", "transaction"]);
     expect(event.defaultPrevented).toBe(true);
@@ -106,6 +106,25 @@ describe("browser clipboard event coordination", () => {
     fixture.handlers.cut(event);
 
     expect(event.defaultPrevented).toBe(false);
+    expect(fixture.options.executeCut).not.toHaveBeenCalled();
+  });
+
+  it("performs no deletion when a cut becomes stale after claiming", () => {
+    const isCurrent = vi.fn().mockReturnValueOnce(true).mockReturnValue(false);
+    const fixture = coordinator({
+      captureCutSelection: vi.fn(() => ({
+        kind: "structural" as const,
+        captured: selection,
+        snapshot,
+        range,
+        graphRevision: 1,
+        isCurrent,
+      })),
+    });
+    const event = clipboardEvent("cut");
+
+    expect(fixture.handlers.cut(event)).toBe(false);
+    expect(isCurrent).toHaveBeenCalledTimes(2);
     expect(fixture.options.executeCut).not.toHaveBeenCalled();
   });
 
@@ -167,10 +186,12 @@ describe("browser clipboard event coordination", () => {
       order.push("claim");
       preventDefault();
     });
-    fixture.handlers.paste(event);
+    dispatchClipboardEvent(event, fixture.handlers.paste);
 
     expect(order).toEqual(["capture", "decode", "claim", "transaction"]);
     expect(event.defaultPrevented).toBe(true);
+    expect(fixture.options.boundary.readClipboardBlocks).toHaveBeenCalledOnce();
+    expect(fixture.options.executePaste).toHaveBeenCalledOnce();
   });
 
   it("claims accepted canonical input even when structural editing fails", () => {
@@ -313,4 +334,16 @@ function clipboardEvent(type: "copy" | "cut" | "paste"): ClipboardEvent {
   });
   Object.defineProperty(event, "clipboardData", { value: { types: [] } });
   return event as ClipboardEvent;
+}
+
+function dispatchClipboardEvent(
+  event: ClipboardEvent,
+  handler: (event: ClipboardEvent) => boolean,
+): void {
+  const target = document.createElement("div");
+  const listener = (routed: Event) => handler(routed as ClipboardEvent);
+  target.addEventListener(event.type, listener);
+  document.body.append(target);
+  target.dispatchEvent(event);
+  target.remove();
 }

@@ -7,7 +7,7 @@ const blockId = asBlockId("01890f07-1c00-7000-8000-000000000001");
 function block(overrides: Partial<VersionedBlock> = {}): VersionedBlock {
   return {
     id: blockId,
-    type: "paragraph",
+    type: "textBlock",
     parentId: null,
     tombstone: null,
     metadata: { alignment: "left", options: { a: 1, b: 2 } },
@@ -59,7 +59,7 @@ describe("blocksHaveEqualCanonicalState", () => {
       ),
     ).toBe(false);
     expect(
-      blocksHaveEqualCanonicalState(value, block({ type: "heading" })),
+      blocksHaveEqualCanonicalState(value, block({ type: "alternateTextBlock" })),
     ).toBe(false);
     expect(
       blocksHaveEqualCanonicalState(

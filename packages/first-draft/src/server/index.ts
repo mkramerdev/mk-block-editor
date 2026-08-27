@@ -46,6 +46,7 @@ export {
   type FirstDraftPostgresSchemaValidation,
 } from "./postgres-schema.ts";
 export {
+  restoreFirstDraftPostgresDocument,
   seedFirstDraftPostgresDocument,
   type SeedFirstDraftPostgresDocumentResult,
 } from "./postgres-seed.ts";
